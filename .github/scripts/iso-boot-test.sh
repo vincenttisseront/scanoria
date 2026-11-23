@@ -204,5 +204,9 @@ fi
 
 monitor system_powerdown
 wait_vm_exit 180 powerdown || true
-[[ "$fail" -eq 0 ]] || exit 1
+if [[ "$fail" -ne 0 ]]; then
+	grep -E '^SCANORIA-FIRSTBOOT-(FAILED-STEP|LOG) ' "$serial" || true
+	dump_diagnostics
+	exit 1
+fi
 log "OK : ISO installée, premier démarrage et scanoria-selftest réussis"

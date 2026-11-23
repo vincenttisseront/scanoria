@@ -645,6 +645,13 @@ report() { # ligne : port série seulement, jamais de mot de passe
 	printf '%s\n' "$1" > "$SERIAL_DEV" 2>/dev/null || true
 }
 
+report_failure() { # étape en échec et fin du journal (jamais de mot de passe ni d'empreinte)
+	local line
+	report "SCANORIA-FIRSTBOOT-FAILED-STEP $FAILED_STEP"
+	tail -n 60 "$LOG_FILE" 2>/dev/null | grep -viE 'pass|hash|secret|token|key' \
+		| while IFS= read -r line; do report "SCANORIA-FIRSTBOOT-LOG $line"; done
+}
+
 report_end() { # ok|error
 	if [[ -z "$SELFTEST_RC" ]] && command -v scanoria-selftest > /dev/null 2>&1; then
 		run_selftest
@@ -681,6 +688,7 @@ run_unattended() {
 	exec 4>&-
 	if [[ $rc -ne 0 ]]; then
 		printf '%s échec / failure: %s\n' "$(date -u +%FT%TZ)" "$FAILED_STEP" >> "$LOG_FILE"
+		report_failure
 		report_end error
 		return 1
 	fi
