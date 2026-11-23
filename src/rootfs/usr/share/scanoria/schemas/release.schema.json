@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scanoria:schema:release:1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront. Contrat : docs/ARCHITECTURE.md.",
+  "title": "release.json (actif de chaque release, couvert par SHA256SUMS signé)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "name",
+    "release",
+    "tag",
+    "commit",
+    "built_at",
+    "archive",
+    "archive_sha256",
+    "archive_size",
+    "min_upgrade_from",
+    "node_major",
+    "notes_md"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "name": {
+      "const": "scanoria"
+    },
+    "release": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$"
+    },
+    "tag": {
+      "type": "string",
+      "pattern": "^v(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "built_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "archive": {
+      "type": "string",
+      "pattern": "^scanoria-(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.tar\\.zst$"
+    },
+    "archive_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "archive_size": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1073741824
+    },
+    "min_upgrade_from": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$"
+    },
+    "node_major": {
+      "type": "integer",
+      "minimum": 22
+    },
+    "notes_md": {
+      "type": "string",
+      "maxLength": 65536
+    }
+  }
+}

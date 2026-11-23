@@ -1,0 +1,323 @@
+#!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# scanoria-ca : AC interne et certificat TLS de l'appliance (ARCHITECTURE § 7).
+#
+#   scanoria-ca init --fqdn NOM               nouvelle AC (l'ancienne est archivée)
+#   scanoria-ca issue --fqdn NOM [--force]    certificat interne NOM + *.NOM, mode interne
+#   scanoria-ca import --fqdn NOM --cert F --key F [--chain F]
+#                                             certificat importé (contrôles § 7.3)
+#   scanoria-ca status                        état TLS (JSON)
+#
+# Appelé par scanoria-helper, qui a validé les paramètres. Réponse sur la
+# sortie standard : {"code", "message", "output"} ; jamais de clé privée.
+# AC : ECDSA P-256 (meilleure compatibilité navigateurs qu'Ed25519), contrainte
+# de nom DNS:NOM, aucune adresse IP. Toute bascule passe par nginx -t ; en cas
+# d'échec l'état précédent est remis.
+set -euo pipefail
+exec < /dev/null
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+# shellcheck source-path=SCRIPTDIR source=../lib/scanoria/lib/common.sh
+. "$here/../lib/scanoria/lib/common.sh"
+
+CA_DIR="$PKI/ca"
+PUBLIC_CA="$VARLIB/public/scanoria-ca.crt"
+NGINX_DIR="$R/etc/nginx/scanoria"
+CA_DAYS=3650
+CERT_DAYS=397
+RENEW_SECONDS=$((30 * 86400))
+
+install -d -m 0700 "$PKI"
+WORK=$(mktemp -d "$PKI/.work.XXXXXX")
+trap 'rm -rf "$WORK"' EXIT
+
+serial() { printf '0x%s' "$(openssl rand -hex 16)"; }
+
+fingerprint() { # certificat
+	openssl x509 -in "$1" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f'
+}
+
+# Noms DNS du SAN, un par ligne, en minuscules (information ; le contrôle
+# d'appartenance passe aussi par -checkhost).
+san_list() { # certificat
+	openssl x509 -in "$1" -noout -ext subjectAltName 2>/dev/null | tail -n +2 \
+		| tr ',' '\n' | sed -n 's/^[[:space:]]*DNS:\([^[:space:]]*\)[[:space:]]*$/\1/p' | tr '[:upper:]' '[:lower:]'
+}
+
+checkhost() { # certificat nom
+	openssl x509 -in "$1" -noout -checkhost "$2" 2>/dev/null | grep -q ' does match certificate$'
+}
+
+# Le certificat couvre NOM et *.NOM : entrées littérales du SAN et
+# correspondance réelle (X509_check_host) pour NOM et un sous-domaine aléatoire.
+names_ok() { # certificat nom
+	local sans probe
+	sans=$(san_list "$1")
+	grep -qxF -- "$2" <<< "$sans" || return 1
+	grep -qxF -- "*.$2" <<< "$sans" || return 1
+	probe="z$(openssl rand -hex 6).$2"
+	checkhost "$1" "$2" && checkhost "$1" "$probe"
+}
+
+pub_sha() { # « x509 » ou « pkey », fichier
+	if [[ "$1" == x509 ]]; then
+		openssl x509 -in "$2" -noout -pubkey | openssl pkey -pubin -outform DER | sha256sum | cut -d' ' -f1
+	else
+		openssl pkey -in "$2" -passin pass: -pubout -outform DER | sha256sum | cut -d' ' -f1
+	fi
+}
+
+cert_json() { # certificat
+	local nb na
+	nb=$(openssl x509 -in "$1" -noout -startdate | cut -d= -f2)
+	na=$(openssl x509 -in "$1" -noout -enddate | cut -d= -f2)
+	jq -cn --arg nb "$(to_iso "$nb")" --arg na "$(to_iso "$na")" --arg fp "$(fingerprint "$1")" \
+		--rawfile sans <(san_list "$1") \
+		'{subject_alt_names: ($sans | split("\n") | map(select(length > 0))),
+		  not_before: $nb, not_after: $na, fingerprint_sha256: $fp}'
+}
+
+ca_json() {
+	local na
+	na=$(openssl x509 -in "$CA_DIR/ca.crt" -noout -enddate | cut -d= -f2)
+	jq -cn --arg fp "$(fingerprint "$CA_DIR/ca.crt")" --arg na "$(to_iso "$na")" \
+		'{ca_fingerprint_sha256: $fp, ca_not_after: $na}'
+}
+
+publish_ca() {
+	install -d -m 0750 "$VARLIB/public"
+	own root:scanoria 0750 "$VARLIB/public"
+	atomic_write root:scanoria 0644 "$PUBLIC_CA" < "$CA_DIR/ca.crt"
+	install -d -m 0755 "$NGINX_DIR"
+	atomic_write root:root 0644 "$NGINX_DIR/scanoria-ca.crt" < "$CA_DIR/ca.crt"
+}
+
+# nginx -t puis rechargement, seulement si le site Scanoria est en place.
+nginx_reload() {
+	[[ -e "$R/etc/nginx/sites-enabled/scanoria.conf" ]] || return 0
+	sys nginx -t -q || return 1
+	sys systemctl try-reload-or-restart nginx.service || return 1
+}
+
+write_tls_mode() { # internal|imported
+	jq -n --arg m "$1" '{mode: $m}' | atomic_write root:scanoria 0640 "$ETC/tls.json"
+}
+
+current_mode() {
+	jq -r '.mode // "none"' "$ETC/tls.json" 2>/dev/null || echo none
+}
+
+# Remplace PKI/<nom> par PKI/<nom>.new (l'ancien reste en <nom>.old).
+swap_in() { # nom
+	rm -rf "${PKI:?}/$1.old"
+	if [[ -d "$PKI/$1" ]]; then mv -T "$PKI/$1" "$PKI/$1.old"; fi
+	mv -T "$PKI/$1.new" "$PKI/$1"
+}
+
+swap_back() { # nom
+	rm -rf "${PKI:?}/$1"
+	if [[ -d "$PKI/$1.old" ]]; then mv -T "$PKI/$1.old" "$PKI/$1"; fi
+}
+
+# Bascule active -> mode, contrôle nginx ; retour à l'état précédent sinon.
+activate() { # internal|imported
+	local prev_link prev_mode
+	prev_link=$(readlink "$PKI/active" 2>/dev/null || true)
+	prev_mode=$(current_mode)
+	ln -sfn "$1" "$PKI/.active.tmp"
+	mv -T "$PKI/.active.tmp" "$PKI/active"
+	write_tls_mode "$1"
+	if ! nginx_reload; then
+		swap_back "$1"
+		if [[ -n "$prev_link" ]]; then
+			ln -sfn "$prev_link" "$PKI/.active.tmp"
+			mv -T "$PKI/.active.tmp" "$PKI/active"
+		else
+			rm -f "$PKI/active"
+		fi
+		if [[ "$prev_mode" == none ]]; then rm -f "$ETC/tls.json"; else write_tls_mode "$prev_mode"; fi
+		nginx_reload || true
+		emit E_INTERNAL "nginx rejected the new certificate, previous state restored"
+	fi
+	rm -rf "${PKI:?}/$1.old"
+}
+
+parse_opts() {
+	FQDN="" FORCE=0 CERT="" KEY="" CHAIN=""
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			--fqdn) FQDN=${2:-}; shift 2 ;;
+			--force) FORCE=1; shift ;;
+			--cert) CERT=${2:-}; shift 2 ;;
+			--key) KEY=${2:-}; shift 2 ;;
+			--chain) CHAIN=${2:-}; shift 2 ;;
+			*) emit E_INVALID_PARAM "unknown option" ;;
+		esac
+	done
+	valid_fqdn "$FQDN" || emit E_INVALID_PARAM "invalid fqdn"
+}
+
+# ---------------------------------------------------------------------------
+
+cmd_init() {
+	local ts
+	install -d -m 0700 "$CA_DIR"
+	openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$WORK/ca.key" 2>/dev/null
+	cat > "$WORK/ca.cnf" <<-EOF
+		[req]
+		distinguished_name = dn
+		prompt = no
+		x509_extensions = v3_ca
+		[dn]
+		CN = Scanoria CA $FQDN
+		[v3_ca]
+		basicConstraints = critical,CA:TRUE,pathlen:0
+		keyUsage = critical,keyCertSign,cRLSign
+		subjectKeyIdentifier = hash
+		nameConstraints = critical,permitted;DNS:$FQDN,excluded;IP:0.0.0.0/0.0.0.0,excluded;IP:0:0:0:0:0:0:0:0/0:0:0:0:0:0:0:0
+	EOF
+	openssl req -new -x509 -config "$WORK/ca.cnf" -key "$WORK/ca.key" -sha256 \
+		-days "$CA_DAYS" -set_serial "$(serial)" -out "$WORK/ca.crt"
+	if [[ -f "$CA_DIR/ca.crt" || -f "$CA_DIR/ca.key" ]]; then
+		ts="$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 4)"
+		install -d -m 0700 "$CA_DIR/archive" "$CA_DIR/archive/$ts"
+		mv -f "$CA_DIR"/ca.crt "$CA_DIR"/ca.key "$CA_DIR/archive/$ts/" 2>/dev/null || true
+	fi
+	own root:root 0600 "$WORK/ca.key"
+	own root:root 0644 "$WORK/ca.crt"
+	mv -f "$WORK/ca.key" "$CA_DIR/ca.key"
+	mv -f "$WORK/ca.crt" "$CA_DIR/ca.crt"
+	publish_ca
+	emit OK "internal CA created" "$(ca_json)"
+}
+
+internal_ok() {
+	local d="$PKI/internal"
+	[[ -f "$d/fullchain.pem" && -f "$d/privkey.pem" ]] || return 1
+	openssl x509 -in "$d/fullchain.pem" -noout -checkend "$RENEW_SECONDS" > /dev/null 2>&1 || return 1
+	names_ok "$d/fullchain.pem" "$FQDN" || return 1
+	openssl verify -x509_strict -CAfile "$CA_DIR/ca.crt" "$d/fullchain.pem" > /dev/null 2>&1 || return 1
+	[[ "$(pub_sha x509 "$d/fullchain.pem")" == "$(pub_sha pkey "$d/privkey.pem")" ]]
+}
+
+cmd_issue() {
+	[[ -f "$CA_DIR/ca.crt" && -f "$CA_DIR/ca.key" ]] || emit E_PRECONDITION "internal CA missing"
+	openssl x509 -in "$CA_DIR/ca.crt" -noout -subject -nameopt RFC2253 \
+		| grep -qxF "subject=CN=Scanoria CA $FQDN" \
+		|| emit E_PRECONDITION "internal CA does not match the appliance name"
+	if [[ $FORCE -eq 0 ]] && internal_ok; then
+		[[ "$(current_mode)" == internal && "$(readlink "$PKI/active" 2>/dev/null)" == internal ]] \
+			|| { cp -a "$PKI/internal" "$PKI/internal.new"; swap_in internal; activate internal; }
+		emit OK "certificate still valid" "$(cert_json "$PKI/internal/fullchain.pem" | jq -c '. + {issued: false}')"
+	fi
+	openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$WORK/privkey.pem" 2>/dev/null
+	openssl req -new -key "$WORK/privkey.pem" -subj "/CN=$FQDN" -out "$WORK/req.csr"
+	cat > "$WORK/ext.cnf" <<-EOF
+		[v3]
+		basicConstraints = critical,CA:FALSE
+		keyUsage = critical,digitalSignature
+		extendedKeyUsage = serverAuth
+		subjectAltName = DNS:$FQDN,DNS:*.$FQDN
+		subjectKeyIdentifier = hash
+		authorityKeyIdentifier = keyid:always
+	EOF
+	openssl x509 -req -in "$WORK/req.csr" -CA "$CA_DIR/ca.crt" -CAkey "$CA_DIR/ca.key" \
+		-set_serial "$(serial)" -days "$CERT_DAYS" -sha256 \
+		-extfile "$WORK/ext.cnf" -extensions v3 -out "$WORK/cert.pem" 2>/dev/null
+	openssl verify -x509_strict -CAfile "$CA_DIR/ca.crt" "$WORK/cert.pem" > /dev/null \
+		|| emit E_INTERNAL "issued certificate does not verify"
+	rm -rf "$PKI/internal.new"
+	install -d -m 0700 "$PKI/internal.new"
+	own root:root 0600 "$WORK/privkey.pem"
+	own root:root 0644 "$WORK/cert.pem"
+	mv "$WORK/privkey.pem" "$PKI/internal.new/privkey.pem"
+	mv "$WORK/cert.pem" "$PKI/internal.new/fullchain.pem"
+	swap_in internal
+	activate internal
+	emit OK "certificate issued" "$(cert_json "$PKI/internal/fullchain.pem" | jq -c '. + {issued: true}')"
+}
+
+# Sépare un fichier PEM en certificats (un fichier par certificat, ré-encodés).
+split_certs() { # fichier préfixe -> nombre de certificats
+	local n
+	awk -v p="$2" '
+		/^-----BEGIN CERTIFICATE-----\r?$/ { n++; f = sprintf("%s%02d.in", p, n); inb = 1 }
+		inb { print > f }
+		/^-----END CERTIFICATE-----\r?$/ { inb = 0; close(f) }
+		END { print n + 0 > (p "count") }' "$1"
+	n=$(cat "$2count")
+	for ((i = 1; i <= n; i++)); do
+		openssl x509 -in "$(printf '%s%02d.in' "$2" "$i")" -out "$(printf '%s%02d.pem' "$2" "$i")" 2>/dev/null \
+			|| return 1
+	done
+	echo "$n"
+}
+
+cmd_import() {
+	local n nb now kind bits i
+	[[ -f "$CERT" && -f "$KEY" ]] || emit E_INVALID_PARAM "certificate and key required"
+	n=$(split_certs "$CERT" "$WORK/leaf") || emit E_CERT_INVALID "unreadable certificate"
+	[[ "$n" -eq 1 ]] || emit E_CERT_INVALID "exactly one certificate expected in cert_pem"
+	openssl pkey -in "$KEY" -passin pass: -out "$WORK/privkey.pem" 2>/dev/null \
+		|| emit E_CERT_INVALID "unreadable or encrypted private key"
+	kind=$(openssl pkey -in "$WORK/privkey.pem" -pubout 2>/dev/null | openssl pkey -pubin -noout -text 2>/dev/null)
+	if grep -Eq '^ASN1 OID: (prime256v1|secp384r1)$' <<< "$kind"; then
+		:
+	elif grep -q '^Modulus:' <<< "$kind"; then
+		bits=$(sed -n 's/^Public-Key: (\([0-9]*\) bit)$/\1/p' <<< "$kind" | head -n 1)
+		[[ "$bits" =~ ^[0-9]+$ && "$bits" -ge 2048 ]] || emit E_CERT_INVALID "RSA key shorter than 2048 bits"
+	else
+		emit E_CERT_INVALID "key must be RSA >= 2048 or ECDSA P-256/P-384"
+	fi
+	[[ "$(pub_sha x509 "$WORK/leaf01.pem")" == "$(pub_sha pkey "$WORK/privkey.pem")" ]] \
+		|| emit E_CERT_KEY_MISMATCH "certificate and key do not match"
+	nb=$(to_epoch "$(openssl x509 -in "$WORK/leaf01.pem" -noout -startdate | cut -d= -f2)")
+	now=$(date -u +%s)
+	[[ "$nb" -le "$now" ]] || emit E_CERT_EXPIRED "certificate not yet valid"
+	openssl x509 -in "$WORK/leaf01.pem" -noout -checkend 86400 > /dev/null 2>&1 \
+		|| emit E_CERT_EXPIRED "certificate expired or valid for less than one day"
+	names_ok "$WORK/leaf01.pem" "$FQDN" || emit E_CERT_NAMES "certificate must cover $FQDN and *.$FQDN"
+	cp "$WORK/leaf01.pem" "$WORK/fullchain.pem"
+	if [[ -n "$CHAIN" ]]; then
+		[[ -f "$CHAIN" ]] || emit E_INVALID_PARAM "chain file missing"
+		n=$(split_certs "$CHAIN" "$WORK/chain") || emit E_CERT_INVALID "unreadable chain"
+		[[ "$n" -ge 1 && "$n" -le 10 ]] || emit E_CERT_INVALID "chain must hold 1 to 10 certificates"
+		for ((i = 1; i <= n; i++)); do
+			cat "$(printf '%s%02d.pem' "$WORK/chain" "$i")" >> "$WORK/fullchain.pem"
+		done
+	fi
+	rm -rf "$PKI/imported.new"
+	install -d -m 0700 "$PKI/imported.new"
+	own root:root 0600 "$WORK/privkey.pem"
+	own root:root 0644 "$WORK/fullchain.pem"
+	mv "$WORK/privkey.pem" "$PKI/imported.new/privkey.pem"
+	mv "$WORK/fullchain.pem" "$PKI/imported.new/fullchain.pem"
+	swap_in imported
+	activate imported
+	emit OK "certificate imported" "$(cert_json "$PKI/imported/fullchain.pem")"
+}
+
+cmd_status() {
+	local mode cert ca='{}' info='{"subject_alt_names": [], "not_before": null, "not_after": null, "fingerprint_sha256": null}'
+	mode=$(current_mode)
+	cert="$PKI/active/fullchain.pem"
+	if [[ -f "$cert" ]]; then info=$(cert_json "$cert"); fi
+	if [[ -f "$CA_DIR/ca.crt" ]]; then
+		ca=$(ca_json)
+	else
+		ca='{"ca_fingerprint_sha256": null, "ca_not_after": null}'
+	fi
+	emit OK "tls status" "$(jq -cn --arg m "$mode" --argjson i "$info" --argjson c "$ca" '{mode: $m} + $i + $c')"
+}
+
+[[ -n "$R" || $EUID -eq 0 ]] || { echo "scanoria-ca: root required" >&2; exit 2; }
+cmd=${1:-}
+[[ $# -gt 0 ]] && shift
+case "$cmd" in
+	init) parse_opts "$@"; cmd_init ;;
+	issue) parse_opts "$@"; cmd_issue ;;
+	import) parse_opts "$@"; cmd_import ;;
+	status) [[ $# -eq 0 ]] || emit E_INVALID_PARAM "no option expected"; cmd_status ;;
+	*) echo "usage: scanoria-ca init|issue|import|status [options]" >&2; exit 2 ;;
+esac

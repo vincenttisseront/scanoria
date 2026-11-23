@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# osv-scanner (ci.yml, travail « osv-scanner »). Toute exception est DATÉE :
+# identifiant, date de fin (ignoreUntil, au plus 90 jours) et motif vérifiable
+# (code non atteignable, correctif absent en amont…). À l'échéance, la CI
+# échoue de nouveau : corriger ou renouveler en le justifiant dans une PR.
+#
+# Modèle :
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"
+# ignoreUntil = 2027-01-31
+# reason = "dépendance de développement seulement, fonction vulnérable non appelée"
+#
+# Aucune exception à ce jour.

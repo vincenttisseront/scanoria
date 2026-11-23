@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+[Unit]
+Description=Scanoria state publication
+After=local-fs.target systemd-tmpfiles-setup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/scanoria-state
+UMask=0027
+PrivateTmp=yes
+ProtectHome=read-only

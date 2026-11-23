@@ -30,3 +30,7 @@ Thumbs.db
 
 # Claude Code : réglages locaux
 .claude/settings.local.json
+
+# Python (helper, tests)
+__pycache__/
+*.pyc

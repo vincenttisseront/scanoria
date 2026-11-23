@@ -1,0 +1,736 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Assistant de premier démarrage de l'appliance Scanoria (console texte,
+# whiptail), lancé sur tty1 par scanoria-firstboot.service tant que
+# /var/lib/scanoria/firstboot.done est absent (ARCHITECTURE § 10).
+#
+# Demande : langue de l'assistant, clavier, réseau (DHCP ou statique), nom
+# complet de l'appliance, fuseau horaire, mot de passe de l'administrateur de
+# la console, mot de passe du compte système de maintenance « sysadmin »,
+# réseaux d'administration. Applique ensuite, avec une jauge de progression :
+# netplan, fuseau, valeurs par défaut de /etc/scanoria, base PostgreSQL,
+# compte administrateur initial (bootstrap/admin.json, haché PBKDF2), demandes
+# set-hostname, set-admin-networks et issue-certificate par
+# « scanoria-helper exec --origin firstboot », services, test de santé et
+# scanoria-selftest ; affiche l'URL et l'empreinte de l'AC, crée
+# firstboot.done et se désactive.
+#
+# Mode sans intervention (docs/TESTING.md § 4) : sous QEMU seulement, quand
+# l'hyperviseur fournit le fichier de réponses fw_cfg
+# opt/scanoria/unattended.json. Il est validé aussi strictement que les
+# saisies, puis les mêmes étapes sont appliquées ; avec "report": "serial",
+# les marqueurs SCANORIA-SELFTEST-JSON, SCANORIA-SELFTEST-EXIT et
+# SCANORIA-FIRSTBOOT-END sont écrits sur /dev/ttyS0.
+#
+# Aucun mot de passe en clair n'est écrit sur disque ni passé en argument.
+# Le fichier peut être « sourcé » par les tests : seules les fonctions sont
+# alors définies.
+
+# Les apostrophes typographiques (’) des textes sont voulues.
+# shellcheck disable=SC1112
+set -euo pipefail
+umask 077
+
+FB_DIR=${SCANORIA_FIRSTBOOT_DIR:-/usr/lib/scanoria/firstboot}
+ZONEINFO_DIR=${SCANORIA_ZONEINFO_DIR:-/usr/share/zoneinfo}
+DONE_FILE=/var/lib/scanoria/firstboot.done
+LOG_FILE=/var/log/scanoria-firstboot.log
+NETPLAN_FILE=/etc/netplan/60-scanoria.yaml
+CA_PUBLIC=/var/lib/scanoria/public/scanoria-ca.crt
+UNATTENDED_FILE=${SCANORIA_UNATTENDED_FILE:-/sys/firmware/qemu_fw_cfg/by_name/opt/scanoria/unattended.json/raw}
+SERIAL_DEV=/dev/ttyS0
+FQDN_RE='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$'
+TZ_RE='^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+){0,2}$'
+IFACE_RE='^[A-Za-z0-9_.:-]{1,15}$'
+
+UI_LANG=fr
+KB_CHOICE=fr
+NET_IFACE=""
+NET_MODE=dhcp
+NET_ADDR=""
+NET_GW=""
+NET_DNS=""
+NET_SEARCH=""
+FQDN=""
+TZ_NAME=Europe/Paris
+ADMIN_HASH=""
+SYS_HASH=""
+ADMIN_NETWORKS_JSON=""
+SELFTEST_SUMMARY=""
+SELFTEST_JSON=""
+SELFTEST_RC=""
+UA_REPORT=none
+UA_POWEROFF=false
+
+# --------------------------------------------------------------------------
+# Textes et contrôles (sans effet de bord, testés par tests/b20-iso-static.sh)
+# --------------------------------------------------------------------------
+
+t() { # texte_fr text_en
+	if [[ "$UI_LANG" == en ]]; then printf '%s' "$2"; else printf '%s' "$1"; fi
+}
+
+valid_fqdn() {
+	local f=$1
+	[[ ${#f} -ge 4 && ${#f} -le 253 && "$f" =~ $FQDN_RE ]]
+}
+
+valid_domain() { valid_fqdn "$1"; }
+
+valid_timezone() {
+	local z=$1
+	[[ "$z" =~ $TZ_RE && "$z" != *..* && -f "$ZONEINFO_DIR/$z" ]]
+}
+
+valid_password() {
+	local n=${#1}
+	[[ $n -ge 12 && $n -le 128 && "$1" != *$'\n'* ]]
+}
+
+netcheck() { python3 -I "$FB_DIR/netcheck.py" "$@"; }
+
+hash_password() { # mot de passe → PHC PBKDF2 (printf est interne : rien dans argv)
+	printf '%s' "$1" | python3 -I "$FB_DIR/hash-password.py"
+}
+
+# Clavier : choix → « disposition:variante »
+keyboard_layout() {
+	case "$1" in
+		fr) echo "fr:" ;;
+		fr-be) echo "be:" ;;
+		fr-ch) echo "ch:fr" ;;
+		fr-ca) echo "ca:" ;;
+		de-ch) echo "ch:" ;;
+		us) echo "us:" ;;
+		gb) echo "gb:" ;;
+		de) echo "de:" ;;
+		es) echo "es:" ;;
+		it) echo "it:" ;;
+		*) return 1 ;;
+	esac
+}
+
+# Configuration netplan (valeurs déjà validées et canoniques).
+netplan_yaml() { # iface mode adresse passerelle dns domaine
+	local iface=$1 mode=$2 addr=$3 gw=$4 dns=$5 search=$6 d
+	printf '%s\n' "# Écrit par scanoria-firstboot / written by scanoria-firstboot" \
+		"network:" "  version: 2" "  renderer: networkd" "  ethernets:" "    \"$iface\":"
+	if [[ "$mode" == dhcp ]]; then
+		printf '%s\n' "      dhcp4: true"
+		return
+	fi
+	printf '%s\n' "      dhcp4: false" "      dhcp6: false" "      addresses:" "        - \"$addr\""
+	if [[ -n "$gw" ]]; then
+		printf '%s\n' "      routes:" "        - to: default" "          via: \"$gw\""
+	fi
+	if [[ -n "$dns" || -n "$search" ]]; then
+		printf '%s\n' "      nameservers:"
+		if [[ -n "$dns" ]]; then
+			printf '%s\n' "        addresses:"
+			for d in $dns; do printf '          - "%s"\n' "$d"; done
+		fi
+		if [[ -n "$search" ]]; then
+			printf '%s\n' "        search:" "          - \"$search\""
+		fi
+	fi
+}
+
+# Interfaces physiques (celles qui ont un périphérique).
+list_interfaces() {
+	local n
+	for n in /sys/class/net/*; do
+		n=${n##*/}
+		[[ "$n" != lo && -e "/sys/class/net/$n/device" && "$n" =~ $IFACE_RE ]] && printf '%s\n' "$n"
+	done
+	return 0
+}
+
+# Fichier de réponses du mode sans intervention → variables de l'assistant.
+# Toute valeur passe par les mêmes contrôles que les saisies interactives ;
+# la moindre anomalie (clé inconnue, type, valeur) refuse le fichier entier.
+load_unattended() { # fichier
+	local f=$1 v lv pw
+	[[ -f "$f" && -r "$f" ]] || return 1
+	[[ $(wc -c < "$f") -le 16384 ]] || return 1
+	jq -e '
+		def str: type == "string" and (test("[[:cntrl:]]") | not);
+		type == "object"
+		and ((keys - ["version", "language", "keyboard", "timezone", "network", "fqdn",
+			"admin_password", "sysadmin_password", "admin_networks", "report", "poweroff"]) == [])
+		and .version == 1
+		and (.language | IN("fr", "en"))
+		and (.keyboard | str) and (.timezone | str) and (.fqdn | str)
+		and (.admin_password | str) and (.sysadmin_password | str)
+		and (.admin_networks | type == "array" and length >= 1 and length <= 64
+			and all(.[]; str and test("^[0-9A-Fa-f:./]{1,49}$")))
+		and ((.report // "none") | IN("serial", "none"))
+		and ((.poweroff // false) | type == "boolean")
+		and (.network | type == "object"
+			and ((keys - ["mode", "interface", "address", "gateway", "dns", "search"]) == [])
+			and (.mode | IN("dhcp", "static"))
+			and ((.interface // "") | str)
+			and ((.address // "") | str) and ((.gateway // "") | str) and ((.search // "") | str)
+			and ((.dns // []) | type == "array" and length <= 3 and all(.[]; str))
+			and (if .mode == "static" then (.address | type == "string") else
+				(has("address") or has("gateway") or has("dns") or has("search")) | not end))
+	' "$f" > /dev/null 2>&1 || return 1
+
+	UI_LANG=$(jq -r .language "$f")
+	v=$(jq -r .keyboard "$f")
+	lv=$(keyboard_layout "$v") || return 1
+	KB_CHOICE=$v
+	v=$(jq -r .timezone "$f")
+	valid_timezone "$v" || return 1
+	TZ_NAME=$v
+	v=$(jq -r .fqdn "$f")
+	valid_fqdn "$v" || return 1
+	FQDN=$v
+
+	NET_MODE=$(jq -r .network.mode "$f")
+	NET_IFACE=$(jq -r '.network.interface // ""' "$f")
+	if [[ -n "$NET_IFACE" && ! "$NET_IFACE" =~ $IFACE_RE ]]; then return 1; fi
+	NET_ADDR="" NET_GW="" NET_DNS="" NET_SEARCH=""
+	if [[ "$NET_MODE" == static ]]; then
+		NET_ADDR=$(netcheck iface "$(jq -r .network.address "$f")") || return 1
+		v=$(jq -r '.network.gateway // ""' "$f")
+		if [[ -n "$v" ]]; then NET_GW=$(netcheck ip "$v") || return 1; fi
+		NET_DNS=$(netcheck ips "$(jq -r '(.network.dns // []) | join(" ")' "$f")") || return 1
+		v=$(jq -r '.network.search // ""' "$f")
+		if [[ -n "$v" ]]; then valid_domain "$v" || return 1; NET_SEARCH=$v; fi
+	fi
+	ADMIN_NETWORKS_JSON=$(netcheck networks "$(jq -r '.admin_networks | join(",")' "$f")") || return 1
+	UA_REPORT=$(jq -r '.report // "none"' "$f")
+	UA_POWEROFF=$(jq -r '.poweroff // false' "$f")
+
+	# Mots de passe : lus par jq depuis le fichier (jamais dans argv), hachés
+	# aussitôt, puis effacés.
+	pw=$(jq -r .admin_password "$f")
+	valid_password "$pw" || { pw=""; return 1; }
+	ADMIN_HASH=$(hash_password "$pw") || { pw=""; return 1; }
+	pw=$(jq -r .sysadmin_password "$f")
+	valid_password "$pw" || { pw=""; return 1; }
+	SYS_HASH=$(printf '%s' "$pw" | openssl passwd -6 -stdin) || { pw=""; return 1; }
+	pw=""
+	return 0
+}
+
+# --------------------------------------------------------------------------
+# Interface (whiptail)
+# --------------------------------------------------------------------------
+
+wt() { # options whiptail… → choix sur la sortie standard
+	whiptail --backtitle "Scanoria — $(t 'Premier démarrage' 'First boot')" "$@" 3>&1 1>&2 2>&3
+}
+
+ui_msg() { wt --title "$1" --msgbox "$2" 20 76 || true; }
+
+ui_error() { wt --title "$(t 'Valeur refusée' 'Invalid value')" --msgbox "$1" 12 70 || true; }
+
+ui_input() { wt --title "$1" --inputbox "$2" 14 76 "$3"; }
+
+ui_password() { wt --title "$1" --passwordbox "$2" 12 76; }
+
+# --------------------------------------------------------------------------
+# Étapes (0 = suivante, 1 = retour à la précédente)
+# --------------------------------------------------------------------------
+
+step_language() {
+	local c
+	c=$(wt --title "Langue / Language" --nocancel --default-item "$UI_LANG" \
+		--menu "Langue de l'assistant / Assistant language" 12 60 2 \
+		fr "Français" en "English") || return 1
+	UI_LANG=$c
+}
+
+step_keyboard() {
+	local c lv
+	c=$(wt --title "$(t 'Clavier' 'Keyboard')" --default-item "$KB_CHOICE" \
+		--menu "$(t 'Disposition du clavier :' 'Keyboard layout:')" 20 60 10 \
+		fr "$(t 'Français (France)' 'French (France)')" \
+		fr-be "$(t 'Français (Belgique)' 'French (Belgium)')" \
+		fr-ch "$(t 'Français (Suisse)' 'French (Switzerland)')" \
+		fr-ca "$(t 'Français (Canada)' 'French (Canada)')" \
+		de-ch "$(t 'Allemand (Suisse)' 'German (Switzerland)')" \
+		us "$(t 'Anglais (États-Unis)' 'English (US)')" \
+		gb "$(t 'Anglais (Royaume-Uni)' 'English (UK)')" \
+		de "$(t 'Allemand' 'German')" \
+		es "$(t 'Espagnol' 'Spanish')" \
+		it "$(t 'Italien' 'Italian')") || return 1
+	KB_CHOICE=$c
+	lv=$(keyboard_layout "$KB_CHOICE")
+	# Appliqué tout de suite : la suite de la saisie utilise ce clavier.
+	write_keyboard "${lv%%:*}" "${lv#*:}"
+	setupcon -k --force < /dev/tty1 > /dev/null 2>&1 || true
+}
+
+step_network() {
+	local -a items=()
+	local n mac c v
+	while IFS= read -r n; do
+		mac=$(cat "/sys/class/net/$n/address" 2>/dev/null || echo "?")
+		items+=("$n" "$mac $(cat "/sys/class/net/$n/operstate" 2>/dev/null || true)")
+	done < <(list_interfaces)
+	if [[ ${#items[@]} -eq 0 ]]; then
+		ui_error "$(t 'Aucune interface réseau détectée.' 'No network interface found.')"
+		return 1
+	fi
+	c=$(wt --title "$(t 'Réseau' 'Network')" --default-item "${NET_IFACE:-${items[0]}}" \
+		--menu "$(t 'Interface d’administration :' 'Management interface:')" 18 70 8 "${items[@]}") || return 1
+	NET_IFACE=$c
+	c=$(wt --title "$(t 'Réseau' 'Network')" --default-item "$NET_MODE" \
+		--menu "$(t 'Configuration de' 'Configuration of') $NET_IFACE :" 12 70 2 \
+		dhcp "$(t 'Automatique (DHCP)' 'Automatic (DHCP)')" \
+		static "$(t 'Adresse fixe' 'Static address')") || return 1
+	NET_MODE=$c
+	[[ "$NET_MODE" == dhcp ]] && return 0
+	while true; do
+		v=$(ui_input "$(t 'Adresse fixe' 'Static address')" \
+			"$(t 'Adresse et préfixe (ex. 192.0.2.10/24) :' 'Address and prefix (e.g. 192.0.2.10/24):')" "$NET_ADDR") || return 1
+		if NET_ADDR=$(netcheck iface "$v"); then break; fi
+		ui_error "$(t 'Adresse invalide :' 'Invalid address:') $v"
+	done
+	while true; do
+		v=$(ui_input "$(t 'Passerelle' 'Gateway')" \
+			"$(t 'Passerelle par défaut (vide si aucune) :' 'Default gateway (empty if none):')" "$NET_GW") || return 1
+		if [[ -z "$v" ]]; then NET_GW=""; break; fi
+		if NET_GW=$(netcheck ip "$v"); then break; fi
+		ui_error "$(t 'Adresse invalide :' 'Invalid address:') $v"
+	done
+	while true; do
+		v=$(ui_input "DNS" \
+			"$(t 'Serveurs DNS, 3 au plus, séparés par des espaces :' 'DNS servers, up to 3, space separated:')" "$NET_DNS") || return 1
+		if NET_DNS=$(netcheck ips "$v"); then break; fi
+		ui_error "$(t 'Liste invalide :' 'Invalid list:') $v"
+	done
+	while true; do
+		v=$(ui_input "$(t 'Domaine de recherche' 'Search domain')" \
+			"$(t 'Domaine de recherche DNS (facultatif, ex. exemple.test) :' 'DNS search domain (optional, e.g. exemple.test):')" "$NET_SEARCH") || return 1
+		if [[ -z "$v" ]] || valid_domain "$v"; then NET_SEARCH=$v; break; fi
+		ui_error "$(t 'Domaine invalide :' 'Invalid domain:') $v"
+	done
+}
+
+step_fqdn() {
+	local v
+	while true; do
+		v=$(ui_input "$(t 'Nom de l’appliance' 'Appliance name')" \
+			"$(t 'Nom complet (FQDN) en minuscules, ex. analyse.exemple.test.
+La console répondra sur ce nom, et chaque module sur <module>.<nom> :
+prévoir les enregistrements DNS <nom> et *.<nom>.' \
+'Fully qualified name in lowercase, e.g. analyse.exemple.test.
+The console will answer on this name, and each module on <module>.<name>:
+plan DNS records for <name> and *.<name>.')" "$FQDN") || return 1
+		v=${v,,}
+		if valid_fqdn "$v"; then FQDN=$v; return 0; fi
+		ui_error "$(t 'Nom invalide :' 'Invalid name:') $v"
+	done
+}
+
+step_timezone() {
+	local c v
+	c=$(wt --title "$(t 'Fuseau horaire' 'Time zone')" --default-item "$TZ_NAME" \
+		--menu "$(t 'Fuseau horaire :' 'Time zone:')" 18 60 8 \
+		Europe/Paris "" Europe/Brussels "" Europe/Zurich "" Europe/Luxembourg "" \
+		America/Toronto "" Etc/UTC "" other "$(t 'Autre…' 'Other…')") || return 1
+	if [[ "$c" != other ]]; then TZ_NAME=$c; return 0; fi
+	while true; do
+		v=$(ui_input "$(t 'Fuseau horaire' 'Time zone')" \
+			"$(t 'Nom du fuseau (ex. Europe/Paris) :' 'Time zone name (e.g. Europe/Paris):')" "$TZ_NAME") || return 1
+		if valid_timezone "$v"; then TZ_NAME=$v; return 0; fi
+		ui_error "$(t 'Fuseau inconnu :' 'Unknown time zone:') $v"
+	done
+}
+
+ask_new_password() { # titre texte → mot de passe sur la sortie standard
+	local a b
+	while true; do
+		a=$(ui_password "$1" "$2") || return 1
+		if ! valid_password "$a"; then
+			ui_error "$(t 'Le mot de passe doit compter de 12 à 128 caractères.' 'The password must be 12 to 128 characters long.')"
+			continue
+		fi
+		b=$(ui_password "$1" "$(t 'Confirmer le mot de passe :' 'Confirm the password:')") || return 1
+		if [[ "$a" == "$b" ]]; then printf '%s' "$a"; return 0; fi
+		ui_error "$(t 'Les deux saisies diffèrent.' 'The two entries differ.')"
+	done
+}
+
+step_admin_password() {
+	local pw
+	pw=$(ask_new_password "$(t 'Administrateur de la console' 'Console administrator')" \
+		"$(t 'Mot de passe du compte « admin » de la console web (12 caractères au moins) :' \
+			'Password of the web console « admin » account (at least 12 characters):')") || return 1
+	ADMIN_HASH=$(hash_password "$pw") || { pw=""; return 1; }
+	pw=""
+}
+
+step_sysadmin_password() {
+	local pw
+	pw=$(ask_new_password "$(t 'Compte de maintenance' 'Maintenance account')" \
+		"$(t 'Mot de passe du compte système « sysadmin » (console locale et SSH depuis les réseaux d’administration, 12 caractères au moins) :' \
+			'Password of the « sysadmin » system account (local console and SSH from the management networks, at least 12 characters):')") || return 1
+	SYS_HASH=$(printf '%s' "$pw" | openssl passwd -6 -stdin) || { pw=""; return 1; }
+	pw=""
+}
+
+default_admin_networks() {
+	if [[ "$NET_MODE" == static && -n "$NET_ADDR" ]]; then
+		netcheck iface-network "$NET_ADDR"
+	elif [[ -n "$NET_IFACE" ]]; then
+		ip -j addr show dev "$NET_IFACE" 2>/dev/null | netcheck ipjson-networks 2>/dev/null \
+			| jq -r 'join(", ")' 2>/dev/null || true
+	fi
+}
+
+step_admin_networks() {
+	local v def
+	if [[ -n "$ADMIN_NETWORKS_JSON" ]]; then
+		def=$(jq -r 'join(", ")' <<< "$ADMIN_NETWORKS_JSON")
+	else
+		def=$(default_admin_networks || true)
+	fi
+	while true; do
+		v=$(ui_input "$(t 'Réseaux d’administration' 'Management networks')" \
+			"$(t 'Réseaux autorisés à joindre la console et SSH (ports 22, 80, 443), en notation CIDR, séparés par des virgules (ex. 192.0.2.0/24, 2001:db8::/48) :' \
+				'Networks allowed to reach the console and SSH (ports 22, 80, 443), in CIDR notation, comma separated (e.g. 192.0.2.0/24, 2001:db8::/48):')" "$def") || return 1
+		if ADMIN_NETWORKS_JSON=$(netcheck networks "$v"); then return 0; fi
+		ui_error "$(t 'Liste invalide (1 à 64 réseaux CIDR) :' 'Invalid list (1 to 64 CIDR networks):') $v"
+		def=$v
+	done
+}
+
+step_summary() {
+	local net
+	if [[ "$NET_MODE" == dhcp ]]; then
+		net="$NET_IFACE, DHCP"
+	else
+		net="$NET_IFACE, $NET_ADDR, $(t 'passerelle' 'gateway') ${NET_GW:--}, DNS ${NET_DNS:--}, ${NET_SEARCH:--}"
+	fi
+	wt --title "$(t 'Récapitulatif' 'Summary')" --yes-button "$(t 'Appliquer' 'Apply')" \
+		--no-button "$(t 'Modifier' 'Change')" --yesno "$(t 'Langue' 'Language') : $UI_LANG
+$(t 'Clavier' 'Keyboard') : $KB_CHOICE
+$(t 'Réseau' 'Network') : $net
+$(t 'Nom' 'Name') : $FQDN
+$(t 'Fuseau' 'Time zone') : $TZ_NAME
+$(t 'Réseaux d’administration' 'Management networks') : $(jq -r 'join(", ")' <<< "$ADMIN_NETWORKS_JSON")
+$(t 'Mots de passe' 'Passwords') : admin, sysadmin ($(t 'saisis' 'set'))
+
+$(t 'Appliquer cette configuration ?' 'Apply this configuration?')" 20 76
+}
+
+# --------------------------------------------------------------------------
+# Application (errexit inactif ici : chaque commande est vérifiée)
+# --------------------------------------------------------------------------
+
+logrun() { "$@" >> "$LOG_FILE" 2>&1; }
+
+write_keyboard() { # disposition variante
+	cat > /etc/default/keyboard.scanoria-new <<-EOF || return 1
+		# Écrit par scanoria-firstboot
+		XKBMODEL="pc105"
+		XKBLAYOUT="$1"
+		XKBVARIANT="$2"
+		XKBOPTIONS=""
+		BACKSPACE="guess"
+	EOF
+	chmod 0644 /etc/default/keyboard.scanoria-new && mv -f /etc/default/keyboard.scanoria-new /etc/default/keyboard
+}
+
+apply_network() {
+	local f
+	netplan_yaml "$NET_IFACE" "$NET_MODE" "$NET_ADDR" "$NET_GW" "$NET_DNS" "$NET_SEARCH" > "$NETPLAN_FILE.new" || return 1
+	chmod 0600 "$NETPLAN_FILE.new" && mv -f "$NETPLAN_FILE.new" "$NETPLAN_FILE" || return 1
+	# Le réseau est désormais géré ici, plus par cloud-init.
+	install -d -m 0755 /etc/cloud/cloud.cfg.d || return 1
+	printf 'network: {config: disabled}\n' > /etc/cloud/cloud.cfg.d/99-scanoria-network.cfg || return 1
+	install -d -m 0700 /var/lib/scanoria/firstboot-backup || return 1
+	for f in /etc/netplan/*.yaml; do
+		[[ -e "$f" && "$f" != "$NETPLAN_FILE" ]] || continue
+		mv -f "$f" /var/lib/scanoria/firstboot-backup/ || return 1
+	done
+	logrun netplan generate || return 1
+	logrun netplan apply || return 1
+	# Attente d'une adresse (DHCP) : 30 s au plus, sans échec si aucune.
+	for _ in $(seq 1 30); do
+		ip -j addr show dev "$NET_IFACE" 2>/dev/null | netcheck ipjson-networks > /dev/null 2>&1 && return 0
+		sleep 1
+	done
+	return 0
+}
+
+copy_defaults() {
+	local d=/usr/share/scanoria/defaults f rel
+	[[ -d "$d" ]] || return 0
+	while IFS= read -r -d '' f; do
+		rel=${f#"$d"/}
+		[[ -e "/etc/scanoria/$rel" ]] && continue
+		install -D -m 0640 -o root -g scanoria "$f" "/etc/scanoria/$rel" || return 1
+	done < <(find "$d" -type f -print0)
+}
+
+setup_database() {
+	local r
+	logrun systemctl enable --now postgresql.service || return 1
+	for _ in $(seq 1 30); do
+		(cd / && runuser -u postgres -- pg_isready -q) && break
+		sleep 1
+	done
+	r=$(cd / && runuser -u postgres -- psql -XAtq -c "SELECT 1 FROM pg_roles WHERE rolname = 'scanoria'") || return 1
+	if [[ "$r" != 1 ]]; then
+		(cd / && logrun runuser -u postgres -- createuser --no-superuser --no-createdb --no-createrole scanoria) || return 1
+	fi
+	r=$(cd / && runuser -u postgres -- psql -XAtq -c "SELECT 1 FROM pg_database WHERE datname = 'scanoria'") || return 1
+	if [[ "$r" != 1 ]]; then
+		(cd / && logrun runuser -u postgres -- createdb --owner=scanoria --encoding=UTF8 \
+			--locale=en_US.UTF-8 --template=template0 scanoria) || return 1
+	fi
+}
+
+write_bootstrap() {
+	local dir=/var/lib/scanoria/bootstrap tmp
+	[[ "$ADMIN_HASH" =~ ^\$pbkdf2-sha256\$i=600000\$[A-Za-z0-9+/]{22}\$[A-Za-z0-9+/]{43}$ ]] || return 1
+	install -d -m 0700 -o scanoria -g scanoria "$dir" || return 1
+	tmp=$(mktemp /run/scanoria-admin.XXXXXX) || return 1
+	if ! jq -n --arg h "$ADMIN_HASH" '{username: "admin", password_hash: $h}' > "$tmp"; then
+		rm -f "$tmp"; return 1
+	fi
+	install -m 0600 -o scanoria -g scanoria "$tmp" "$dir/.admin.json.new" || { rm -f "$tmp"; return 1; }
+	rm -f "$tmp"
+	mv -f "$dir/.admin.json.new" "$dir/admin.json"
+}
+
+helper_exec() { # type params_json
+	local out rc code
+	out=$(scanoria-helper exec --origin firstboot --type "$1" --params "$2" 2>> "$LOG_FILE")
+	rc=$?
+	printf '%s helper %s: rc=%s %s\n' "$(date -u +%FT%TZ)" "$1" "$rc" "$out" >> "$LOG_FILE"
+	code=$(jq -r '.code // empty' <<< "$out" 2>/dev/null || true)
+	[[ $rc -eq 0 && "$code" == OK ]]
+}
+
+set_sysadmin_password() {
+	id sysadmin > /dev/null 2>&1 || return 0
+	printf 'sysadmin:%s\n' "$SYS_HASH" | chpasswd -e || return 1
+	logrun passwd -u sysadmin || true
+}
+
+start_services() {
+	local u
+	for u in nginx.service scanoria-helper.path scanoria-console.service; do
+		logrun systemctl enable --now "$u" || return 1
+	done
+	for u in scanoria-firewall.service scanoria-state.timer scanoria-update-check.timer \
+		scanoria-update-apply.timer scanoria-cert-renew.timer; do
+		if systemctl cat "$u" > /dev/null 2>&1; then
+			logrun systemctl enable --now "$u" || return 1
+		fi
+	done
+}
+
+wait_console() {
+	local s
+	for _ in $(seq 1 120); do
+		s=$(curl -fsS --max-time 3 http://127.0.0.1:3000/api/health 2>/dev/null | jq -r '.status // empty' 2>/dev/null || true)
+		[[ "$s" == ok ]] && return 0
+		sleep 1
+	done
+	return 1
+}
+
+run_selftest() {
+	local out rc
+	out=$(scanoria-selftest --json 2>> "$LOG_FILE")
+	rc=$?
+	printf '%s selftest rc=%s %s\n' "$(date -u +%FT%TZ)" "$rc" "$out" >> "$LOG_FILE"
+	SELFTEST_JSON=$out
+	SELFTEST_RC=$rc
+	case "$rc" in
+		0) SELFTEST_SUMMARY="$(jq -r '.status' <<< "$out" 2>/dev/null || echo pass)" ;;
+		1) SELFTEST_SUMMARY="fail : $(jq -r '[.checks[] | select(.status == "fail") | .id] | join(", ")' <<< "$out" 2>/dev/null || true)" ;;
+		*) SELFTEST_SUMMARY="$(t 'erreur interne' 'internal error')" ;;
+	esac
+	return 0
+}
+
+FAILED_STEP=""
+progress() { printf 'XXX\n%d\n%s\nXXX\n' "$1" "$2" >&4; }
+step() { # pourcentage libellé commande…
+	local pct=$1 label=$2
+	shift 2
+	progress "$pct" "$label"
+	printf '%s étape / step: %s\n' "$(date -u +%FT%TZ)" "$label" >> "$LOG_FILE"
+	if ! "$@"; then
+		FAILED_STEP=$label
+		return 1
+	fi
+}
+
+do_apply() {
+	local lv
+	lv=$(keyboard_layout "$KB_CHOICE")
+	step 3 "$(t 'Clavier' 'Keyboard')" write_keyboard "${lv%%:*}" "${lv#*:}" || return 1
+	step 6 "$(t 'Fuseau horaire' 'Time zone')" logrun timedatectl set-timezone "$TZ_NAME" || return 1
+	step 10 "$(t 'Réseau' 'Network')" apply_network || return 1
+	step 20 "$(t 'Configuration par défaut' 'Default configuration')" copy_defaults || return 1
+	step 28 "$(t 'Base de données' 'Database')" setup_database || return 1
+	step 36 "$(t 'Compte administrateur' 'Administrator account')" write_bootstrap || return 1
+	step 40 "$(t 'Compte de maintenance' 'Maintenance account')" set_sysadmin_password || return 1
+	step 44 "nginx" logrun systemctl enable --now nginx.service || return 1
+	step 50 "$(t 'Nom, autorité de certification et certificat' 'Name, certificate authority and certificate')" \
+		helper_exec set-hostname "$(jq -nc --arg f "$FQDN" '{fqdn: $f}')" || return 1
+	step 60 "$(t 'Pare-feu' 'Firewall')" \
+		helper_exec set-admin-networks "$(jq -nc --argjson n "$ADMIN_NETWORKS_JSON" '{networks: $n, allow_self_lockout: false}')" || return 1
+	step 66 "$(t 'Certificat' 'Certificate')" helper_exec issue-certificate '{"force":false}' || return 1
+	step 72 "Services" start_services || return 1
+	step 80 "$(t 'Démarrage de la console' 'Console start-up')" wait_console || return 1
+	step 90 "$(t 'Tests de fumée' 'Smoke tests')" run_selftest || return 1
+	progress 100 "$(t 'Terminé' 'Done')"
+	sleep 1
+}
+
+apply_all() {
+	local rc=0 gauge
+	FAILED_STEP=""
+	exec 4> >(whiptail --backtitle "Scanoria — $(t 'Premier démarrage' 'First boot')" \
+		--title "$(t 'Application de la configuration' 'Applying the configuration')" \
+		--gauge "$(t 'Veuillez patienter…' 'Please wait…')" 8 76 0)
+	gauge=$!
+	do_apply || rc=1
+	exec 4>&-
+	wait "$gauge" 2>/dev/null || true
+	return "$rc"
+}
+
+finalize() {
+	touch /etc/cloud/cloud-init.disabled 2>/dev/null || true
+	date -u +%FT%TZ > "$DONE_FILE"
+	chmod 0644 "$DONE_FILE"
+	logrun systemctl disable scanoria-firstboot.service || true
+}
+
+finish() {
+	local fp ip4
+	fp=$(openssl x509 -in "$CA_PUBLIC" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2 || true)
+	ip4=$(ip -j -4 addr show dev "$NET_IFACE" 2>/dev/null | jq -r '[.[].addr_info[] | select(.scope == "global") | .local][0] // "?"' 2>/dev/null || echo "?")
+	finalize
+	ui_msg "$(t 'Appliance prête' 'Appliance ready')" "$(t 'Console' 'Console') : https://$FQDN/
+$(t 'Identifiant' 'Login') : admin
+
+$(t 'Enregistrements DNS à créer' 'DNS records to create') :
+  $FQDN  →  $ip4
+  *.$FQDN  →  $ip4
+
+$(t 'Autorité de certification à importer sur les postes' 'Certificate authority to import on workstations') :
+  http://$FQDN/scanoria-ca.crt
+  SHA-256 : ${fp:-?}
+
+$(t 'Tests de fumée' 'Smoke tests') : ${SELFTEST_SUMMARY:-?}"
+}
+
+# --------------------------------------------------------------------------
+# Mode sans intervention (QEMU, fw_cfg)
+# --------------------------------------------------------------------------
+
+unattended_present() {
+	if [[ ! -e "$UNATTENDED_FILE" && -z "${SCANORIA_UNATTENDED_FILE:-}" ]]; then
+		modprobe -q qemu_fw_cfg 2>/dev/null || true
+	fi
+	[[ -e "$UNATTENDED_FILE" ]]
+}
+
+report() { # ligne : port série seulement, jamais de mot de passe
+	[[ "$UA_REPORT" == serial ]] || return 0
+	printf '%s\n' "$1" > "$SERIAL_DEV" 2>/dev/null || true
+}
+
+report_end() { # ok|error
+	if [[ -z "$SELFTEST_RC" ]] && command -v scanoria-selftest > /dev/null 2>&1; then
+		run_selftest
+	fi
+	if [[ -n "$SELFTEST_RC" ]]; then
+		report "SCANORIA-SELFTEST-JSON $(printf '%s' "$SELFTEST_JSON" | base64 -w 0)"
+		report "SCANORIA-SELFTEST-EXIT $SELFTEST_RC"
+	fi
+	report "SCANORIA-FIRSTBOOT-END $1"
+}
+
+run_unattended() {
+	local rc=0
+	printf '%s mode sans intervention / unattended mode\n' "$(date -u +%FT%TZ)" >> "$LOG_FILE"
+	echo "Scanoria : premier démarrage sans intervention / unattended first boot" > /dev/tty1 2>/dev/null || true
+	if ! load_unattended "$UNATTENDED_FILE"; then
+		# Le fichier est refusé en bloc : pas de détail (il porte des mots de passe).
+		UA_REPORT=serial
+		printf '%s fichier de réponses refusé / answers file rejected\n' "$(date -u +%FT%TZ)" >> "$LOG_FILE"
+		report "SCANORIA-FIRSTBOOT-END error"
+		return 1
+	fi
+	if [[ -z "$NET_IFACE" ]]; then
+		NET_IFACE=$(list_interfaces | head -n 1)
+	fi
+	if [[ -z "$NET_IFACE" ]] || ! list_interfaces | grep -qx -- "$NET_IFACE"; then
+		printf '%s interface absente / no interface\n' "$(date -u +%FT%TZ)" >> "$LOG_FILE"
+		report_end error
+		return 1
+	fi
+	FAILED_STEP=""
+	exec 4> /dev/null
+	do_apply || rc=1
+	exec 4>&-
+	if [[ $rc -ne 0 ]]; then
+		printf '%s échec / failure: %s\n' "$(date -u +%FT%TZ)" "$FAILED_STEP" >> "$LOG_FILE"
+		report_end error
+		return 1
+	fi
+	finalize
+	report_end ok
+	if [[ "$UA_POWEROFF" == true ]]; then
+		logrun systemctl poweroff --no-block || true
+	fi
+	return 0
+}
+
+main() {
+	local i=0 rc
+	local -a steps=(step_language step_keyboard step_network step_fqdn step_timezone
+		step_admin_password step_sysadmin_password step_admin_networks step_summary)
+	if [[ $EUID -ne 0 ]]; then
+		echo "scanoria-firstboot: root requis / root required" >&2
+		exit 2
+	fi
+	[[ -e "$DONE_FILE" ]] && exit 0
+	touch "$LOG_FILE" && chmod 0600 "$LOG_FILE"
+	export TERM=${TERM:-linux}
+	if unattended_present; then
+		# Pas de relance automatique d'un échec (Restart=on-failure) : le
+		# marqueur d'erreur est écrit une fois, et le prochain démarrage reprend.
+		run_unattended || true
+		exit 0
+	fi
+	while true; do
+		while [[ $i -lt ${#steps[@]} ]]; do
+			rc=0
+			"${steps[$i]}" || rc=$?
+			if [[ $rc -eq 0 ]]; then
+				i=$((i + 1))
+			elif [[ $i -gt 0 ]]; then
+				i=$((i - 1))
+			fi
+		done
+		if apply_all; then
+			finish
+			exit 0
+		fi
+		ui_msg "$(t 'Échec' 'Failure')" "$(t 'L’étape suivante a échoué :' 'The following step failed:') $FAILED_STEP
+
+$(t 'Détails' 'Details') : $LOG_FILE
+$(t 'Corrigez la configuration puis appliquez de nouveau.' 'Fix the configuration and apply again.')"
+		i=$(( ${#steps[@]} - 1 ))
+	done
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+	main "$@"
+fi

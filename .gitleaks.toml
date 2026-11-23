@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# gitleaks (ci.yml, travail « gitleaks », tout l'historique de toutes les
+# branches). Règles par défaut de gitleaks, SANS aucune exception pour un
+# fichier versionné : le dépôt ne contient ni secret ni clé privée, pas même
+# de test. Les clés de test (Ed25519, AC interne, certificats) sont générées
+# à l'exécution par les tests, dans des répertoires temporaires hors du dépôt,
+# et ne sont donc jamais vues par gitleaks. Un faux positif se corrige dans le
+# fichier concerné (générer la valeur à l'exécution), pas ici ; toute
+# exception ajoutée ici doit être motivée dans la PR.
+title = "Scanoria"
+
+[extend]
+useDefault = true

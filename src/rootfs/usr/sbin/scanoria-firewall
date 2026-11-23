@@ -1,0 +1,115 @@
+#!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# scanoria-firewall : table nftables « inet scanoria » (ARCHITECTURE § 4).
+#
+#   scanoria-firewall apply [--boot]   génère depuis admin-networks.json, vérifie
+#                                      (nft -c) puis charge ; règles précédentes
+#                                      rechargées en cas d'échec
+#   scanoria-firewall render           affiche les règles générées (contrôle)
+#   scanoria-firewall status           état (JSON)
+#
+# --boot (scanoria-firewall.service) : sans configuration (avant le premier
+# démarrage), rien n'est chargé ; configuration illisible : la table est
+# chargée avec des ensembles vides (échec fermé, accès par la console locale).
+# Réponse sur la sortie standard : {"code", "message", "output"}.
+set -euo pipefail
+exec < /dev/null
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+# shellcheck source-path=SCRIPTDIR source=../lib/scanoria/lib/common.sh
+. "$here/../lib/scanoria/lib/common.sh"
+
+CONF="$ETC/admin-networks.json"
+NFT_DIR="$ETC/nftables"
+RULES="$NFT_DIR/scanoria.nft"
+TEMPLATE="$SHARE/nftables/scanoria.nft.tmpl"
+
+# Réseaux de la configuration, « 4 CIDR » ou « 6 CIDR » par ligne ; échec si
+# la configuration n'est pas exactement {"networks": [1..64 CIDR canoniques]}.
+read_networks() {
+	/usr/bin/python3 -I -c '
+import ipaddress, json, sys
+d = json.loads(sys.stdin.buffer.read(65536).decode("utf-8"))
+assert isinstance(d, dict) and set(d) == {"networks"}
+nets = d["networks"]
+assert isinstance(nets, list) and 1 <= len(nets) <= 64
+for s in nets:
+    assert isinstance(s, str) and len(s) <= 49
+    n = ipaddress.ip_network(s, strict=True)
+    assert str(n) == s
+    print(n.version, s)
+' < "$CONF"
+}
+
+elements() { # 4|6 lignes
+	local list
+	list=$(awk -v v="$1" '$1 == v { printf "%s%s", sep, $2; sep = ", " }' <<< "$2")
+	if [[ -n "$list" ]]; then printf '\t\telements = { %s }' "$list"; fi
+}
+
+render() { # lignes « version CIDR » -> règles sur la sortie standard
+	local e4 e6 line
+	e4=$(elements 4 "$1")
+	e6=$(elements 6 "$1")
+	while IFS= read -r line; do
+		case "$line" in
+			@ADMIN4@) [[ -z "$e4" ]] || printf '%s\n' "$e4" ;;
+			@ADMIN6@) [[ -z "$e6" ]] || printf '%s\n' "$e6" ;;
+			*) printf '%s\n' "$line" ;;
+		esac
+	done < "$TEMPLATE"
+}
+
+networks_json() { # lignes « version CIDR »
+	awk 'NF == 2 { print $2 }' <<< "$1" | jq -Rnc '[inputs]'
+}
+
+cmd_apply() {
+	local boot=$1 nets new
+	if [[ ! -f "$CONF" ]]; then
+		[[ $boot -eq 1 ]] && emit OK "no admin networks configured, nothing loaded" '{"loaded": false, "admin_networks": []}'
+		emit E_PRECONDITION "admin networks not configured"
+	fi
+	if ! nets=$(read_networks 2>/dev/null); then
+		[[ $boot -eq 1 ]] || emit E_INVALID_PARAM "invalid admin-networks.json"
+		log "invalid admin-networks.json: loading the table with empty sets"
+		nets=""
+	fi
+	install -d -m 0700 "$NFT_DIR"
+	new=$(mktemp "$NFT_DIR/.scanoria.nft.XXXXXX")
+	render "$nets" > "$new"
+	chmod 0600 "$new"
+	if ! sys nft -c -f "$new"; then
+		rm -f "$new"
+		emit E_INTERNAL "generated ruleset rejected by nft -c"
+	fi
+	if ! sys nft -f "$new"; then
+		rm -f "$new"
+		if [[ -f "$RULES" ]]; then sys nft -f "$RULES" || log "previous ruleset could not be reloaded"; fi
+		emit E_INTERNAL "ruleset could not be loaded, previous rules restored"
+	fi
+	mv -f "$new" "$RULES"
+	emit OK "firewall loaded" "$(jq -cn --argjson n "$(networks_json "$nets")" '{loaded: true, admin_networks: $n}')"
+}
+
+cmd_status() {
+	local loaded=false nets=""
+	if is_test; then
+		[[ -f "$RULES" ]] && loaded=true
+	elif nft list table inet scanoria > /dev/null 2>&1; then
+		loaded=true
+	fi
+	if [[ -f "$CONF" ]]; then nets=$(read_networks 2>/dev/null || true); fi
+	emit OK "firewall status" "$(jq -cn --argjson l "$loaded" --argjson n "$(networks_json "$nets")" \
+		'{loaded: $l, admin_networks: $n}')"
+}
+
+[[ -n "$R" || $EUID -eq 0 ]] || { echo "scanoria-firewall: root required" >&2; exit 2; }
+case "${1:-} ${2:-}" in
+	"apply ") cmd_apply 0 ;;
+	"apply --boot") cmd_apply 1 ;;
+	"render ") nets=$(read_networks) || { echo "invalid admin-networks.json" >&2; exit 1; }; render "$nets" ;;
+	"status ") cmd_status ;;
+	*) echo "usage: scanoria-firewall apply [--boot] | render | status" >&2; exit 2 ;;
+esac

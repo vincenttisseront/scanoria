@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Paquets installés par l'ISO depuis son dépôt local (hors ligne). build.sh
+# télécharge ces paquets et toutes leurs dépendances (vérifiées par apt) dans
+# /scanoria/pool de l'ISO. Un nom par ligne.
+postgresql-16
+postgresql-client-16
+nginx
+podman
+uidmap
+slirp4netns
+catatonit
+nftables
+jq
+zstd
+openssl
+curl
+ca-certificates
+python3
+whiptail
+console-setup
+kbd
+tzdata
+locales
