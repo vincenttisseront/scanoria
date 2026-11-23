@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Fins de ligne : LF pour tout ce qui s'exécute ou est lu sur l'appliance,
+# même depuis un poste Windows (make-iso.ps1 refuse un build.sh en CRLF).
+* text=auto eol=lf
+*.sh text eol=lf
+build.sh text eol=lf
+src/** text eol=lf
+tests/** text eol=lf
+*.ps1 text eol=lf
+*.pem text eol=lf
+*.asc text eol=lf
+*.png binary
+*.ico binary
+*.woff2 binary

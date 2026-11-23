@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Assistant de premier démarrage sur tty1, tant que firstboot.done est absent.
+# Déployé par le lot (ARCHITECTURE § 3.3) et activé par l'ISO
+# (src/iso/scripts/late-install.sh).
+[Unit]
+Description=Scanoria first boot assistant
+ConditionPathExists=!/var/lib/scanoria/firstboot.done
+After=systemd-user-sessions.service plymouth-quit-wait.service cloud-final.service systemd-sysusers.service systemd-tmpfiles-setup.service
+Wants=cloud-final.service
+Before=getty@tty1.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/scanoria-firstboot
+Environment=TERM=linux
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=infinity
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

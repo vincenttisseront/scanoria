@@ -1,0 +1,200 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Vincent Tisseront
+//
+// Contraintes partagées par la console (client et serveur). Elles reprennent
+// À L'IDENTIQUE les schémas JSON de src/rootfs/usr/share/scanoria/requests/
+// (docs/ARCHITECTURE.md § 5) ; tests/unit/schemas.test.ts compare les deux.
+
+import { z } from 'zod'
+
+export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+export const TIMESTAMP_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$/
+export const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/
+export const ADDRESS_RE = /^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}|[0-9a-f.]*:[0-9a-f:.]*)$/
+export const FQDN_RE = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$/
+export const CIDR_RE = /^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}\/([0-9]|[12][0-9]|3[0-2])|[0-9a-f.]*:[0-9a-f:.]*\/([0-9]|[1-9][0-9]|1[01][0-9]|12[0-8]))$/
+export const VERSION_RE = /^(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})$/
+export const CERT_PEM_RE = /^-----BEGIN CERTIFICATE-----\r?\n/
+export const KEY_PEM_RE = /^-----BEGIN (EC |RSA )?PRIVATE KEY-----\r?\n/
+export const WINDOW_START_RE = /^([01][0-9]|2[0-3]):[0-5][0-9]$/
+export const REPO_RE = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
+/** Nom d'un fichier de demande ou de résultat (§ 5.3). */
+export const REQUEST_FILE_RE = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/
+
+export const REQUEST_TYPES = [
+  'set-hostname',
+  'set-admin-networks',
+  'issue-certificate',
+  'import-certificate',
+  'check-update',
+  'apply-update',
+  'rollback-update',
+  'set-update-policy',
+  'run-selftest',
+] as const
+export type RequestType = (typeof REQUEST_TYPES)[number]
+
+export const RESULT_CODES = [
+  'OK',
+  'E_INVALID_NAME', 'E_NOT_REGULAR_FILE', 'E_BAD_OWNER', 'E_TOO_LARGE', 'E_INVALID_JSON',
+  'E_UNKNOWN_TYPE', 'E_SCHEMA', 'E_ID_MISMATCH', 'E_DUPLICATE_ID', 'E_STALE', 'E_INVALID_PARAM',
+  'E_PRECONDITION', 'E_LOCKOUT', 'E_NETWORK', 'E_NOT_FOUND', 'E_SIGNATURE', 'E_CHECKSUM',
+  'E_ARCHIVE', 'E_VERSION', 'E_DISK_SPACE', 'E_CERT_INVALID', 'E_CERT_NAMES',
+  'E_CERT_KEY_MISMATCH', 'E_CERT_EXPIRED', 'E_NO_PREVIOUS', 'E_HEALTH_ROLLED_BACK',
+  'E_ROLLBACK_FAILED', 'E_TIMEOUT', 'E_INTERNAL',
+] as const
+export type ResultCode = (typeof RESULT_CODES)[number]
+
+export const ROLES = ['viewer', 'operator', 'admin'] as const
+export type Role = (typeof ROLES)[number]
+export const LOCALES = ['fr', 'en'] as const
+export const CHANNELS = ['stable', 'prerelease'] as const
+export const WEEK_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+
+const unique = (items: readonly unknown[]) => new Set(items).size === items.length
+
+export const fqdnSchema = z.string().min(4).max(253).regex(FQDN_RE)
+export const versionSchema = z.string().regex(VERSION_RE)
+export const uuidSchema = z.string().regex(UUID_V4_RE)
+export const cidrSchema = z.string().max(49).regex(CIDR_RE)
+
+export const maintenanceWindowSchema = z.strictObject({
+  days: z.array(z.enum(WEEK_DAYS)).min(1).max(7).refine(unique, { message: 'duplicate' }),
+  start: z.string().regex(WINDOW_START_RE),
+  duration_minutes: z.int().min(30).max(480),
+})
+
+/** Paramètres de chaque type de demande (§ 5.1). */
+export const requestParamSchemas = {
+  'set-hostname': z.strictObject({ fqdn: fqdnSchema }),
+  'set-admin-networks': z.strictObject({
+    networks: z.array(cidrSchema).min(1).max(64).refine(unique, { message: 'duplicate' }),
+    allow_self_lockout: z.boolean().optional(),
+  }),
+  'issue-certificate': z.strictObject({ force: z.boolean().optional() }),
+  'import-certificate': z.strictObject({
+    cert_pem: z.string().max(16384).regex(CERT_PEM_RE),
+    key_pem: z.string().max(16384).regex(KEY_PEM_RE),
+    chain_pem: z.string().max(65536).regex(CERT_PEM_RE).optional(),
+  }),
+  'check-update': z.strictObject({ channel: z.enum(CHANNELS).optional() }),
+  'apply-update': z.union([
+    z.strictObject({ source: z.literal('github'), version: versionSchema }),
+    z.strictObject({ source: z.literal('upload'), upload_id: uuidSchema }),
+  ]),
+  'rollback-update': z.strictObject({ expected_current: versionSchema, expected_target: versionSchema }),
+  'set-update-policy': z
+    .strictObject({
+      channel: z.enum(CHANNELS),
+      auto_check: z.boolean(),
+      auto_apply: z.boolean(),
+      maintenance_window: maintenanceWindowSchema.nullable(),
+    })
+    .refine(p => !p.auto_apply || p.maintenance_window !== null, {
+      message: 'auto_apply requires a maintenance window',
+      path: ['maintenance_window'],
+    }),
+  'run-selftest': z.strictObject({ quick: z.boolean().optional() }),
+} satisfies Record<RequestType, z.ZodType>
+
+export type RequestParams<T extends RequestType> = z.infer<(typeof requestParamSchemas)[T]>
+
+export const requestedBySchema = z.strictObject({
+  user_id: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
+  username: z.string().regex(USERNAME_RE),
+  address: z.string().max(45).regex(ADDRESS_RE).optional(),
+})
+
+/** Enveloppe complète d'une demande (§ 5.2). */
+export function envelopeSchema<T extends RequestType>(type: T) {
+  return z.strictObject({
+    version: z.literal(1),
+    id: uuidSchema,
+    type: z.literal(type),
+    created_at: z.string().regex(TIMESTAMP_RE),
+    requested_by: requestedBySchema,
+    params: requestParamSchemas[type],
+  })
+}
+
+const nullableTimestamp = z.string().regex(TIMESTAMP_RE).nullable()
+
+/** Résultat écrit par scanoria-helper (§ 5.6). */
+export const resultSchema = z
+  .strictObject({
+    version: z.literal(1),
+    id: uuidSchema.nullable(),
+    type: z.enum(REQUEST_TYPES).nullable(),
+    origin: z.enum(['console', 'timer', 'firstboot', 'cli']),
+    status: z.enum(['ok', 'error', 'rejected']),
+    code: z.enum(RESULT_CODES),
+    message: z.string().max(2000),
+    received_at: z.string().regex(TIMESTAMP_RE),
+    started_at: nullableTimestamp.optional(),
+    finished_at: z.string().regex(TIMESTAMP_RE),
+    output: z.record(z.string(), z.unknown()),
+  })
+  .refine(r => (r.status === 'ok') === (r.code === 'OK'), { message: 'status/code mismatch', path: ['code'] })
+export type HelperResult = z.infer<typeof resultSchema>
+
+// ---- Entrées de l'API de la console (hors protocole helper) ----
+
+export const PASSWORD_MIN = 12
+export const PASSWORD_MAX = 1024
+export const passwordSchema = z.string().min(PASSWORD_MIN).max(PASSWORD_MAX)
+
+export const loginSchema = z.strictObject({
+  username: z.string().min(1).max(64),
+  password: z.string().min(1).max(PASSWORD_MAX),
+})
+
+export const changePasswordSchema = z.strictObject({
+  current_password: z.string().min(1).max(PASSWORD_MAX),
+  new_password: passwordSchema,
+})
+
+export const accountUpdateSchema = z.strictObject({
+  locale: z.enum(LOCALES).optional(),
+  display_name: z.string().max(128).nullable().optional(),
+})
+
+export const userCreateSchema = z.strictObject({
+  username: z.string().regex(USERNAME_RE),
+  display_name: z.string().max(128).nullable().optional(),
+  email: z.string().max(254).regex(/^[^@\s]+@[^@\s]+$/).nullable().optional(),
+  role: z.enum(ROLES),
+  locale: z.enum(LOCALES).optional(),
+  password: passwordSchema,
+})
+
+export const userUpdateSchema = z.strictObject({
+  display_name: z.string().max(128).nullable().optional(),
+  email: z.string().max(254).regex(/^[^@\s]+@[^@\s]+$/).nullable().optional(),
+  role: z.enum(ROLES).optional(),
+  locale: z.enum(LOCALES).optional(),
+  is_active: z.boolean().optional(),
+})
+
+export const userPasswordResetSchema = z.strictObject({
+  password: passwordSchema,
+  must_change_password: z.boolean().optional(),
+})
+
+export const auditQuerySchema = z.strictObject({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
+  action: z.string().max(64).regex(/^[a-z0-9.-]+$/).optional(),
+  outcome: z.enum(['success', 'failure', 'denied']).optional(),
+  actor: z.string().max(64).regex(/^[a-z0-9._-]+$/).optional(),
+})
+
+export const applyUpdateBodySchema = requestParamSchemas['apply-update']
+
+export const UPLOAD_FILE_NAMES = ['release.json', 'SHA256SUMS', 'SHA256SUMS.sig'] as const
+export const ARCHIVE_NAME_RE = /^scanoria-(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.tar\.zst$/
+
+/** Rang des rôles (table roles). */
+export const ROLE_RANK: Record<Role, number> = { viewer: 10, operator: 20, admin: 30 }
+export function hasRole(actual: Role, required: Role): boolean {
+  return ROLE_RANK[actual] >= ROLE_RANK[required]
+}

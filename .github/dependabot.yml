@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Mises à jour Dependabot : dépendances npm de la console et actions GitHub
+# (épinglées par SHA ; Dependabot met à jour le SHA et le commentaire de
+# version). Les outils de .github/tools.env et les empreintes de src/iso/*.env
+# sont suivis à la main.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /webui
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    commit-message:
+      # Préfixes de commit du dépôt (CLAUDE.md § 16) : « fix(deps): … ».
+      prefix: "fix"
+      include: scope
+    groups:
+      nuxt:
+        patterns: ["nuxt", "@nuxt/*", "@nuxtjs/*", "vue", "vue-router", "h3"]
+      outils-dev:
+        dependency-type: development
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci"
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]

@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Gabarit de la table nftables « inet scanoria » (ARCHITECTURE § 4), rendu par
+# scanoria-firewall depuis /etc/scanoria/admin-networks.json. Seule cette
+# table est gérée : jamais de « flush ruleset ». Entrant : boucle locale,
+# connexions établies, ICMP nécessaire, client DHCP, puis SSH/HTTP/HTTPS
+# depuis les réseaux d'administration seulement. Sortant libre.
+table inet scanoria
+delete table inet scanoria
+table inet scanoria {
+	set admin4 {
+		type ipv4_addr
+		flags interval
+		auto-merge
+@ADMIN4@
+	}
+
+	set admin6 {
+		type ipv6_addr
+		flags interval
+		auto-merge
+@ADMIN6@
+	}
+
+	chain input {
+		type filter hook input priority filter; policy drop;
+		iif "lo" accept
+		ct state invalid drop
+		ct state established,related accept
+		ip protocol icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept
+		ip protocol icmp icmp type echo-request limit rate 10/second accept
+		meta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
+		meta l4proto ipv6-icmp icmpv6 type echo-request limit rate 10/second accept
+		udp sport 67 udp dport 68 accept
+		ip6 saddr fe80::/10 udp sport 547 udp dport 546 accept
+		ip saddr @admin4 tcp dport { 22, 80, 443 } accept
+		ip6 saddr @admin6 tcp dport { 22, 80, 443 } accept
+	}
+}

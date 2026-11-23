@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+[Unit]
+Description=Scanoria daily update check (only if auto_check)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/scanoria-helper scheduled update-check
+UMask=0027
+PrivateTmp=yes
+ProtectHome=read-only

@@ -1,0 +1,10 @@
+#!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# scanoria-selftest : lanceur de l'implémentation Python (bibliothèque standard),
+# /usr/lib/scanoria/py/scanoria/selftest.py. Fonctionne aussi depuis un lot extrait
+# (installation initiale : bash <lot>/rootfs/usr/sbin/scanoria-selftest …).
+set -euo pipefail
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+exec /usr/bin/python3 -I -B "$here/../lib/scanoria/py/run.py" selftest "$@"

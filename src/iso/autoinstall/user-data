@@ -1,0 +1,64 @@
+#cloud-config
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Installation sans intervention de l'appliance Scanoria (console seule).
+# Lu depuis /cdrom/nocloud/ (ds=nocloud;s=/cdrom/nocloud/ dans grub.cfg).
+# Aucun secret ici : le compte de maintenance est verrouillé jusqu'au premier
+# démarrage, où l'assistant demande les mots de passe.
+autoinstall:
+  version: 1
+  interactive-sections: []
+  refresh-installer:
+    update: false
+  # Refus sous le plancher D6 (2 vCPU, 4 Go, 40 Go), avant toute écriture disque.
+  early-commands:
+    - ["sh", "/cdrom/scanoria/check-hardware.sh"]
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  timezone: Etc/UTC
+  network:
+    version: 2
+    ethernets:
+      all-en:
+        match:
+          name: "en*"
+        dhcp4: true
+        optional: true
+      all-eth:
+        match:
+          name: "eth*"
+        dhcp4: true
+        optional: true
+  apt:
+    geoip: false
+    fallback: offline-install
+  source:
+    id: ubuntu-server
+    search_drivers: false
+  drivers:
+    install: false
+  storage:
+    layout:
+      name: lvm
+      sizing-policy: all
+      match:
+        size: largest
+  ssh:
+    install-server: true
+    allow-pw: true
+  updates: security
+  # Arrêt en fin d'installation : retirer le support avant de rallumer, sinon
+  # la machine redémarrerait sur l'installation.
+  shutdown: poweroff
+  user-data:
+    disable_root: true
+    users:
+      - name: sysadmin
+        gecos: Scanoria maintenance
+        groups: [sudo]
+        shell: /bin/bash
+        lock_passwd: true
+  late-commands:
+    - ["bash", "/cdrom/scanoria/late-install.sh"]

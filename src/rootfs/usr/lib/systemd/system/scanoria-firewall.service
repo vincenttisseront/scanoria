@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Charge la table nftables « inet scanoria » au démarrage, avant le réseau.
+[Unit]
+Description=Scanoria firewall (nftables table inet scanoria)
+DefaultDependencies=no
+After=local-fs.target systemd-tmpfiles-setup.service
+Before=network-pre.target shutdown.target
+Wants=network-pre.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/scanoria-firewall apply --boot
+ExecReload=/usr/sbin/scanoria-firewall apply --boot
+
+[Install]
+WantedBy=sysinit.target

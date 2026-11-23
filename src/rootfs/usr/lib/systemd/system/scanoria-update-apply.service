@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+[Unit]
+Description=Scanoria scheduled update (only if auto_apply, within the maintenance window)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/scanoria-helper scheduled update-apply
+UMask=0027
+PrivateTmp=yes
+ProtectHome=read-only

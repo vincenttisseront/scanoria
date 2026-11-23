@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scanoria:schema:request:set-update-policy:1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront. Contrat : docs/ARCHITECTURE.md.",
+  "title": "Politique de mise à jour",
+  "description": "Écrit /etc/scanoria/update.json : canal, recherche quotidienne, installation automatique dans une fenêtre de maintenance (jamais sans fenêtre).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "id",
+    "type",
+    "created_at",
+    "requested_by",
+    "params"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "type": {
+      "const": "set-update-policy"
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "requested_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user_id",
+        "username"
+      ],
+      "properties": {
+        "user_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "username": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 45,
+          "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}|[0-9a-f.]*:[0-9a-f:.]*)$"
+        }
+      }
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "enum": [
+            "stable",
+            "prerelease"
+          ]
+        },
+        "auto_check": {
+          "type": "boolean"
+        },
+        "auto_apply": {
+          "type": "boolean"
+        },
+        "maintenance_window": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "days": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 7,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri",
+                      "sat",
+                      "sun"
+                    ]
+                  }
+                },
+                "start": {
+                  "type": "string",
+                  "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+                },
+                "duration_minutes": {
+                  "type": "integer",
+                  "minimum": 30,
+                  "maximum": 480
+                }
+              },
+              "required": [
+                "days",
+                "start",
+                "duration_minutes"
+              ]
+            }
+          ]
+        }
+      },
+      "required": [
+        "channel",
+        "auto_check",
+        "auto_apply",
+        "maintenance_window"
+      ],
+      "if": {
+        "properties": {
+          "auto_apply": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "maintenance_window": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

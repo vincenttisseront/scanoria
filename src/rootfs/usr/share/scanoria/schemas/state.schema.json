@@ -1,0 +1,490 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scanoria:schema:state:1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront. Contrat : docs/ARCHITECTURE.md.",
+  "title": "État publié par scanoria-state",
+  "description": "/run/scanoria/state.json, réécrit atomiquement chaque minute et après chaque demande.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "generated_at",
+    "appliance",
+    "helper",
+    "update",
+    "tls",
+    "firewall",
+    "services",
+    "disks"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "appliance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fqdn": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 4,
+              "maxLength": 253,
+              "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+            }
+          ]
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$"
+        },
+        "previous_version": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$"
+            }
+          ]
+        },
+        "firstboot_done": {
+          "type": "boolean"
+        },
+        "cpu_count": {
+          "type": "integer"
+        },
+        "memory_mb": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fqdn",
+        "version",
+        "previous_version",
+        "firstboot_done",
+        "cpu_count",
+        "memory_mb"
+      ]
+    },
+    "helper": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "busy": {
+          "type": "boolean"
+        },
+        "current": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "type": {
+                  "enum": [
+                    "set-hostname",
+                    "set-admin-networks",
+                    "issue-certificate",
+                    "import-certificate",
+                    "check-update",
+                    "apply-update",
+                    "rollback-update",
+                    "set-update-policy",
+                    "run-selftest"
+                  ]
+                },
+                "step": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,31}$"
+                },
+                "started_at": {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+                }
+              },
+              "required": [
+                "id",
+                "type",
+                "step",
+                "started_at"
+              ]
+            }
+          ]
+        },
+        "queue_length": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "busy",
+        "current",
+        "queue_length"
+      ]
+    },
+    "update": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "enum": [
+            "stable",
+            "prerelease"
+          ]
+        },
+        "auto_check": {
+          "type": "boolean"
+        },
+        "auto_apply": {
+          "type": "boolean"
+        },
+        "maintenance_window": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        },
+        "last_check_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+            }
+          ]
+        },
+        "last_check_code": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "OK",
+                "E_INVALID_NAME",
+                "E_NOT_REGULAR_FILE",
+                "E_BAD_OWNER",
+                "E_TOO_LARGE",
+                "E_INVALID_JSON",
+                "E_UNKNOWN_TYPE",
+                "E_SCHEMA",
+                "E_ID_MISMATCH",
+                "E_DUPLICATE_ID",
+                "E_STALE",
+                "E_INVALID_PARAM",
+                "E_PRECONDITION",
+                "E_LOCKOUT",
+                "E_NETWORK",
+                "E_NOT_FOUND",
+                "E_SIGNATURE",
+                "E_CHECKSUM",
+                "E_ARCHIVE",
+                "E_VERSION",
+                "E_DISK_SPACE",
+                "E_CERT_INVALID",
+                "E_CERT_NAMES",
+                "E_CERT_KEY_MISMATCH",
+                "E_CERT_EXPIRED",
+                "E_NO_PREVIOUS",
+                "E_HEALTH_ROLLED_BACK",
+                "E_ROLLBACK_FAILED",
+                "E_TIMEOUT",
+                "E_INTERNAL"
+              ]
+            }
+          ]
+        },
+        "latest_version": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$"
+            }
+          ]
+        },
+        "skipped_version": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$"
+            }
+          ]
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "notes_md": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 65536
+            }
+          ]
+        },
+        "published_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+            }
+          ]
+        },
+        "source_url": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^https://github\\.com/"
+            }
+          ]
+        },
+        "alert": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "enum": [
+                    "E_ROLLBACK_FAILED"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "at": {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$"
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "at"
+              ]
+            }
+          ]
+        }
+      },
+      "required": [
+        "channel",
+        "auto_check",
+        "auto_apply",
+        "maintenance_window",
+        "last_check_at",
+        "latest_version",
+        "available"
+      ]
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "internal",
+            "imported",
+            "none"
+          ]
+        },
+        "subject_alt_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "not_before": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+            }
+          ]
+        },
+        "not_after": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+            }
+          ]
+        },
+        "fingerprint_sha256": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          ]
+        },
+        "ca_fingerprint_sha256": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          ]
+        },
+        "ca_not_after": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+            }
+          ]
+        }
+      },
+      "required": [
+        "mode",
+        "subject_alt_names",
+        "not_after",
+        "fingerprint_sha256",
+        "ca_fingerprint_sha256"
+      ]
+    },
+    "firewall": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "loaded": {
+          "type": "boolean"
+        },
+        "admin_networks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 49,
+            "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/([0-9]|[12][0-9]|3[0-2])|[0-9a-f.]*:[0-9a-f:.]*/([0-9]|[1-9][0-9]|1[01][0-9]|12[0-8]))$"
+          }
+        }
+      },
+      "required": [
+        "loaded",
+        "admin_networks"
+      ]
+    },
+    "services": {
+      "type": "object",
+      "additionalProperties": {
+        "enum": [
+          "active",
+          "inactive",
+          "failed",
+          "activating",
+          "deactivating",
+          "unknown"
+        ]
+      }
+    },
+    "disks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mount": {
+            "type": "string"
+          },
+          "size_mb": {
+            "type": "integer"
+          },
+          "avail_mb": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mount",
+          "size_mb",
+          "avail_mb"
+        ]
+      }
+    },
+    "selftest": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "enum": [
+                "pass",
+                "warn",
+                "fail"
+              ]
+            },
+            "finished_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+            }
+          },
+          "required": [
+            "status",
+            "finished_at"
+          ]
+        }
+      ]
+    }
+  }
+}

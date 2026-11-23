@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Déclenche scanoria-helper dès qu'une demande complète arrive dans incoming/.
+[Unit]
+Description=Scanoria request queue watcher
+
+[Path]
+PathExistsGlob=/var/lib/scanoria/requests/incoming/*.json
+Unit=scanoria-helper.service
+
+[Install]
+WantedBy=multi-user.target
