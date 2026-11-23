@@ -82,7 +82,10 @@ assert d == {"channel": "stable", "auto_check": True, "auto_apply": False, "main
 if command -v systemd-analyze > /dev/null; then
 	# Seules les erreurs de syntaxe comptent (les binaires ne sont pas installés ici).
 	systemd-analyze verify --man=no "$RF"/usr/lib/systemd/system/scanoria-* 2>&1 \
-		| grep -v 'is not executable: No such file or directory' > "$TMP/sa.log" || true
+		| grep -v 'is not executable: No such file or directory' \
+		| grep -F "$RF/" > "$TMP/sa.log" || true
+	# (seuls les messages qui portent sur nos unités : systemd-analyze vérifie
+	# aussi les unités dont elles dépendent, celles de l'hôte de test)
 	expect "unités systemd (systemd-analyze verify)" "$(cat "$TMP/sa.log")" ""
 fi
 grep -q '^NoNewPrivileges=yes' "$RF/usr/lib/systemd/system/scanoria-console.service" \

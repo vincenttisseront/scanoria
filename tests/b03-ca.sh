@@ -84,7 +84,7 @@ openssl verify -x509_strict -CAfile "$C" "$L" > /dev/null 2>&1 && ok "certificat
 for h in "$N" "www.$N"; do
 	openssl x509 -in "$L" -noout -checkhost "$h" | grep -q 'does match' && ok "certificat : couvre $h" || ko "certificat : $h"
 done
-openssl x509 -in "$L" -noout -checkhost "a.b.$N" | grep -q 'does NOT match' && ok "certificat : ne couvre pas a.b.$N" || ko "joker sur deux niveaux"
+openssl x509 -in "$L" -noout -checkhost "a.b.$N" | grep -qi 'does not match' && ok "certificat : ne couvre pas a.b.$N" || ko "joker sur deux niveaux"
 expect "certificat : clé 0600" "$(stat -c %a "$PKI/internal/privkey.pem")" 600
 expect "lien active → internal" "$(active)" internal
 expect "tls.json : internal" "$(jq -r .mode "$T/etc/scanoria/tls.json")" internal

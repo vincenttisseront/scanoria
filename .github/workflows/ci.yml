@@ -26,7 +26,7 @@ env:
 jobs:
   lint:
     name: lint (shell, workflows, dépôt)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -49,7 +49,7 @@ jobs:
 
   gitleaks:
     name: gitleaks (tout l'historique)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -66,7 +66,7 @@ jobs:
 
   osv-scanner:
     name: osv-scanner
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -82,7 +82,7 @@ jobs:
   dependency-review:
     name: dependency-review
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -93,7 +93,7 @@ jobs:
 
   console:
     name: console (lint, types, tests, construction)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -154,7 +154,7 @@ jobs:
 
   batteries:
     name: batteries shell (sans root)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -182,7 +182,7 @@ jobs:
 
   iso-build:
     name: construction (lot et ISO, sans démarrage)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     needs: [lint]
     permissions:
@@ -228,7 +228,7 @@ jobs:
 
   sonarqube:
     name: SonarQube Cloud
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: [console]
     permissions:
@@ -266,7 +266,7 @@ jobs:
     name: ci-ok
     if: always()
     needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
     steps:

@@ -24,7 +24,7 @@ permissions: {}
 jobs:
   boot-test:
     name: boot-test (installation et selftest)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:
       contents: read

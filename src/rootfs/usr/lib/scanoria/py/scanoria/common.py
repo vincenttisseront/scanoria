@@ -163,8 +163,36 @@ def _check_strings(obj):
             stack.extend(o)
 
 
+MAX_JSON_DEPTH = 32
+
+
+def _check_depth(text, limit=MAX_JSON_DEPTH):
+    """Refuse une imbrication > limit avant l'analyse (parcours linéaire,
+    indépendant de la limite de récursion de la version de Python)."""
+    depth = 0
+    in_str = False
+    esc = False
+    for ch in text:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch in "[{":
+            depth += 1
+            if depth > limit:
+                raise JsonError("nesting too deep")
+        elif ch in "]}":
+            depth -= 1
+
+
 def loads_strict(data):
-    """JSON UTF-8 sans BOM, sans clé dupliquée, sans NaN/Infinity."""
+    """JSON UTF-8 sans BOM, sans clé dupliquée, sans NaN/Infinity,
+    imbrication limitée à MAX_JSON_DEPTH."""
     if isinstance(data, bytes):
         if data.startswith(b"\xef\xbb\xbf"):
             raise JsonError("BOM")
@@ -172,6 +200,7 @@ def loads_strict(data):
             data = data.decode("utf-8", "strict")
         except UnicodeDecodeError as e:
             raise JsonError("not UTF-8") from e
+    _check_depth(data)
     try:
         obj = json.loads(data, object_pairs_hook=_no_dup, parse_constant=_bad_const)
         _check_strings(obj)
