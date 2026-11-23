@@ -15,6 +15,7 @@
 #       SCANORIA-SELFTEST-JSON <rapport scanoria-selftest --json en base64, une ligne>
 #       SCANORIA-SELFTEST-EXIT <code de sortie>
 #       SCANORIA-FIRSTBOOT-END ok|error
+#    (un marqueur peut suivre l'invite de connexion sur la même ligne)
 #    Délai : ISO_FIRSTBOOT_TIMEOUT (défaut 2400 s).
 # 3. Vérifications : code 0 (pass ou warn), rapport JSON lisible, aucune
 #    vérification « fail » ; /api/health de la console répond via nginx
@@ -155,7 +156,7 @@ log "premier démarrage sans intervention"
 	-fw_cfg "name=opt/scanoria/unattended.json,file=$answers" \
 	-serial "file:$serial"
 deadline=$((SECONDS + ${ISO_FIRSTBOOT_TIMEOUT:-2400}))
-until grep -q '^SCANORIA-FIRSTBOOT-END ' "$serial" 2> /dev/null; do
+until grep -q 'SCANORIA-FIRSTBOOT-END ' "$serial" 2> /dev/null; do
 	if ! vm_running; then
 		die "la machine s'est arrêtée avant la fin du premier démarrage"
 	fi
@@ -170,9 +171,9 @@ screenshot firstboot-end
 
 # --- 3. Vérifications ---------------------------------------------------------
 fail=0
-end=$(sed -n 's/^SCANORIA-FIRSTBOOT-END \([a-z]*\).*$/\1/p' "$serial" | tail -n 1)
-rc=$(sed -n 's/^SCANORIA-SELFTEST-EXIT \([0-9]*\).*$/\1/p' "$serial" | tail -n 1)
-sed -n 's/^SCANORIA-SELFTEST-JSON \([A-Za-z0-9+/=]*\).*$/\1/p' "$serial" | tail -n 1 \
+end=$(sed -n 's/^.*SCANORIA-FIRSTBOOT-END \([a-z]*\).*$/\1/p' "$serial" | tail -n 1)
+rc=$(sed -n 's/^.*SCANORIA-SELFTEST-EXIT \([0-9]*\).*$/\1/p' "$serial" | tail -n 1)
+sed -n 's/^.*SCANORIA-SELFTEST-JSON \([A-Za-z0-9+/=]*\).*$/\1/p' "$serial" | tail -n 1 \
 	| base64 -d > "$work/logs/selftest.json" 2> /dev/null || true
 log "premier démarrage : ${end:-?} ; scanoria-selftest : code ${rc:-?}"
 [[ "$end" == ok ]] || { echo "::error::premier démarrage en erreur"; fail=1; }
@@ -205,7 +206,7 @@ fi
 monitor system_powerdown
 wait_vm_exit 180 powerdown || true
 if [[ "$fail" -ne 0 ]]; then
-	grep -E '^SCANORIA-FIRSTBOOT-(FAILED-STEP|LOG) ' "$serial" || true
+	grep -E 'SCANORIA-FIRSTBOOT-(FAILED-STEP|LOG) ' "$serial" || true
 	dump_diagnostics
 	exit 1
 fi
