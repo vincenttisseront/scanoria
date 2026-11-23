@@ -1,0 +1,358 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Publication d'une version candidate (docs/RELEASING.md) : sur main, quand
+# VERSION change. Construit le lot de mise à jour, le signe (environment
+# « release », secret UPDATE_SIGNING_KEY), construit l'ISO autour du lot
+# signé, la teste dans QEMU/KVM, signe ses empreintes, vérifie tout avec
+# update-pubkey.pem versionné, puis publie une PRÉ-VERSION vX.Y.Z. La
+# promotion en version stable est faite par promote.yml, sans reconstruction.
+# Un numéro déjà publié (tag ou release existants) n'est jamais reconstruit.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  prepare:
+    name: préparation (main, numéro libre)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Publication réservée à main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::publication refusée hors de main (ref : $GITHUB_REF)"
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Cohérence du dépôt
+        run: .github/scripts/check-repo.sh
+      - id: version
+        name: Version
+        run: |
+          v=$(tr -d '[:space:]' < VERSION)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Version : $v" >> "$GITHUB_STEP_SUMMARY"
+      - name: Numéro jamais publié (tag et release absents)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null; then
+            echo "::error::le tag v$VERSION existe déjà : un numéro n'est jamais reconstruit (publier X.Y.Z+1)"
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" > /dev/null 2>&1; then
+            echo "::error::une release v$VERSION existe déjà"
+            exit 1
+          fi
+
+  # CLAUDE.md § 16 : jamais de publication sans CI verte. ci.yml tourne en
+  # parallèle sur ce même commit (environ 90 min avec iso-build) : on attend
+  # son contrôle « ci-ok » pendant que le lot et l'ISO se construisent.
+  ci-green:
+    name: CI verte sur le commit (ci-ok)
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      checks: read
+    steps:
+      - name: Attente de ci-ok réussi sur ce commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          end=$(( $(date +%s) + 170 * 60 ))
+          while :; do
+            state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=ci-ok&filter=latest" \
+              --jq '(.check_runs | sort_by(.started_at) | last) // {} | "\(.status // "absent")/\(.conclusion // "none")"')
+            case "$state" in
+              completed/success)
+                echo "ci-ok réussi sur $GITHUB_SHA"; exit 0 ;;
+              completed/*)
+                echo "::error::ci-ok en échec sur $GITHUB_SHA ($state) : aucune publication"; exit 1 ;;
+            esac
+            if [ "$(date +%s)" -ge "$end" ]; then
+              echo "::error::ci-ok toujours absent ou en cours sur $GITHUB_SHA ($state)"; exit 1
+            fi
+            echo "ci-ok : $state, nouvelle lecture dans 60 s"
+            sleep 60
+          done
+
+  bundle:
+    name: lot de mise à jour
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: ./build.sh --bundle
+        run: ./build.sh --bundle --engine docker
+      - name: Contrôle (version, deux lignes dans SHA256SUMS)
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          jq -e --arg v "$VERSION" --arg c "$GITHUB_SHA" '.release == $v and .commit == $c' out/release.json
+          test "$(wc -l < out/SHA256SUMS)" -eq 2
+          (cd out && sha256sum --check --strict SHA256SUMS)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-unsigned
+          path: |
+            out/scanoria-${{ needs.prepare.outputs.version }}.tar.zst
+            out/release.json
+            out/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  sign-bundle:
+    name: signature du lot
+    needs: [prepare, bundle]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            update-pubkey.pem
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bundle-unsigned
+          path: dist
+      - name: Signature de SHA256SUMS (Ed25519 brute)
+        env:
+          SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: .github/scripts/sign-assets.sh update-pubkey.pem dist/SHA256SUMS
+      - name: Vérification avec update-pubkey.pem versionné
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: .github/scripts/verify-release-assets.sh dist "$VERSION" update-pubkey.pem
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-signed
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  iso:
+    name: ISO (construction et test de démarrage)
+    needs: [prepare, sign-bundle]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Place disque
+        run: .github/scripts/free-disk-space.sh
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bundle-signed
+          path: out
+      - name: Lot signé vérifié avant usage
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: .github/scripts/verify-release-assets.sh out "$VERSION" update-pubkey.pem
+      - name: KVM et QEMU
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            qemu-system-x86 qemu-utils socat netpbm jq
+      - name: ./build.sh --iso (autour du lot signé, sans le reconstruire)
+        env:
+          SCANORIA_REUSE_BUNDLE: "1"
+        run: ./build.sh --iso --engine docker
+      - name: Installation et premier démarrage dans QEMU/KVM
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: .github/scripts/iso-boot-test.sh "out/scanoria-$VERSION-amd64.iso" "$RUNNER_TEMP/boot"
+      - name: Journaux du test de démarrage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iso-boot-logs
+          path: ${{ runner.temp }}/boot/logs
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Découpage (< 2 Gio par actif de release)
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          rm -rf out/cache out/stage
+          .github/scripts/split-iso.sh out "$VERSION"
+          mkdir -p iso-sums
+          cp "out/scanoria-$VERSION-amd64.iso.SHA256SUMS" iso-sums/
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iso-parts
+          path: out/scanoria-${{ needs.prepare.outputs.version }}-amd64.iso.part*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iso-sums
+          path: iso-sums/
+          if-no-files-found: error
+          retention-days: 7
+
+  sign-iso:
+    name: signature des empreintes de l'ISO
+    needs: [prepare, iso]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            update-pubkey.pem
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: iso-sums
+          path: dist
+      - name: Signature
+        env:
+          SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: .github/scripts/sign-assets.sh update-pubkey.pem "dist/scanoria-$VERSION-amd64.iso.SHA256SUMS"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iso-sums-signed
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: publication de la pré-version
+    needs: [prepare, ci-green, sign-bundle, iso, sign-iso]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - name: Publication réservée à main
+        if: github.ref != 'refs/heads/main'
+        run: exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            update-pubkey.pem
+          sparse-checkout-cone-mode: false
+      - name: Place disque
+        run: .github/scripts/free-disk-space.sh
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bundle-signed
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: iso-sums-signed
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: iso-parts
+          path: dist
+      - name: Vérification complète avant publication (update-pubkey.pem versionné)
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          .github/scripts/verify-release-assets.sh dist "$VERSION" update-pubkey.pem --iso
+          jq -e --arg c "$GITHUB_SHA" '.commit == $c' dist/release.json
+      - name: Numéro toujours libre (brouillons compris)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/v$VERSION" > /dev/null; then
+            echo "::error::le tag v$VERSION existe déjà"; exit 1
+          fi
+          n=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq "[.[] | select(.tag_name == \"v$VERSION\")] | length" | awk '{s += $1} END {print s + 0}')
+          if [ "$n" -ne 0 ]; then
+            echo "::error::une release v$VERSION existe déjà (brouillon compris)"; exit 1
+          fi
+      - name: Notes de version (section du CHANGELOG, signée dans release.json)
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          {
+            jq -r .notes_md dist/release.json
+            echo
+            echo "---"
+            echo
+            echo "**ISO d'installation / Installation ISO** : \`scanoria-$VERSION-amd64.iso.partNN\`, à concaténer dans l'ordre"
+            echo "(\`cat scanoria-$VERSION-amd64.iso.part* > scanoria-$VERSION-amd64.iso\`), puis vérifier"
+            echo "\`scanoria-$VERSION-amd64.iso.SHA256SUMS\` et sa signature \`.sig\` (docs/RELEASING.md)."
+          } > "$RUNNER_TEMP/notes.md"
+      - name: Pré-version v${{ needs.prepare.outputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          cd dist
+          gh release create "v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease --latest=false \
+            --title "Scanoria $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "scanoria-$VERSION.tar.zst" release.json SHA256SUMS SHA256SUMS.sig \
+            "scanoria-$VERSION-amd64.iso.SHA256SUMS" "scanoria-$VERSION-amd64.iso.SHA256SUMS.sig" \
+            "scanoria-$VERSION-amd64.iso".part*
+      - name: Vérification depuis les adresses publiques (comme l'appliance)
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          d="$RUNNER_TEMP/public"
+          mkdir -p "$d"
+          for a in SHA256SUMS SHA256SUMS.sig release.json "scanoria-$VERSION.tar.zst"; do
+            curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-all-errors -o "$d/$a" \
+              "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/$a"
+          done
+          .github/scripts/verify-release-assets.sh "$d" "$VERSION" update-pubkey.pem
+          {
+            echo "Pré-version publiée : https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION"
+            echo "Promotion après validation : workflow « Promote » (docs/RELEASING.md)."
+          } >> "$GITHUB_STEP_SUMMARY"

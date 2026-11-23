@@ -1,0 +1,170 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Promotion d'une version candidate en version stable (releases/latest), ou
+# rejet (titre préfixé « [rejected] »), SANS reconstruction (docs/RELEASING.md).
+#
+# Déclencheurs :
+#   - workflow_dispatch (version, action) depuis main ;
+#   - repository_dispatch « scanoria-validation », envoyé par l'instance de
+#     validation (AWX) après avoir posé son statut de commit, avec
+#     client_payload = {"version": "X.Y.Z", "action": "promote" | "reject"}.
+#
+# Promotion seulement si : la release vX.Y.Z existe, est une pré-version
+# publiée (ni brouillon ni déjà stable), n'est pas marquée [rejected], ses
+# actifs sont toujours valides (signature vérifiée avec update-pubkey.pem
+# versionné), « ci-ok » a réussi sur son commit, le DERNIER statut de commit
+# « scanoria/validation » de ce commit est « success », et la version est
+# strictement supérieure à la version stable actuelle.
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version candidate (X.Y.Z)"
+        required: true
+        type: string
+      action:
+        description: "promote = version stable ; reject = candidate rejetée"
+        required: true
+        default: promote
+        type: choice
+        options: [promote, reject]
+  repository_dispatch:
+    types: [scanoria-validation]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  promote:
+    name: promotion ou rejet
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      statuses: read
+      checks: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # Entrées non fiables : passées par l'environnement, validées ci-dessous.
+      IN_VERSION: ${{ github.event.inputs.version || github.event.client_payload.version }}
+      IN_ACTION: ${{ github.event.inputs.action || github.event.client_payload.action }}
+    steps:
+      - name: Entrées et branche
+        id: in
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::promotion refusée hors de main (ref : $GITHUB_REF)"; exit 1
+          fi
+          if ! printf '%s' "$IN_VERSION" | grep -Eqx '(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})'; then
+            echo "::error::version invalide"; exit 1
+          fi
+          case "$IN_ACTION" in promote|reject) ;; *) echo "::error::action invalide"; exit 1 ;; esac
+          {
+            echo "version=$IN_VERSION"
+            echo "action=$IN_ACTION"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            update-pubkey.pem
+          sparse-checkout-cone-mode: false
+      - name: Release candidate
+        id: rel
+        env:
+          VERSION: ${{ steps.in.outputs.version }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" > "$RUNNER_TEMP/release.json"; then
+            echo "::error::release v$VERSION introuvable"; exit 1
+          fi
+          jq -e '.draft == false' "$RUNNER_TEMP/release.json" > /dev/null \
+            || { echo "::error::v$VERSION est un brouillon"; exit 1; }
+          jq -e '.prerelease == true' "$RUNNER_TEMP/release.json" > /dev/null \
+            || { echo "::error::v$VERSION n'est pas (ou plus) une pré-version"; exit 1; }
+          jq -e '.name | startswith("[rejected]") | not' "$RUNNER_TEMP/release.json" > /dev/null \
+            || { echo "::error::v$VERSION est marquée [rejected]"; exit 1; }
+          # Commit du tag (tag léger ou annoté).
+          ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION")
+          sha=$(echo "$ref" | jq -r .object.sha)
+          if [ "$(echo "$ref" | jq -r .object.type)" = tag ]; then
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$sha" --jq .object.sha)
+          fi
+          echo "$sha" | grep -Eqx '[0-9a-f]{40}' || { echo "::error::commit du tag introuvable"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "title=$(jq -r .name "$RUNNER_TEMP/release.json")" >> "$GITHUB_OUTPUT"
+      - name: Rejet
+        if: steps.in.outputs.action == 'reject'
+        env:
+          VERSION: ${{ steps.in.outputs.version }}
+          TITLE: ${{ steps.rel.outputs.title }}
+        run: |
+          gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "[rejected] $TITLE"
+          echo "v$VERSION marquée [rejected] : elle ne sera jamais proposée aux appliances. Corriger par une version suivante." \
+            >> "$GITHUB_STEP_SUMMARY"
+      - name: ci-ok vert sur le commit
+        if: steps.in.outputs.action == 'promote'
+        env:
+          SHA: ${{ steps.rel.outputs.sha }}
+        run: |
+          c=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?check_name=ci-ok&filter=latest" \
+            --jq '[.check_runs[] | select(.conclusion == "success")] | length')
+          if [ "$c" -lt 1 ]; then
+            echo "::error::aucun contrôle ci-ok réussi sur $SHA"; exit 1
+          fi
+      - name: Statut « scanoria/validation » vert (instance de validation)
+        if: steps.in.outputs.action == 'promote'
+        env:
+          SHA: ${{ steps.rel.outputs.sha }}
+        run: |
+          # L'API rend les statuts du plus récent au plus ancien : seul le
+          # dernier statut du contexte compte.
+          state=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$SHA/statuses?per_page=100" \
+            --jq '.[] | select(.context == "scanoria/validation") | .state' | awk 'NR == 1')
+          if [ "$state" != success ]; then
+            echo "::error::statut scanoria/validation de $SHA : ${state:-absent} (success attendu)"; exit 1
+          fi
+      - name: Actifs inchangés et signés (aucune reconstruction)
+        if: steps.in.outputs.action == 'promote'
+        env:
+          VERSION: ${{ steps.in.outputs.version }}
+        run: |
+          d="$RUNNER_TEMP/assets"
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --dir "$d" \
+            --pattern SHA256SUMS --pattern SHA256SUMS.sig --pattern release.json \
+            --pattern "scanoria-$VERSION.tar.zst" \
+            --pattern "scanoria-$VERSION-amd64.iso.SHA256SUMS" --pattern "scanoria-$VERSION-amd64.iso.SHA256SUMS.sig"
+          .github/scripts/verify-release-assets.sh "$d" "$VERSION" update-pubkey.pem
+          openssl pkeyutl -verify -pubin -inkey update-pubkey.pem -rawin \
+            -in "$d/scanoria-$VERSION-amd64.iso.SHA256SUMS" -sigfile "$d/scanoria-$VERSION-amd64.iso.SHA256SUMS.sig"
+      - name: Version supérieure à la version stable actuelle
+        if: steps.in.outputs.action == 'promote'
+        env:
+          VERSION: ${{ steps.in.outputs.version }}
+        run: |
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)
+          latest=${latest#v}
+          if [ -n "$latest" ]; then
+            top=$(printf '%s\n%s\n' "$latest" "$VERSION" | sort -V | tail -n 1)
+            if [ "$latest" = "$VERSION" ] || [ "$top" != "$VERSION" ]; then
+              echo "::error::v$VERSION n'est pas supérieure à la version stable actuelle v$latest"; exit 1
+            fi
+          fi
+      - name: Promotion en version stable
+        if: steps.in.outputs.action == 'promote'
+        env:
+          VERSION: ${{ steps.in.outputs.version }}
+        run: |
+          gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
+          got=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          if [ "$got" != "v$VERSION" ]; then
+            echo "::error::releases/latest = $got après promotion"; exit 1
+          fi
+          echo "v$VERSION promue en version stable : https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" \
+            >> "$GITHUB_STEP_SUMMARY"

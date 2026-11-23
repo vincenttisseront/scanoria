@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Test de démarrage de l'ISO (docs/TESTING.md) : construction, installation
+# sans intervention dans QEMU/KVM, premier démarrage sans intervention, puis
+# scanoria-selftest et /api/health. Trop long pour chaque PR (ci.yml construit
+# l'ISO sans la démarrer) : lancé sur main, à la demande, et chaque semaine.
+# release.yml refait ce test sur l'ISO publiée.
+name: ISO
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "41 4 * * 2"
+
+concurrency:
+  group: iso-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  boot-test:
+    name: boot-test (installation et selftest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Place disque
+        run: .github/scripts/free-disk-space.sh
+      - name: KVM et QEMU
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            qemu-system-x86 qemu-utils socat netpbm jq
+          ls -l /dev/kvm
+      - name: Cache des téléchargements vérifiés (ISO de base, Node.js, paquets)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: out/cache
+          key: iso-cache-${{ hashFiles('src/iso/*.env', 'src/iso/packages.list') }}
+      - name: ./build.sh --iso
+        run: ./build.sh --iso --engine docker
+      - name: Installation et premier démarrage dans QEMU/KVM
+        run: |
+          iso=$(find out -maxdepth 1 -name 'scanoria-*-amd64.iso' -print -quit)
+          .github/scripts/iso-boot-test.sh "$iso" "$RUNNER_TEMP/boot"
+      - name: Journaux du test de démarrage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iso-boot-logs
+          path: ${{ runner.temp }}/boot/logs
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,287 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Intégration continue (docs/CI-CD.md). Le contrôle requis par la protection de
+# main est « ci-ok », qui résume tous les travaux ci-dessous. Le test de
+# démarrage de l'ISO (installation dans QEMU/KVM) est dans iso.yml.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Sur une PR, une nouvelle poussée annule l'exécution dépassée. Sur main, chaque
+# commit garde sa CI jusqu'au bout (groupe par SHA) : promote.yml exige un
+# ci-ok réussi sur le commit exact du tag.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  lint:
+    name: lint (shell, workflows, dépôt)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Outils (versions et empreintes épinglées)
+        run: |
+          .github/scripts/install-tools.sh "$RUNNER_TEMP/tools" shellcheck actionlint
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - name: Cohérence du dépôt (VERSION, CHANGELOG, clé publique, actions épinglées)
+        run: .github/scripts/check-repo.sh
+      - name: shellcheck
+        run: .github/scripts/lint-shell.sh
+      - name: actionlint
+        run: actionlint -color
+      - name: Chaîne de signature (clés jetables)
+        run: .github/scripts/test-release-chain.sh
+
+  gitleaks:
+    name: gitleaks (tout l'historique)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks
+        run: |
+          .github/scripts/install-tools.sh "$RUNNER_TEMP/tools" gitleaks
+          "$RUNNER_TEMP/tools/gitleaks" git --config .gitleaks.toml --redact --no-banner \
+            --exit-code 1 --log-opts="--all" .
+
+  osv-scanner:
+    name: osv-scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: osv-scanner (exceptions datées dans osv-scanner.toml)
+        run: |
+          .github/scripts/install-tools.sh "$RUNNER_TEMP/tools" osv-scanner
+          "$RUNNER_TEMP/tools/osv-scanner" scan source --config osv-scanner.toml --recursive .
+
+  dependency-review:
+    name: dependency-review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: moderate
+
+  console:
+    name: console (lint, types, tests, construction)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    services:
+      postgres:
+        # postgres:16, épinglée par empreinte (relevée le 2026-11-23).
+        image: postgres:16@sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f
+        env:
+          # Base jetable du runner, joignable seulement en local : pas de mot de passe.
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=en_US.UTF-8
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres@127.0.0.1:5432/postgres
+      NUXT_TELEMETRY_DISABLED: "1"
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+      - name: Locale de la base (en_US.UTF-8)
+        run: |
+          psql "$DATABASE_URL" -Atc "SELECT datcollate FROM pg_database WHERE datname = 'postgres'" \
+            | grep -qx 'en_US.UTF-8'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: Tests unitaires et d'intégration (couverture lcov)
+        run: >-
+          npm run test --
+          --coverage.enabled=true
+          --coverage.provider=v8
+          --coverage.reporter=lcov
+          --coverage.reporter=text-summary
+          --coverage.reportsDirectory=coverage
+      - run: npm run build
+      - name: Tests de bout en bout (serveur construit)
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-console
+          path: webui/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 7
+
+  batteries:
+    name: batteries shell (sans root)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Dépendances des batteries
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            jq zstd xorriso gnupg openssl python3-yaml python3-jsonschema
+          .github/scripts/install-tools.sh "$RUNNER_TEMP/tools" shellcheck
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - name: tests/b*.sh
+        run: .github/scripts/run-batteries.sh
+      - name: Contrôles réservés à root (nginx -t, nft -c dans b03 et b04)
+        run: |
+          sudo apt-get install -y -q --no-install-recommends nginx nftables
+          sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b03-ca.sh
+          sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b04-system-static.sh
+
+  iso-build:
+    name: construction (lot et ISO, sans démarrage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [lint]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Place disque
+        run: .github/scripts/free-disk-space.sh
+      - name: Cache des téléchargements vérifiés (ISO de base, Node.js, paquets)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: out/cache
+          key: iso-cache-${{ hashFiles('src/iso/*.env', 'src/iso/packages.list') }}
+      - name: ./build.sh --iso
+        run: ./build.sh --iso --engine docker
+      - name: Batteries de construction (lot et ISO produits)
+        env:
+          SCANORIA_OUT: ${{ github.workspace }}/out
+        # b21 contrôle le lot et l'ISO produits ; b30 signe et vérifie le lot
+        # produit avec des clés jetables (test-release-chain.sh).
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            jq zstd xorriso gnupg openssl python3-yaml python3-jsonschema
+          .github/scripts/install-tools.sh "$RUNNER_TEMP/tools" shellcheck
+          PATH="$RUNNER_TEMP/tools:$PATH"
+          .github/scripts/run-batteries.sh 'b2[0-9]-*.sh'
+          .github/scripts/run-batteries.sh 'b3[0-9]-*.sh'
+      - name: Lot de mise à jour (artefact, non signé)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-unsigned
+          path: |
+            out/scanoria-*.tar.zst
+            out/release.json
+            out/SHA256SUMS
+            out/scanoria-*-amd64.iso.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  sonarqube:
+    name: SonarQube Cloud
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [console]
+    permissions:
+      contents: read
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-console
+          path: webui/coverage
+      # Seule une PR venant d'un fork peut se passer du jeton (les secrets n'y
+      # sont pas transmis) ; partout ailleurs, un jeton absent fait échouer ci-ok.
+      - name: Jeton absent (PR depuis un fork)
+        if: env.SONAR_TOKEN == '' && github.event.pull_request.head.repo.fork == true
+        run: echo "::notice::SONAR_TOKEN indisponible ; l'analyse SonarQube Cloud de cette PR est faite après fusion."
+      - name: Jeton absent hors PR de fork
+        if: env.SONAR_TOKEN == '' && github.event.pull_request.head.repo.fork != true
+        run: |
+          echo "::error::SONAR_TOKEN absent : l'analyse SonarQube Cloud et son quality gate sont obligatoires."
+          exit 1
+      - name: Analyse et quality gate
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # v8.5.0
+        with:
+          args: >-
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=600
+
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Résumé
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          # Seul dependency-review peut être « skipped » (hors PR).
+          bad=$(echo "$NEEDS" | jq -r 'to_entries[]
+            | select(.value.result != "success"
+                and not (.key == "dependency-review" and .value.result == "skipped"))
+            | .key')
+          if [ -n "$bad" ]; then
+            echo "::error::travaux en échec, annulés ou sautés : $(echo "$bad" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "ci-ok : tous les travaux ont réussi"
