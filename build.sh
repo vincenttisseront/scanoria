@@ -306,7 +306,9 @@ build_webui() { # work
 	[[ -f "$1/webui/package.json" ]] || die "webui/package.json absent"
 	(
 		cd "$1/webui"
-		npm ci --no-audit --no-fund --loglevel=error
+		# Sans scripts d'installation des dépendances ; préparation Nuxt explicite.
+		npm ci --ignore-scripts --no-audit --no-fund --loglevel=error
+		npx nuxt prepare
 		npm run build
 	)
 	[[ -f "$1/webui/.output/server/index.mjs" ]] || die "la construction n'a pas produit webui/.output"

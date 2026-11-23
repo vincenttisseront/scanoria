@@ -17,7 +17,12 @@ const SALT_BYTES = 16
 const HASH_BYTES = 32
 const PHC_RE = /^\$pbkdf2-sha256\$i=([0-9]{6,7})\$([A-Za-z0-9+/]{22})\$([A-Za-z0-9+/]{43})$/
 
-const b64 = (buf: Buffer) => buf.toString('base64').replace(/=+$/, '')
+const b64 = (buf: Buffer) => {
+  const s = buf.toString('base64')
+  let end = s.length
+  while (end > 0 && s[end - 1] === '=') end--
+  return s.slice(0, end)
+}
 
 export async function hashPassword(password: string, iterations = PBKDF2_ITERATIONS): Promise<string> {
   if (iterations < PBKDF2_MIN_ITERATIONS || iterations > PBKDF2_MAX_ITERATIONS) {

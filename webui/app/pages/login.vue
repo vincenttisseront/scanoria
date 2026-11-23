@@ -76,6 +76,7 @@ async function onSubmit(event: FormSubmitEvent<{ username: string, password: str
         >
           <UInput
             v-model="form.username"
+            type="text"
             autocomplete="username"
             autofocus
             class="w-full"

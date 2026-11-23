@@ -131,7 +131,10 @@ jobs:
         run: |
           psql "$DATABASE_URL" -Atc "SELECT datcollate FROM pg_database WHERE datname = 'postgres'" \
             | grep -qx 'en_US.UTF-8'
-      - run: npm ci
+      # Sans scripts d'installation des dépendances ; seule la préparation Nuxt
+      # (postinstall du projet) est lancée explicitement.
+      - run: npm ci --ignore-scripts
+      - run: npx nuxt prepare
       - run: npm run lint
       - run: npm run typecheck
       - name: Tests unitaires et d'intégration (couverture lcov)

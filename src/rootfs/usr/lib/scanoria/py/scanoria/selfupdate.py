@@ -431,13 +431,58 @@ def _member_rel(name, prefix):
     return "/".join(parts[1:])
 
 
+# Arborescence d'une version : root:scanoria, rien pour les autres (la console,
+# utilisateur scanoria, la lit et l'exécute ; personne d'autre n'en a besoin).
+RELEASE_DIR_MODE = 0o750
+RELEASE_EXEC_MODE = 0o750
+RELEASE_FILE_MODE = 0o640
+
+
+def _own_release(fd, mode):
+    os.fchmod(fd, mode)
+    if not common.TEST_ROOT:
+        os.fchown(fd, 0, common.scanoria_ids()[1])
+
+
+def _contained(base_real, rel):
+    """Chemin absolu de rel sous base_real, refusé s'il en sort (Zip Slip),
+    en plus des contrôles de _member_rel."""
+    target = os.path.realpath(os.path.join(base_real, rel)) if rel else base_real
+    if target != base_real and not target.startswith(base_real + os.sep):
+        raise Fail("E_ARCHIVE", "path traversal in archive")
+    return target
+
+
+def _mkdirs_release(base_real, path):
+    """Crée les répertoires de path sous base_real, root:scanoria 0750."""
+    path = _contained(base_real, os.path.relpath(path, base_real) if path != base_real else "")
+    todo = []
+    cur = path
+    while cur != base_real and not os.path.lexists(cur):
+        todo.append(cur)
+        cur = os.path.dirname(cur)
+    for d in reversed(todo):
+        os.mkdir(d, 0o700)
+        fd = os.open(d, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            _own_release(fd, RELEASE_DIR_MODE)
+        finally:
+            os.close(fd)
+
+
 def extract(archive, version, dest_parent=None):
     dest_parent = dest_parent or RELEASES
     os.makedirs(dest_parent, mode=0o755, exist_ok=True)
     final = os.path.join(dest_parent, version)
     tmp = final + ".tmp"
     shutil.rmtree(tmp, ignore_errors=True)
-    os.mkdir(tmp, 0o755)
+    os.mkdir(tmp, 0o700)
+    tmp_real = os.path.realpath(tmp)
+    fd = os.open(tmp_real, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        _own_release(fd, RELEASE_DIR_MODE)
+    finally:
+        os.close(fd)
     prefix = "scanoria-" + version
     zstd = common.resolve("zstd")
     if zstd is None:
@@ -452,9 +497,9 @@ def extract(archive, version, dest_parent=None):
                 if count > MAX_MEMBERS:
                     raise Fail("E_ARCHIVE", "too many members")
                 rel = _member_rel(m.name, prefix)
-                target = os.path.join(tmp, rel) if rel else tmp
+                target = _contained(tmp_real, rel)
                 if m.isdir():
-                    os.makedirs(target, mode=0o755, exist_ok=True)
+                    _mkdirs_release(tmp_real, target)
                     continue
                 if not m.isreg() or not rel:
                     raise Fail("E_ARCHIVE", "links and special files are not allowed")
@@ -462,19 +507,19 @@ def extract(archive, version, dest_parent=None):
                 if total > MAX_EXTRACTED:
                     raise Fail("E_ARCHIVE", "archive expands too much")
                 parent = os.path.dirname(target)
-                os.makedirs(parent, mode=0o755, exist_ok=True)
+                _mkdirs_release(tmp_real, parent)
                 if os.path.islink(parent) or not os.path.isdir(parent):
                     raise Fail("E_ARCHIVE", "invalid directory in archive")
                 execok = (m.mode & 0o111) and rel.startswith(EXEC_PREFIXES)
+                fmode = RELEASE_EXEC_MODE if execok else RELEASE_FILE_MODE
                 try:
-                    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                                 0o755 if execok else 0o644)
+                    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
                 except FileExistsError:
                     raise Fail("E_ARCHIVE", "duplicate member in archive")
                 src = tf.extractfile(m)
                 with os.fdopen(fd, "wb") as out:
+                    _own_release(out.fileno(), fmode)
                     shutil.copyfileobj(src, out, 1 << 20)
-                os.chmod(target, 0o755 if execok else 0o644)
     except (tarfile.TarError, EOFError, OSError) as e:
         shutil.rmtree(tmp, ignore_errors=True)
         raise Fail("E_ARCHIVE", "unreadable archive: %s" % type(e).__name__)
