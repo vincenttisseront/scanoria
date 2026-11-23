@@ -281,7 +281,7 @@ jobs:
           # Seul dependency-review peut être « skipped » (hors PR).
           bad=$(echo "$NEEDS" | jq -r 'to_entries[]
             | select(.value.result != "success"
-                and not (.key == "dependency-review" and .value.result == "skipped"))
+                and ((.key == "dependency-review" and .value.result == "skipped") | not))
             | .key')
           if [ -n "$bad" ]; then
             echo "::error::travaux en échec, annulés ou sautés : $(echo "$bad" | tr '\n' ' ')"
