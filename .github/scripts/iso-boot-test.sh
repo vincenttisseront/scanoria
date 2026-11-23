@@ -27,7 +27,30 @@
 set -euo pipefail
 umask 077
 
-die() { echo "::error::iso-boot-test: $*" >&2; exit 1; }
+die() {
+	echo "::error::iso-boot-test: $*" >&2
+	dump_diagnostics
+	exit 1
+}
+# Les artefacts ne sont pas toujours lisibles par qui diagnostique : les fins
+# des journaux série et les dernières captures (PNG en base64, une ligne
+# chacune, marqueur SCANORIA-SCREENSHOT) vont aussi dans le journal du job.
+# Aucun secret à l'écran : les mots de passe ne passent que par fw_cfg.
+dump_diagnostics() {
+	local f
+	for f in "${work:-/nonexistent}"/logs/*-serial.log; do
+		[[ -s "$f" ]] || continue
+		echo "::group::$(basename "$f") (200 dernières lignes)"
+		tail -n 200 "$f" | tr -d '\r' | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g'
+		echo "::endgroup::"
+	done
+	echo "::group::captures d'écran (base64)"
+	find "${work:-/nonexistent}/logs" -maxdepth 1 -name '*.png' -printf '%T@ %p\n' 2> /dev/null \
+		| sort -n | tail -n 3 | while read -r _ f; do
+		echo "SCANORIA-SCREENSHOT $(basename "$f") $(base64 -w0 "$f")"
+	done
+	echo "::endgroup::"
+}
 log() { echo "iso-boot-test: $*"; }
 
 [[ $# -eq 2 ]] || die "usage : iso-boot-test.sh ISO RÉPERTOIRE_DE_TRAVAIL"
