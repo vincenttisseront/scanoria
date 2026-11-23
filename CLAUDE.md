@@ -1,0 +1,432 @@
+# Scanoria — appliance d'analyse de code on-prem — contexte projet
+
+> Fichier de contexte du dépôt, à la racine sous le nom `CLAUDE.md`.
+> Nom du produit : **Scanoria** (affiché), `scanoria` (commandes, paquets, chemins, base de données). Les décisions encore ouvertes sont listées en section 14.
+
+## 1. Objet
+
+Une **appliance ISO, construite sur Ubuntu Server 24.04 LTS**. Elle installe sur une VM ou un serveur de l'entreprise **tous les outils gratuits d'analyse de code**, administrés depuis **une seule console web** :
+
+- qualité ;
+- secrets ;
+- vulnérabilités des dépendances ;
+- SAST ;
+- IaC ;
+- conteneurs ;
+- SBOM ;
+- DAST.
+
+**À l'installation, l'appliance ne contient que la console web.** Chaque outil s'ajoute ensuite selon le besoin depuis un **catalogue modulaire**, où l'on peut aussi le mettre à jour, le désactiver ou le retirer. Chaque application installée est **accessible par son nom** (`sonarqube.<appliance>`…).
+
+L'appliance analyse les dépôts Git de l'entreprise, réunit les résultats dans un format commun et applique des **quality gates**. La CI définie pour chaque dépôt fait passer **chaque release par tous les outils installés** : la release n'est publiée que si l'appliance rend un verdict favorable (section 7).
+
+Besoin d'origine : n'utiliser **que des outils gratuits**, en SaaS gratuit ou déployés on-prem. Les dépôts **privés** ne doivent pas dépendre de services payants : SonarQube Cloud et CodeQL sont gratuits seulement pour le code public.
+
+Hors périmètre initial : la haute disponibilité (un seul nœud), le multi-tenant, et l'« IA partout ». Une aide par un modèle local n'est envisageable que via un connecteur **Ollama externe** optionnel, désactivé par défaut, sur un cas réellement utile, par exemple expliquer un résultat.
+
+## 2. Principes non négociables
+
+1. **Logiciels libres ou gratuits uniquement.** Chaque module déclare sa licence dans son manifeste. Une licence qui interdit l'usage sur du code privé ou la redistribution est signalée dans la console et bloque l'activation tant qu'elle n'est pas acceptée explicitement (section 5).
+2. **On-prem et hors ligne possible.** Une appliance sans Internet fonctionne avec des **lots hors ligne signés** : images des modules et bases de vulnérabilités.
+3. **Code générique.** Aucun nom d'infrastructure, de domaine ni de client réel dans le dépôt. Les exemples utilisent `exemple.test` et les plages de documentation (RFC 5737). Aucun fournisseur n'est imposé quand un standard existe : LDAP/AD, OIDC, forge Git quelconque.
+4. **Frontière de privilèges.** La console web tourne **sans privilège**. Elle **dépose des demandes** (fichiers JSON dans un répertoire de demandes) qu'un service **root** valide strictement puis exécute : installation de module, unités systemd, pare-feu, mises à jour. Elle **lit** l'état publié par ce service. Le service root ne fait confiance à rien dans la demande.
+5. **Isolation des analyses.** Le code analysé n'est jamais exécuté par défaut, et chaque scanner tourne dans un **conteneur jetable et confiné** (section 6.4).
+6. **Tout ce qui est livré est signé**, avec une clé Ed25519 dont la clé publique est épinglée dans l'appliance : mises à jour de l'appliance, index du catalogue, lots hors ligne. Images de conteneurs **épinglées par empreinte** (`@sha256:`), jamais par étiquette.
+7. **Règles d'interface permanentes** :
+   - toute action un peu longue affiche un **indicateur d'attente** ;
+   - toutes les **boîtes de dialogue sont des modales de la console**, jamais `alert`/`confirm` ;
+   - la console est en **français et anglais** dès le départ.
+
+## 3. Architecture
+
+```
+┌──────────────────────────── appliance (Ubuntu Server 24.04) ─────────────────────────────┐
+│  nftables ─ proxy inverse TLS (nginx) ─┬─ console (Nuxt 4, Node 22, utilisateur dédié)     │
+│                                        ├─ interfaces web des modules « service »            │
+│                                        │    (SonarQube, Dependency-Track, DefectDojo…)      │
+│  PostgreSQL 16 ── base de la console + bases des modules qui le permettent                 │
+│  scanoria-helper (root) ── demandes de la console : modules (Quadlet), pare-feu, MàJ      │
+│  scanoria-worker ── file d'analyses (PostgreSQL) → conteneurs scanners jetables (Podman)  │
+│  Podman + Quadlet ── un module = une ou plusieurs unités systemd générées                  │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 3.1 ISO et installation
+- On part de l'ISO officielle Ubuntu Server 24.04 et on y ajoute une configuration **autoinstall** (cloud-init / Subiquity). L'installation se fait sans intervention, puis un **assistant au premier démarrage** (console texte) demande le réseau, le nom, le fuseau, le clavier et le mot de passe administrateur.
+- Construction **reproductible dans un conteneur `ubuntu:24.04` neuf**, jamais sur la machine hôte. Lanceurs fournis : `build.sh --iso` (Linux), et `make-iso.ps1` (Windows, Docker Desktop ou Podman).
+- Les paquets Ubuntu nécessaires hors ligne voyagent dans l'ISO. **Aucune image de module n'est embarquée** : l'ISO installe la console seule (section 5.3). Pour une appliance sans Internet, un **lot hors ligne signé** apporte les images des modules choisis (section 9).
+- La communication du produit ne mentionne pas la distribution sous-jacente : on parle d'« appliance », jamais d'« Ubuntu 24.04 ».
+
+### 3.2 Socle système
+- **PostgreSQL 16** (paquets Ubuntu) : base `scanoria` pour la console, et une base par module qui sait utiliser PostgreSQL (SonarQube, Dependency-Track, DefectDojo).
+- **Podman + Quadlet** pour tous les modules. Pas de Docker ni de compose en production : chaque module produit des fichiers `.container` / `.network` / `.volume` relus par le générateur Quadlet, donc pilotés par systemd.
+- **nginx** en proxy inverse, aiguillage **par nom** (section 3.4). TLS avec un certificat émis par une **AC interne de l'appliance** (créée à l'installation, exportable pour les postes), ou un certificat importé.
+- **nftables** : accès d'administration restreint à des réseaux déclarés ; les conteneurs scanners n'ont aucun réseau.
+- Réglages noyau exigés par certains modules (SonarQube : `vm.max_map_count ≥ 524288`, `fs.file-max`, limites `nofile`/`nproc`) : posés par le module à son installation, dans `/etc/sysctl.d/`, et retirés à sa désinstallation.
+
+### 3.3 Console web
+- **Nuxt 4 + Nuxt UI**, serveur Nitro, **PostgreSQL** (requêtes SQL explicites, migrations numérotées et testées), validation **zod** de toutes les entrées.
+- Authentification : comptes locaux (PBKDF2), **LDAP/AD** (LDAPS), **OIDC**. Rôles `viewer` / `operator` / `admin`, avec **journal d'audit** consultable : une ligne cliquable ouvre le détail dans un panneau latéral.
+- Sections :
+  - **Tableau de bord** ;
+  - **Projets** (dépôts) ;
+  - **Analyses** (file, historique, journaux) ;
+  - **Résultats** (unifiés, filtres, statut de tri) ;
+  - **Quality gates** ;
+  - **Catalogue** (modules) ;
+  - **Mises à jour** ;
+  - **Sauvegardes** ;
+  - **Système** (réseau, TLS, utilisateurs, journal d'audit, À propos et licence).
+- **API REST** documentée (OpenAPI) et jetons d'API par projet pour la CI.
+
+### 3.4 Accès aux applications par nom
+- L'appliance a un nom complet, par exemple `analyse.exemple.test`. La **console** répond sur ce nom.
+- Chaque module `service` déclare un **libellé** dans son manifeste (`sonarqube`, `dtrack`, `defectdojo`…) et répond sur `<libellé>.<nom de l'appliance>`, par exemple `sonarqube.analyse.exemple.test`.
+- **DNS** : un enregistrement générique `*.<nom de l'appliance>` vers l'adresse de l'appliance, en plus de l'enregistrement du nom lui-même. La console affiche les enregistrements à créer, **vérifie la résolution** avant d'activer un module, et signale un nom qui ne résout pas.
+- En option, l'appliance crée elle-même les enregistrements par **mise à jour dynamique RFC 2136 signée TSIG** vers le serveur DNS de l'entreprise (BIND, DDI…). Elle ne dépend d'aucun produit DNS particulier.
+- **Certificat** : l'AC interne émet un certificat pour `<nom>` et `*.<nom>`, renouvelé automatiquement. Un certificat importé doit couvrir les deux noms, et la console le vérifie.
+- Le proxy n'expose que les modules installés et actifs. Un module désactivé renvoie une page d'erreur de la console, jamais l'application.
+- La **connexion unique** est souhaitée : les modules qui savent faire de l'OIDC (SonarQube, Dependency-Track, DefectDojo) sont branchés sur le fournisseur d'identité configuré dans la console.
+
+## 4. Catalogue modulaire
+
+### 4.1 Types de modules
+| Type | Rôle | Exécution |
+|---|---|---|
+| `scanner` | outil en ligne de commande lancé par analyse (gitleaks, Trivy…) | conteneur **jetable** par analyse, sans réseau |
+| `service` | application web permanente (SonarQube, Dependency-Track…) | unités Quadlet permanentes, derrière le proxy |
+| `feed` | base de données de vulnérabilités ou de règles, à jour hors ligne | tâche planifiée ou import d'un lot signé |
+| `runner` | exécuteur de CI auto-hébergé (section 8) | unité Quadlet, réseau sortant vers la forge seulement |
+
+### 4.2 Manifeste d'un module
+Chaque module est un dossier `modules/<id>/` du dépôt, avec un `module.yaml` validé par un schéma JSON lors de la CI :
+
+```yaml
+id: trivy
+name: Trivy
+type: scanner                     # scanner | service | feed | runner
+categories: [sca, iac, container, sbom, secrets]
+license: { spdx: Apache-2.0, url: https://…, restrictions: none }   # restrictions : none | private-code-forbidden | no-redistribution | other
+upstream: { homepage: https://…, source: https://… }
+image: ghcr.io/…/trivy@sha256:…   # épinglée par empreinte ; l'étiquette n'est qu'informative
+version: "x.y.z"
+resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 2000 }
+hostname: null                    # type service : libellé DNS de l'application (« sonarqube » → sonarqube.<appliance>)
+needs: { feeds: [trivy-db], sysctl: {}, postgres: false }
+scan:                             # type scanner seulement
+  inputs: [repo, archive, image, sbom]
+  command: ["trivy", "fs", "--format", "sarif", "--output", "/out/result.sarif", "/src"]
+  outputs: { sarif: /out/result.sarif }          # ou cyclonedx, ou format natif + convertisseur
+  timeout_s: 900
+  network: none
+service: null                     # type service : unités, ports internes, chemin de santé, sauvegarde, migration de version
+health: { command: ["trivy", "--version"] }
+upgrade: { policy: on-demand }    # mises à jour détectées, appliquées à la demande, avec sauvegarde préalable
+```
+
+### 4.3 Cycle de vie d'un module
+1. **Catalogue** : un index JSON **signé** liste les modules disponibles, leurs versions et leurs empreintes d'images. La console l'affiche, avec la licence, les restrictions, les ressources nécessaires et la compatibilité avec la machine (RAM, disque, sysctl).
+2. **Installation** : la demande est déposée par la console. Le service root contrôle la signature et les ressources, récupère l'image (registre ou lot hors ligne), génère les unités, crée la base si besoin, puis attend la santé du module. **Retour arrière** automatique si le module ne devient pas sain.
+3. **Mise à jour** : détectée, puis **lancée à la demande**, toujours précédée d'une sauvegarde du module (base et volumes). Retour arrière en cas d'échec de santé.
+4. **Désactivation / désinstallation** : la désinstallation propose de garder ou supprimer les données (modale explicite, irréversible).
+5. **Sauvegarde / restauration** par module, incluse dans la sauvegarde globale.
+
+## 5. Catalogue initial
+
+Toutes les versions sont **à épingler au moment de l'intégration**. Ne jamais reprendre une version de mémoire. Licence et restrictions sont **à revérifier** sur le dépôt amont à chaque intégration et à chaque montée de version majeure.
+
+### 5.1 Modules
+| Module | Type | Catégories | Licence (à revérifier) | Contraintes à connaître |
+|---|---|---|---|---|
+| **SonarQube Community Build** | service | qualité, SAST | LGPL-3.0 | **Branche principale seulement, pas d'analyse de PR** ; PostgreSQL ; `vm.max_map_count` ; ≥ 4 Go RAM pour lui seul |
+| **gitleaks** | scanner | secrets | MIT | historique complet ; configuration d'exceptions par projet |
+| **TruffleHog** | scanner | secrets | AGPL-3.0 | **vérification active des secrets désactivée** (aucun appel réseau) |
+| **OSV-Scanner** | scanner + feed | SCA | Apache-2.0 | base OSV hors ligne ; exceptions datées par projet |
+| **Trivy** | scanner + feed | SCA, IaC, conteneurs, SBOM, secrets | Apache-2.0 | base `trivy-db` hors ligne |
+| **Syft + Grype** | scanner + feed | SBOM, SCA | Apache-2.0 | base Grype hors ligne |
+| **OWASP Dependency-Track** | service + feed | SBOM, SCA, licences | Apache-2.0 | PostgreSQL ; reçoit les SBOM CycloneDX des analyses ; miroirs de vulnérabilités hors ligne |
+| **Semgrep CE** / **Opengrep** | scanner | SAST | moteur LGPL-2.1 | règles officielles Semgrep : **usage interne seulement, redistribution interdite** → jamais embarquées dans l'ISO, téléchargées par l'administrateur ; Opengrep + règles maison en alternative |
+| **Checkov**, **KICS** | scanner | IaC | Apache-2.0 | Terraform, Kubernetes, Dockerfile, Ansible… |
+| **ShellCheck**, **hadolint**, **actionlint** | scanner | lint | GPL-3.0 / GPL-3.0 / MIT | rapides, sans base |
+| **Bandit** | scanner | SAST Python | Apache-2.0 | — |
+| **OWASP ZAP** | scanner | DAST | Apache-2.0 | **cibles autorisées seulement** (section 6.5) |
+| **Nuclei** | scanner + feed | DAST | MIT | idem ; modèles épinglés |
+| **DefectDojo** | service | gestion des vulnérabilités | BSD-3-Clause | optionnel : la console fait déjà l'unification ; utile pour un suivi avancé et des exports |
+| **CodeQL** | scanner | SAST | **propriétaire (conditions GitHub)** | **interdit sur du code privé** sans licence payante : proposé seulement pour les projets déclarés open source (licence OSI), désactivé par défaut |
+
+### 5.2 Lien entre catégories et modules
+Une analyse lance des **profils**, et chaque profil est un ensemble de modules :
+
+- `rapide` : gitleaks, OSV-Scanner, ShellCheck, actionlint ;
+- `complet` : `rapide`, plus Trivy, Semgrep/Opengrep, Checkov, Syft → Dependency-Track, SonarQube si installé ;
+- `conteneur` : Trivy image, Grype ;
+- `dast` : ZAP, Nuclei, sur une cible autorisée.
+
+L'administrateur peut créer ses propres profils.
+
+### 5.3 Installation de base : la console seule
+L'ISO installe la console, PostgreSQL, nginx, Podman, le service root et le pare-feu. **Aucun module n'est préinstallé.**
+
+Au premier accès, la console propose le catalogue, avec une **sélection conseillée** : gitleaks, OSV-Scanner, Trivy, Syft/Grype, ShellCheck, actionlint, Checkov. Ces modules sont légers et sans service permanent. Rien n'est installé sans confirmation.
+
+Les modules `service` (SonarQube, Dependency-Track, DefectDojo) s'installent après le contrôle des ressources et du DNS. Un profil ne référence que des modules installés, et le profil `complet` prend **tous les modules installés et actifs**.
+
+## 6. Analyses
+
+### 6.1 Projets
+Un projet est un **dépôt Git** (HTTPS + jeton ou SSH + clé de déploiement, secrets chiffrés en base) ou une **archive téléversée**. Branches suivies, profil par défaut, exceptions (chemins, règles, vulnérabilités acceptées avec **motif et date de fin**), et quality gate.
+
+### 6.2 Déclenchement
+- À la main depuis la console.
+- Planifié : quotidien, ou à chaque nouveau commit par interrogation de la forge.
+- Par **webhook** de la forge (GitHub, GitLab ou Forgejo, signature vérifiée).
+- Depuis une CI par l'**API** : `POST /api/projects/:id/scans {ref, profile}`, puis attente du verdict. Un petit client `scanoria-scan` (binaire statique ou script) rend le code de sortie du quality gate.
+
+### 6.3 Résultats unifiés
+- Chaque scanner produit du **SARIF 2.1.0** (ou du CycloneDX pour les SBOM). Un convertisseur testé est fourni pour les outils qui ne le font pas.
+- Les résultats sont normalisés en base :
+  - outil, règle, gravité normalisée (`critical`, `high`, `medium`, `low`, `info`) ;
+  - fichier et ligne, empreinte stable de déduplication ;
+  - premier et dernier commit où le résultat est vu ;
+  - statut de tri : `nouveau`, `confirmé`, `faux positif`, `accepté jusqu'au …`, `corrigé`.
+- La valeur d'un **secret** trouvé n'est **jamais** stockée : seulement l'emplacement, le type et l'empreinte.
+- **Quality gate** par projet : seuils sur le nouveau code (aucun secret, aucune vulnérabilité ≥ seuil hors exceptions datées, aucun résultat SAST `high`…). Verdict exposé dans l'API, en badge, et en statut de commit envoyé à la forge si un jeton est fourni.
+- Exports : SARIF fusionné, CycloneDX, rapport PDF ou HTML par analyse, envoi vers DefectDojo si le module est installé.
+
+### 6.4 Confinement des scanners
+Chaque analyse se déroule ainsi :
+
+1. Clone **superficiel** dans un répertoire de travail propre à l'analyse.
+2. Conteneur Podman jetable :
+   - `--network=none` (sauf type `dast`) ;
+   - `--read-only` avec les sources montées **en lecture seule** sur `/src` et un `/out` écrivable ;
+   - `--cap-drop=ALL`, `--security-opt=no-new-privileges` ;
+   - utilisateur non root, limites mémoire, CPU et PIDs, délai maximal.
+3. Le répertoire est **supprimé** après l'analyse.
+
+Aucun build ni script du dépôt analysé n'est lancé. Un profil « avec construction » éventuel demande une activation explicite par projet, et tourne dans un conteneur jetable distinct, sans secret.
+
+### 6.5 DAST
+- Les cibles sont déclarées par un administrateur : URL, propriétaire, attestation d'autorisation.
+- Liste blanche appliquée au niveau réseau : le conteneur DAST ne peut joindre **que** la cible.
+- Mode passif par défaut, mode actif seulement sur confirmation explicite.
+- Rien n'est scanné en dehors des cibles déclarées.
+
+## 7. Releases passées par tous les outils (gate de release)
+
+### 7.1 Principe
+Chaque dépôt déclare, dans sa CI, que **ses releases passent par l'appliance**. Le profil `release` exécute **tous les modules installés et actifs** applicables au dépôt : scanners, SonarQube sur la branche principale, Dependency-Track pour le SBOM, DAST si une cible de recette est déclarée. Le quality gate du projet décide.
+
+Une release candidate qui échoue n'est **pas publiée**, et la raison est rattachée au commit.
+
+### 7.2 Deux modes d'intégration
+| Mode | Pour | Fonctionnement |
+|---|---|---|
+| **Tiré** (recommandé, aucune exposition de l'appliance) | forge hébergée hors du réseau (GitHub…) dont les runners ne peuvent pas joindre l'appliance | L'appliance **interroge la forge** (tags, pré-versions, PR marquées) selon un planning, analyse, puis publie un **statut de commit** `scanoria/release-gate` (succès ou échec, lien vers le rapport). La règle de protection de la branche ou la promotion exige ce statut. C'est le même schéma que la validation AWX d'Ipnoria : requêtes sortantes seulement. |
+| **Poussé** | CI qui tourne dans le réseau (Forgejo Actions, runner auto-hébergé) | La CI appelle `scanoria-scan --profile release --ref <tag> --wait`, et le code de sortie du client reflète le verdict du quality gate. |
+
+### 7.3 Preuves jointes à la release
+- **Rapport d'analyse de release** au format JSON : outils et versions exactes (empreintes d'images), âge des bases de vulnérabilités, résultats par gravité, exceptions appliquées (avec motif et date de fin) et verdict.
+- Le rapport est **signé** par la clé de l'appliance et téléversable comme fichier de la release, avec le SARIF fusionné et le SBOM CycloneDX.
+- Une commande `scanoria-verify rapport.json` vérifie la signature et l'empreinte du commit analysé.
+
+### 7.4 Exemple : Ipnoria
+L'appliance s'insère dans la chaîne existante :
+
+1. `release.yml` publie la version candidate ;
+2. l'appliance, en mode tiré, analyse le tag et pose le statut `scanoria/release-gate` ;
+3. `promote.yml` n'accepte la promotion qu'avec ce statut au vert, **en plus** du verdict de l'instance de dev pilotée par AWX.
+
+## 8. CI on-prem (modules `runner`)
+- **Runner GitHub Actions auto-hébergé.** À n'utiliser que pour des **dépôts privés de l'entreprise**, jamais pour un dépôt public : une PR externe exécuterait du code sur l'appliance. La facturation GitHub des runners auto-hébergés en dépôt privé a changé plusieurs fois en 2026 (frais par minute annoncés puis reportés) : **à vérifier** avant de recommander ce module.
+- **Forgejo + Forgejo Actions** (option entièrement on-prem) : un miroir du dépôt sur une forge interne et un runner local. Aucune dépendance à une facturation tierce.
+- Chaque runner tourne dans un conteneur isolé avec un réseau sortant limité à la forge. Les jobs ne voient pas les données des autres modules.
+
+## 9. Hors ligne et bases de vulnérabilités
+- Les modules `feed` maintiennent les bases (OSV, `trivy-db`, Grype, miroirs NVD/GHSA pour Dependency-Track, modèles Nuclei) :
+  - mise à jour planifiée quand Internet est disponible ;
+  - sinon, **import d'un lot hors ligne signé** produit par une appliance Scanoria connectée (« exporter les bases »).
+- La console affiche l'**âge de chaque base**, avec une alerte au-delà d'un seuil (par défaut 7 jours). Une analyse faite avec une base trop ancienne le signale dans son verdict.
+
+## 10. Mises à jour, sauvegarde, observabilité
+- **Mises à jour de la console et des scripts de l'appliance par les releases GitHub** du dépôt :
+  - l'appliance interroge les releases (quotidiennement ou sur demande) et affiche dans la console la version disponible et ses **notes de version** (section du `CHANGELOG.md`) ;
+  - l'archive est **signée** (Ed25519, `SHA256SUMS` signé, clé publique épinglée) et vérifiée avant toute installation ;
+  - le dépôt étant **public**, l'appliance interroge l'API GitHub **sans jeton** ; en cas de limite de débit (`403`/`429`), elle se replie sur les adresses publiques de la release. L'import manuel d'une archive signée reste possible pour une appliance sans Internet ;
+  - installation **à la demande** ou **planifiée dans une fenêtre de maintenance** ; jamais automatique sans réglage explicite ;
+  - **sauvegarde** de la base et des fichiers remplacés avant l'installation, migrations de schéma appliquées, test de santé, **retour arrière automatique** si la console ne redémarre pas ;
+  - **retour à la version précédente en un clic** (N-1 conservée) ;
+  - canaux **`stable`** (défaut, `releases/latest`) et **`prerelease`** (instance de validation, bêta-testeurs ; jamais une version candidate rejetée) ;
+  - **l'index du catalogue** est publié de la même façon, signé, avec son propre numéro, et mis à jour indépendamment de la console ;
+  - les paquets système suivent `apt` (mises à jour de sécurité Ubuntu) ; un changement de Node.js ou de base système passe par une nouvelle ISO ;
+  - même chaîne de publication que pour Ipnoria : CI complète, version candidate, validation sur une instance de dev, puis promotion ; ici le gate de release de l'appliance elle-même s'y ajoute (section 7).
+- **Sauvegardes** :
+  - quotidiennes et à la demande, base de la console, bases et volumes des modules, configuration ;
+  - chiffrées, rétention configurable ;
+  - destination locale, partage SMB/NFS ou S3 compatible ;
+  - restauration testée par la CI.
+- **Santé** : une photographie JSON par minute (services, PostgreSQL, disques, certificats, âge des bases, file d'analyses). Commande `scanoria-selftest` pour les tests de fumée après installation ou mise à jour.
+
+## 11. Dimensionnement indicatif
+| Usage | vCPU | RAM | Disque |
+|---|---|---|---|
+| Console seule | 2 | 4 Go | 40 Go |
+| + sélection conseillée (scanners) | 4 | 8 Go | 80 Go |
+| + SonarQube + Dependency-Track | 8 | 24 Go | 200 Go |
+| + DefectDojo + DAST + runner | 8–12 | 32 Go | 300 Go |
+
+L'installation d'un module `service` est refusée, avec un message clair, si la machine n'a pas les ressources déclarées dans son manifeste.
+
+## 12. Dépôt, construction, tests, CI
+```
+build.sh                 # --iso | --bundle (mise à jour) | --stage ; construit dans un conteneur ubuntu:24.04 neuf
+make-iso.ps1             # lanceur Windows
+src/iso/                 # autoinstall, scripts de fin d'installation
+src/rootfs/              # fichiers déposés sur le système : services systemd, scripts root (scanoria-helper, -worker, -selfupdate, -selftest…)
+modules/<id>/            # module.yaml, gabarits Quadlet, convertisseur SARIF éventuel, tests du module
+catalog/                 # génération et signature de l'index du catalogue
+webui/                   # console Nuxt 4 (app/, server/, tests/)
+tests/bNN-*.sh           # batteries shell : sans root (CI) ou « -live » (machine de test root, vrais conteneurs)
+docs/                    # ARCHITECTURE, MODULES, SECURITE, TESTING, RELEASING, CI-CD
+```
+- **Tests** :
+  - unitaires et **bout en bout** de la console contre un vrai PostgreSQL 16, dans la locale de l'appliance (`en_US.UTF-8`) ;
+  - pour chaque module : validation du manifeste par le schéma, conversion SARIF sur des **jeux d'essai** (dépôts piégés : faux secrets, dépendances vulnérables, IaC fautive), installation et désinstallation `-live` ;
+  - pour le service root : demandes hostiles (injections, chemins `..`, liens symboliques).
+- **CI GitHub Actions, dépôt public** : runners standard **gratuits et sans quota**. La CI reste raisonnable (annulation des exécutions dépassées sur une même PR, caches npm et images), mais n'a pas à économiser les minutes.
+- **Outils** : lint shell et workflows (shellcheck, actionlint), gitleaks sur tout l'historique, osv-scanner avec exceptions datées, **dependency-review** sur les PR, **CodeQL** (JavaScript/TypeScript et workflows), **SonarQube Cloud** (gratuit pour un dépôt public, quality gate bloquant), alertes et mises à jour **Dependabot**. À partir de la 0.8, le verdict de Scanoria sur son propre dépôt s'y ajoute.
+- Actions épinglées par empreinte, droits minimaux par travail ; contrôle unique **`ci-ok`** qui résume la CI.
+- **Protections** (disponibles gratuitement pour un dépôt public) :
+  - **règle de protection de `main`** : PR obligatoire, contrôles requis `ci-ok`, CodeQL et quality gate SonarQube Cloud, pas de force-push ni de suppression ;
+  - **environment `release`** limité à `main`, qui porte la clé de signature : seuls les travaux de publication la lisent ;
+  - dans les workflows : publication refusée hors de `main`, numéros de version jamais reconstruits ;
+  - **jamais de runner auto-hébergé** sur ce dépôt : une PR externe y exécuterait du code.
+- **Dépôt public, mais non annoncé** : rien dans le dépôt ne doit trahir une infrastructure réelle (principe 3), et aucun secret n'y entre jamais ; gitleaks bloque la CI au moindre doute.
+
+## 13. Itérations
+Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20) est rattachée à une itération.
+
+| Version | Contenu |
+|---|---|
+| 0.1 | **Socle** : ISO (console seule), assistant de premier démarrage, console (auth locale, rôles, audit, À propos et licence), PostgreSQL, pare-feu, nom de l'appliance, AC interne et certificat `<nom>` / `*.<nom>`. **Mise à jour en ligne par les releases GitHub (F18)**, `scanoria-selftest`, chaîne de publication (CI, version candidate, validation, promotion) |
+| 0.2 | **Moteur de modules** : manifeste, catalogue signé publié en release, service root, Quadlet, aiguillage par nom et vérification DNS. **Banc d'essai à l'installation (F12)**, **packs (F11)**, **dépendances et conflits de modules (G1)**, **paramètres de module typés (G3)**. Premiers scanners : gitleaks, OSV-Scanner, Trivy |
+| 0.3 | **Analyses** : projets Git avec **assistant d'ajout (F1)**, file d'analyses, confinement, résultats SARIF unifiés, tri, quality gate, API et client CI. **Suivi des secrets jusqu'à révocation (F7)**. Profils : **profils par couverture (G7)**. Catalogue : **contrat de sortie vérifié (G2)**, **normalisation des gravités (G5)**. Fiabilité : **analyses reproductibles (G11)**, **relances distinguées (G12)**, **échec par défaut (G13)**, **couverture d'analyse (G15)**, **ordonnancement (G17)**, **empreintes stables (G19)** |
+| 0.4 | **SonarQube Community Build** (PostgreSQL, sysctl, proxy, sauvegarde, mise à jour à la demande). **Consommation réelle par module (F14)**, **santé des analyses (G20)** |
+| 0.5 | **SBOM** : Syft → Dependency-Track. **Politique de licences (F8)**, **recherche transverse CVE / composant avec re-corrélation (F3)**, **recoupement entre outils (F16)** |
+| 0.6 | **Hors ligne et vigilance** : modules `feed`, lots signés, âge des bases. **Appliance miroir (F17)**, **mise à jour d'outil à l'essai (F13)**, **alertes sur l'appliance elle-même (F19)**, **canaris nocturnes (G14)**, **fraîcheur obligatoire (G16)**, **version de module figée par projet (G6)** |
+| 0.7 | **SAST/IaC étendus** (Semgrep/Opengrep, Checkov, KICS, Bandit), profils personnalisés, webhooks et statuts de commit. **Tri en masse (F4)**, **exceptions soumises à approbation (F5)**, **affectation `CODEOWNERS` (F6)**, **analyse incrémentale des PR (G18)**, **jeux de règles gérés dans la console (G4)**, **héritage et verrouillage des profils (G8)**, **profil par déclencheur (G9)**, **aperçu d'un profil (G10)** |
+| 0.8 | **Gate de release** : profil `release`, modes tiré et poussé, rapport de release signé, `scanoria-verify`. **Comparaison entre releases (F2)**, **simulateur de quality gate (F9)**. Branchement sur Ipnoria |
+| 0.9 | **Runners CI** (Forgejo Actions, runner GitHub pour dépôts privés). **Notifications et rapport mensuel (F10)**, **kit développeur (F20)** |
+| 0.10 | **DAST** (ZAP, Nuclei) avec cibles autorisées ; DefectDojo optionnel. **Catalogue privé et SDK de scanner (F15)** |
+| 1.0 | LDAP/AD, OIDC et connexion unique aux modules, sauvegardes distantes, durcissement, documentation complète |
+
+## 14. Décisions
+**Prises**
+- **Accès aux applications par nom** : `<libellé>.<nom de l'appliance>`, avec un DNS générique et un certificat générique (section 3.4).
+- **Installation de base = console seule** : tout outil s'ajoute par le catalogue, et aucune image n'est embarquée dans l'ISO (section 5.3).
+- **Releases passées par tous les outils** installés, via la CI de chaque dépôt (section 7).
+- **Fonctionnalités F1 à F20 et G1 à G20 retenues** (section 15), réparties dans les itérations (section 13).
+- **Dépôt GitHub public, sans aucune communication** (« non publié ») : CI, CodeQL, SonarQube Cloud, protection de `main` et environments gratuits ; mises à jour des appliances sans jeton. Conséquences : sections 10 et 12.
+- **Claude gère tout le cycle Git** : branches, commits, push, PR, merges, versions et suivi des publications, selon les règles de la section 16.
+- **Mises à jour de la console par les releases GitHub** dès la 0.1 (section 10, F18).
+- **Nom : Scanoria.** Pas de publication ni de communication publique pour l'instant : aucun nom de domaine à réserver.
+- **Licence : AGPL-3.0-or-later**, titulaire Vincent Tisseront (comme Ipnoria). Conséquences à appliquer dès la 0.1 :
+  - texte intégral dans `LICENSE` à la racine (visible sur GitHub), en-tête SPDX `AGPL-3.0-or-later` dans les fichiers sources, champ `license` du `package.json` ;
+  - l'appliance s'utilise par le réseau : l'**article 13** impose d'offrir le code source aux utilisateurs. La page « À propos » affiche la licence et un **lien vers le code source de la version installée** (tag GitHub du dépôt public) ;
+  - `OPEN-SOURCE.md` liste les composants tiers livrés dans l'ISO et leurs licences. Chaque module du catalogue garde **sa propre licence**, déclarée dans son manifeste et affichée dans la console : il tourne dans son conteneur, non modifié, et n'est pas couvert par l'AGPL de l'appliance ;
+  - les contributions externes sont acceptées sous la même licence (mention dans `CONTRIBUTING.md`).
+
+- **D4 — Forge intégrée en premier : Forgejo** (gratuit, tout on-prem). L'appliance sait d'abord analyser les dépôts d'une forge Forgejo ; GitHub, puis GitLab suivent. Le développement de Scanoria lui-même reste sur GitHub (section 12).
+- **D6 — Planchers matériels** : console seule **2 vCPU / 4 Go / 40 Go**, installation refusée en dessous (section 11). Pour chaque module, son manifeste fait foi.
+- **Signature des mises à jour : clé Ed25519**, clé publique versionnée dans `update-pubkey.pem` à la racine, épinglée dans l'appliance. La clé privée vit hors ligne et dans le secret `UPDATE_SIGNING_KEY` de l'environment `release` (limité à `main`) ; Claude ne la voit jamais.
+
+**Ouvertes**
+- Aucune à ce jour.
+
+## 15. Fonctionnalités retenues (F1–F20, G1–G20)
+
+### Console
+| # | Fonctionnalité | Ce qu'elle doit faire |
+|---|---|---|
+| F1 | Assistant d'ajout de dépôt | Détecte langages, gestionnaires de paquets, Dockerfile, Terraform/Kubernetes/Ansible, workflows CI ; propose les modules pertinents (installés ou à installer) et un profil ; rien n'est installé sans confirmation |
+| F2 | Comparaison entre deux releases | Entre deux tags ou analyses : résultats introduits, corrigés, inchangés, par outil et par gravité ; exportable dans le rapport de release |
+| F3 | Recherche transverse CVE / composant | « Qui utilise tel composant, telle version, tel CVE ? » sur tous les projets ; à chaque mise à jour d'une base, les SBOM existants sont recomparés **sans réanalyse** et les nouveaux projets touchés sont signalés |
+| F4 | Règles de tri en masse | Règles par chemin, outil, règle ou gravité (ex. `tests/**` → faux positif), avec justification et date de fin obligatoires ; effet simulé avant application ; tracé dans l'audit |
+| F5 | Exceptions soumises à approbation | Un opérateur demande, un administrateur approuve ou refuse ; échéance notifiée avant expiration ; une exception expirée redevient bloquante |
+| F6 | Affectation par `CODEOWNERS` | Les résultats sont affectés aux responsables lus dans `CODEOWNERS` (ou une table de correspondance) ; vue « mes résultats » |
+| F7 | Suivi des secrets jusqu'à révocation | États `à révoquer` → `révoqué` / `faux positif`, date et auteur ; relance tant qu'un secret n'est pas révoqué ; **jamais la valeur du secret** |
+| F8 | Politique de licences | Listes de licences autorisées, à revoir ou interdites, appliquées aux SBOM ; violations intégrées au quality gate |
+| F9 | Simulateur de quality gate | Rejoue des seuils candidats sur l'historique des analyses (« combien de releases auraient été bloquées ? ») avant de les enregistrer |
+| F10 | Notifications et rapport mensuel | SMTP et webhook générique **signé** (HMAC) ; abonnements par projet et par événement ; rapport mensuel PDF (tendances, dette, délais de correction) |
+
+### Catalogue
+| # | Fonctionnalité | Ce qu'elle doit faire |
+|---|---|---|
+| F11 | Packs | Ensembles de modules par technologie (Node, Python, Java, IaC, conteneurs), installés en une opération avec contrôle global des ressources |
+| F12 | Banc d'essai à l'installation | Chaque module livre un jeu d'essai piégé (faux secrets, dépendances vulnérables, IaC fautive) ; après installation, il est analysé et le résultat attendu est vérifié ; le module n'est activé que si le banc d'essai passe |
+| F13 | Mise à jour d'outil à l'essai | La nouvelle version tourne en parallèle de l'ancienne sur les dernières analyses ; l'écart (nouveaux résultats, résultats disparus, durée) est affiché ; adoption ou abandon en un clic |
+| F14 | Consommation réelle par module | RAM, CPU, disque et durée moyenne d'analyse mesurés ; modules inutilisés depuis N jours signalés, avec suggestion de retrait |
+| F15 | Catalogue privé et SDK | Un kit pour empaqueter un scanner maison (manifeste, image, convertisseur SARIF, jeu d'essai) ; catalogue privé signé par une **clé de l'entreprise**, ajoutée explicitement par un administrateur, à côté du catalogue officiel |
+| F16 | Recoupement entre outils | Un même problème trouvé par plusieurs outils (CVE + composant, règle CWE + emplacement) est fusionné, avec un indice de confiance selon le nombre d'outils qui le confirment |
+| F17 | Appliance miroir | Une appliance connectée publie le catalogue, les images et les bases pour des appliances hors ligne : exportation périodique d'un lot signé, ou service de miroir interne |
+
+### Plateforme
+| # | Fonctionnalité | Ce qu'elle doit faire |
+|---|---|---|
+| F18 | Mises à jour par les releases GitHub | Voir section 10 : signature, notes de version, canaux, fenêtre de maintenance, sauvegarde, retour arrière automatique et retour à N-1 en un clic |
+| F19 | Alertes sur l'appliance elle-même | SBOM de la console et des images de modules installées, recomparés chaque jour aux bases ; alerte « module X vulnérable, mise à jour disponible » |
+| F20 | Kit développeur | Téléchargeable depuis la console : hook pre-commit gitleaks avec la configuration du projet, client `scanoria-scan` local, réglages de lecture SARIF dans l'éditeur |
+
+### Fiabilité des analyses (G11–G20)
+| # | Piste | Ce qu'elle doit faire |
+|---|---|---|
+| G11 | Analyses reproductibles | Chaque analyse enregistre commit, empreintes d'images, versions des bases et configuration ; bouton « rejouer à l'identique » |
+| G12 | Relances distinguées | Les erreurs d'infrastructure (mémoire, délai, image absente) sont relancées automatiquement et ne sont jamais confondues avec « aucun résultat » |
+| G13 | Échec par défaut | Un outil du profil absent, en erreur ou incomplet rend le verdict **non concluant**, donc bloquant, sauf exception explicite et datée |
+| G14 | Canaris nocturnes | Le banc d'essai de F12 est rejoué chaque nuit sur tous les modules ; alerte si un outil ne détecte plus un cas connu |
+| G15 | Couverture d'analyse | Rapport de ce qui n'a pas été analysé : fichiers ignorés, langages non couverts, fichier de verrouillage absent, taille maximale dépassée |
+| G16 | Fraîcheur obligatoire | Au-delà d'un âge de base configurable, le verdict devient non concluant (et pas seulement signalé) |
+| G17 | Ordonnancement | Priorités (release > PR > planifié), concurrence bornée selon la RAM, quotas par projet, aucune famine |
+| G18 | Analyse incrémentale | Analyse limitée aux fichiers modifiés pour les PR, cache des dépendances résolues ; analyse complète chaque nuit |
+| G19 | Empreintes stables | Empreinte de résultat fondée sur le contexte du code et non sur le numéro de ligne : un déplacement de code ne crée pas de « nouveau » résultat |
+| G20 | Santé des analyses | Taux d'échec, durées et délais dépassés par outil ; journal complet de chaque analyse téléchargeable pour le diagnostic |
+
+
+### Intégration au catalogue (G1–G6)
+| # | Piste | Ce qu'elle doit faire |
+|---|---|---|
+| G1 | Dépendances et conflits de modules | Le manifeste déclare ce qu'il requiert (base `feed`, module `service`, version minimale de l'appliance) et ce avec quoi il est incompatible ; résolution automatique à l'installation, graphe affiché, retrait bloqué si un autre module en dépend |
+| G2 | Contrat de sortie vérifié | Le manifeste déclare ses sorties (SARIF 2.1.0, CycloneDX 1.x) ; chaque sortie est validée contre le schéma à chaque analyse : sortie invalide ou vide inattendue = analyse non concluante (G13) |
+| G3 | Paramètres de module typés | Le manifeste décrit ses options (schéma JSON) : la console génère le formulaire, valide les valeurs, applique des défauts globaux et des surcharges par projet |
+| G4 | Jeux de règles gérés dans la console | Règles Opengrep/Semgrep, configuration gitleaks, politiques Checkov… stockés, versionnés et partagés entre projets ; historique et retour à une version antérieure |
+| G5 | Normalisation des gravités éditable | Table de correspondance par module (gravité native → `critical`…`info`), éditable par l'administrateur, pour un quality gate cohérent entre outils ; toute modification tracée |
+| G6 | Version de module épinglée par projet | Un projet peut figer la version d'un module (reproductibilité, audit) ; avertissement quand la version figée est retirée du catalogue ou vulnérable |
+
+### Profils de scan (G7–G10)
+| # | Piste | Ce qu'elle doit faire |
+|---|---|---|
+| G7 | Profils par couverture | Un profil exprime des **catégories** à couvrir (secrets, SCA, IaC, SAST…) plutôt qu'une liste d'outils : il se résout vers les modules installés ; un module ajouté y entre automatiquement ; une catégorie sans module est signalée comme trou de couverture |
+| G8 | Héritage et verrouillage | Profil d'entreprise → profil d'équipe → profil de projet ; l'administrateur verrouille des exigences (ex. secrets obligatoire, seuil minimal) qu'un niveau inférieur ne peut pas assouplir |
+| G9 | Profil par déclencheur | Pour chaque projet : profil PR (rapide), profil nocturne (complet), profil release (tous les modules + DAST si cible) ; configuré une fois, choisi selon l'événement |
+| G10 | Aperçu d'un profil | Avant d'enregistrer : modules résolus, modules manquants à installer, durée et ressources estimées, couverture obtenue sur le dépôt (détection de F1) |
+
+## 16. Consignes pour Claude Code dans ce dépôt
+- Session principale : Sonnet 5.5 ; conseiller : Opus 5.5.
+- Sous-agents **Haiku 5.5** :
+  - `search` : explorer le dépôt ;
+  - `grep` : trouver les points d'appel ;
+  - `audit` : relire un diff, dans un worktree isolé.
+- **Toutes les recherches dans le dépôt et tous les tests** sont confiés à ces sous-agents, pour garder le contexte principal léger. Ne relire soi-même que les extraits qu'ils désignent.
+- Toujours répondre en **français**. Aucune référence à une infrastructure réelle dans le code ni dans les exemples.
+- Travailler par **itérations** : une version = une PR = une section du `CHANGELOG.md`, avec ses tests. Ne jamais publier une version sans CI verte.
+
+### Cycle Git géré par Claude
+- **Branches** : une branche par itération ou correctif (`feat/…`, `fix/…`), depuis `main` à jour. **Jamais de commit ni de push direct sur `main`**, jamais de `--force` sur `main`.
+- **Commits** : messages en français, au présent, préfixés (`feat:`, `fix:`, `ci:`, `docs:`, `test:`), avec les lignes d'attribution demandées par l'environnement.
+- **Avant d'ouvrir la PR** : tests passés par le sous-agent de tests, diff relu par `audit`, corrections faites. La description résume le changement, les tests et les limites connues.
+- **Merge** : en *squash*, **seulement** quand tous les contrôles requis sont verts sur le dernier commit de la PR (`ci-ok`, CodeQL, SonarQube Cloud), vérifiés par l'API et non supposés. La protection de `main` l'impose aussi. Jamais de merge d'une PR rouge, en attente ou dont un contrôle a été désactivé pour passer.
+- **Version** : une PR de version modifie les deux fichiers `VERSION` et ajoute la section du `CHANGELOG.md`. Après le merge, Claude suit `release.yml` jusqu'à la pré-version, puis la promotion, et rapporte le résultat. Une version rejetée est corrigée par une nouvelle version (X.Y.Z+1) ; un numéro n'est jamais reconstruit.
+- **Échec en CI** : Claude lit le journal, corrige sur la branche et repousse. Il ne contourne jamais un contrôle (pas de `continue-on-error` ajouté, pas d'exception de scanner sans motif ni date de fin) sans le dire et obtenir l'accord.
+- **Toujours demander avant** : supprimer une branche distante autre que celle d'une PR fusionnée, réécrire l'historique publié, supprimer un tag ou une release, modifier les secrets, les réglages du dépôt, la protection de `main` ou la clé de signature, rendre le dépôt privé, ajouter un runner auto-hébergé.
+- **Dépôt public** : relire chaque diff comme s'il était lu par un inconnu. Aucun nom d'hôte, domaine, adresse ou identifiant réel, aucun secret, même factice d'apparence réelle hors des jeux d'essai prévus.
+- **Rapport** : après chaque merge ou publication, une ligne pour l'utilisateur (version, état de la CI, lien vers la release).
