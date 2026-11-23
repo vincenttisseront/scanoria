@@ -75,6 +75,12 @@ in_target env DEBIAN_FRONTEND=noninteractive LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 rm -f "$T/etc/apt/scanoria-local.list"
 rm -rf "${T:?}$POOL"
 
+# Locale de l'appliance (en_US.UTF-8) : la base scanoria est créée avec elle au
+# premier démarrage (createdb --locale), elle doit donc être générée.
+log "locale en_US.UTF-8"
+in_target locale-gen en_US.UTF-8
+in_target update-locale LANG=en_US.UTF-8
+
 # PostgreSQL : socket Unix seul (ARCHITECTURE § 4).
 PGCONF="$T/etc/postgresql/16/main/conf.d"
 [[ -d "$PGCONF" ]] || die "configuration PostgreSQL 16 absente"
