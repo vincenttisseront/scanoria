@@ -1,0 +1,32 @@
+# Clés privées : JAMAIS versionnées (seule la clé publique update-pubkey.pem l'est)
+*.key
+*.key.*
+signing.*
+!update-pubkey.pem
+*.p12
+*.pfx
+.env
+.env.*
+
+# Dépendances et sorties de construction
+node_modules/
+.nuxt/
+.output/
+.data/
+dist/
+coverage/
+out/
+build/
+*.iso
+*.tar.zst
+*.tar.gz
+
+# Postes de travail
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Claude Code : réglages locaux
+.claude/settings.local.json
