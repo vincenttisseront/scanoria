@@ -26,6 +26,13 @@ die() {
 	log "ERREUR / ERROR: $*"
 	exit 1
 }
+# Une erreur imprévue (set -e) nomme sa ligne et sa commande dans le journal.
+trap 'log "ERREUR / ERROR: ligne $LINENO : $BASH_COMMAND"' ERR
+# Sortie recopiée sur le port série quand il existe : seul journal lisible
+# d'une installation automatisée (tests de démarrage, hyperviseurs).
+if [[ -w /dev/ttyS0 ]] && stty -F /dev/ttyS0 > /dev/null 2>&1; then
+	exec > >(tee -a /dev/ttyS0 2> /dev/null) 2>&1
+fi
 in_target() {
 	curtin in-target --target="$T" -- "$@"
 }

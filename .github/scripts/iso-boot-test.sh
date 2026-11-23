@@ -106,9 +106,14 @@ qemu_base=(qemu-system-x86_64 -name scanoria-test -machine q35,accel=kvm -cpu ho
 	-monitor "unix:$mon,server,nowait"
 	-daemonize -pidfile "$pidfile")
 
-wait_vm_exit() { # délai étiquette
+wait_vm_exit() { # délai étiquette [journal série à surveiller]
 	local deadline=$((SECONDS + $1)) n=0
 	while vm_running; do
+		# L'installateur en erreur attend une touche : inutile d'attendre le délai.
+		if [[ -n "${3:-}" ]] && grep -qE 'An error occurred|install_fail' "$3" 2> /dev/null; then
+			screenshot "$2-error"
+			return 2
+		fi
 		if [[ $SECONDS -ge $deadline ]]; then
 			screenshot "$2-timeout"
 			return 1
@@ -127,7 +132,10 @@ log "installation (autoinstall) de $(basename "$iso")"
 "${qemu_base[@]}" -cdrom "$iso" -boot order=d \
 	-serial "file:$work/logs/install-serial.log"
 start=$SECONDS
-wait_vm_exit "${ISO_INSTALL_TIMEOUT:-3600}" install || die "installation non terminée dans le délai"
+rc=0
+wait_vm_exit "${ISO_INSTALL_TIMEOUT:-3600}" install "$work/logs/install-serial.log" || rc=$?
+[[ $rc -ne 2 ]] || die "l'installateur signale une erreur"
+[[ $rc -eq 0 ]] || die "installation non terminée dans le délai"
 log "installation terminée en $(((SECONDS - start) / 60)) min (machine éteinte)"
 
 # --- 2. Premier démarrage sans intervention -----------------------------------
