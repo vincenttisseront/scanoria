@@ -424,8 +424,13 @@ const codeLabel = (code: string | null | undefined) => (code && te(`codes.${code
         </p>
       </template>
       <div class="space-y-3">
-        <UFormField :label="t('updates.uploadFiles')">
+        <div class="space-y-1">
+          <label
+            for="update-upload-files"
+            class="block text-sm font-medium"
+          >{{ t('updates.uploadFiles') }}</label>
           <input
+            id="update-upload-files"
             type="file"
             multiple
             accept=".zst,.json,.sig,application/octet-stream"
@@ -433,7 +438,7 @@ const codeLabel = (code: string | null | undefined) => (code && te(`codes.${code
             :disabled="anyRunning"
             @change="onFiles"
           >
-        </UFormField>
+        </div>
         <p
           v-if="uploadFiles.length && missingFiles.length"
           class="text-sm text-warning"
