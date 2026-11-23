@@ -58,8 +58,15 @@ export default defineNuxtConfig({
   },
 
   typescript: {
+    // Tests de la console (environnement Nuxt) : types de l'application (auto-imports, ~).
+    tsConfig: {
+      include: ['../tests/app/**/*.ts'],
+    },
     nodeTsConfig: {
-      include: ['../tests/**/*.ts', '../vitest.config.ts', '../vitest.e2e.config.ts', '../migrate.d.mts'],
+      include: [
+        '../tests/unit/**/*.ts', '../tests/integration/**/*.ts', '../tests/e2e/**/*.ts', '../tests/helpers/**/*.ts',
+        '../vitest.config.ts', '../vitest.e2e.config.ts', '../migrate.d.mts',
+      ],
       compilerOptions: {
         paths: {
           '#shared': ['../shared'],

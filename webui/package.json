@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
+    "test:app": "vitest run --project app",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
@@ -36,11 +37,14 @@
   },
   "devDependencies": {
     "@nuxt/eslint": "1.17.0",
+    "@nuxt/test-utils": "4.4.0",
     "@types/node": "22.20.5",
     "@types/pg": "8.23.1",
     "@vitest/coverage-v8": "5.1.1",
+    "@vue/test-utils": "2.6.0",
     "ajv": "8.20.0",
     "eslint": "10.15.0",
+    "happy-dom": "21.0.4",
     "typescript": "6.0.3",
     "vitest": "5.1.1",
     "vue-tsc": "3.3.14"
@@ -48,6 +52,10 @@
   "overrides": {
     "readdir-glob": {
       "minimatch": "11.0.9"
+    },
+    "js-beautify": {
+      "glob": "14.0.6",
+      "editorconfig": "4.0.1"
     }
   }
 }

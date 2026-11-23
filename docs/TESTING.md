@@ -16,7 +16,8 @@ Scripts npm standard, appelés tels quels par la CI :
 |---|---|
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `nuxt typecheck` (vue-tsc) |
-| `npm run test` | Vitest : tests unitaires (`tests/unit`) et tests d'intégration contre un **vrai PostgreSQL 16** (`tests/integration`) |
+| `npm run test` | Vitest, deux projets : `server` (tests unitaires `tests/unit`, et tests d'intégration contre un **vrai PostgreSQL 16** `tests/integration`, dont l'API servie par h3 dans le processus) et `app` (pages, composants et composables de la console dans l'environnement Nuxt, `tests/app`, API simulée) |
+| `npm run test:app` | Projet `app` seul |
 | `npm run build` | Construction Nitro (`.output/`) |
 | `npm run test:e2e` | Tests de bout en bout contre le serveur construit (`tests/e2e`) |
 
@@ -33,7 +34,8 @@ cd webui && DATABASE_URL=postgresql://postgres@127.0.0.1:5432/postgres npm run t
 
 La base de test est en locale `en_US.UTF-8`, comme sur l'appliance. La CI
 vérifie la locale avant de lancer les tests. Elle ajoute la couverture lcov
-(`webui/coverage/lcov.info`), envoyée à SonarQube Cloud.
+(`webui/coverage/lcov.info`, un seul rapport pour les deux projets : `app/`,
+`server/` et `shared/`), envoyée à SonarQube Cloud.
 
 ## 2. Batteries shell `tests/bNN-*.sh`
 

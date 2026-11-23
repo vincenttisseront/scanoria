@@ -41,6 +41,28 @@ describe('limitation des tentatives', () => {
     expect(l.retryAfterSeconds('a', 500)).toBe(1)
     expect(l.hit('a', 1001)).toBe(true)
   })
+
+  it('état bloqué, remise à zéro et nombre de clés borné', () => {
+    const l = new FixedWindowLimiter(2, 1000, 2)
+    l.hit('a', 0)
+    expect(l.isBlocked('a', 0)).toBe(false)
+    l.hit('a', 0)
+    expect(l.isBlocked('a', 10)).toBe(true)
+    expect(l.isBlocked('a', 1000)).toBe(false)
+    expect(l.retryAfterSeconds('inconnu')).toBe(0)
+    l.reset('a')
+    expect(l.isBlocked('a', 10)).toBe(false)
+    // table pleine : les entrées expirées sont purgées d'abord…
+    l.hit('x', 0)
+    l.hit('y', 500)
+    l.hit('z', 1200)
+    expect(l.retryAfterSeconds('x', 1200)).toBe(0)
+    expect(l.retryAfterSeconds('y', 1200)).toBe(1)
+    // … puis tout est vidé si aucune n'a expiré
+    l.hit('w', 1300)
+    expect(l.retryAfterSeconds('y', 1300)).toBe(0)
+    expect(l.retryAfterSeconds('w', 1300)).toBe(1)
+  })
 })
 
 describe('audit sans secret', () => {

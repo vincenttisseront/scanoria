@@ -15,6 +15,8 @@ node_modules/
 .data/
 dist/
 coverage/
+# Marqueur local écrit par @nuxt/test-utils
+webui/.nuxtrc
 out/
 build/
 *.iso
