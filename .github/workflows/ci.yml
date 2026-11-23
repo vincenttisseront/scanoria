@@ -134,7 +134,7 @@ jobs:
       # Sans scripts d'installation des dépendances ; seule la préparation Nuxt
       # (postinstall du projet) est lancée explicitement.
       - run: npm ci --ignore-scripts
-      - run: npx nuxt prepare
+      - run: npm run postinstall
       - run: npm run lint
       - run: npm run typecheck
       - name: Tests unitaires et d'intégration (couverture lcov)

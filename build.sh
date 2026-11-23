@@ -308,7 +308,7 @@ build_webui() { # work
 		cd "$1/webui"
 		# Sans scripts d'installation des dépendances ; préparation Nuxt explicite.
 		npm ci --ignore-scripts --no-audit --no-fund --loglevel=error
-		npx nuxt prepare
+		npm run postinstall
 		npm run build
 	)
 	[[ -f "$1/webui/.output/server/index.mjs" ]] || die "la construction n'a pas produit webui/.output"
