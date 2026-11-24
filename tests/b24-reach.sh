@@ -36,7 +36,15 @@ ko() { FAIL=$((FAIL + 1)); printf 'FAIL %s\n' "$1"; }
 expect() {
 	if [[ "$2" == "$3" ]]; then ok "$1"; else ko "$1 (obtenu « $2 », attendu « $3 »)"; fi
 }
-run_tool() { (cd "$TMP" && python3 -I "$TOOL" "$@"); }
+# L'outil est chargé par son chemin et sa fonction run() appelée sur des dossiers de test ;
+# son point d'entrée (main) n'accepte que /src et /out, vérifié à part et dans b24-live.
+run_tool() {
+	(cd "$TMP" && python3 -I -c 'import importlib.util, sys
+spec = importlib.util.spec_from_file_location("reach_index", sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+sys.exit(m.run(*sys.argv[2:]) if len(sys.argv) == 4 else 2)' "$TOOL" "$@")
+}
 # Entrées de l'index : « type chemin module symbole » triées.
 entries() {
 	jq -r '.runs[0].results[] | [(.ruleId | sub("reach-index/"; "")), .locations[0].physicalLocation.artifactLocation.uri,
@@ -146,13 +154,20 @@ R="$TMP/redos"
 mkdir -p "$R"
 python3 -c 'import sys; open(sys.argv[1], "w").write("import a " * 110000)' "$R/a.js"
 start=$SECONDS
-rc=0; (cd "$TMP" && timeout 60 python3 -I "$TOOL" "$R" "$TMP/out/r.sarif") > /dev/null 2>&1 || rc=$?
+rc=0; timeout 60 bash -c "$(declare -f run_tool); TMP='$TMP' TOOL='$TOOL' run_tool '$R' '$TMP/out/r.sarif'" > /dev/null 2>&1 || rc=$?
 expect "motif pathologique : terminé en moins de 60 s (code $rc, $((SECONDS - start)) s)" "$rc" 0
 rc=0; run_tool > /dev/null 2>&1 || rc=$?
 expect "sans argument : refusé (code 2)" "$rc" 2
 rc=0; run_tool "$TMP/absent" "$TMP/out/x.sarif" > /dev/null 2>&1 || rc=$?
 expect "sources absentes : refusé (code 2)" "$rc" 2
 [[ ! -e "$TMP/out/x.sarif" ]] && ok "sources absentes : aucune sortie" || ko "sources absentes : sortie écrite"
+# Point d'entrée du conteneur : seulement /src et /out/<nom>.sarif.
+for args in "$TB $TMP/out/y.sarif" "/src /tmp/y.sarif" "/src /out/../etc/y.sarif" "/src /out/y.txt" "/etc /out/y.sarif"; do
+	rc=0
+	# shellcheck disable=SC2086
+	(cd "$TMP" && python3 -I "$TOOL" $args) > /dev/null 2>&1 || rc=$?
+	expect "point d'entrée : « $args » refusé (code 2)" "$rc" 2
+done
 
 echo
 echo "b24-reach : $PASS réussis, $FAIL échoués"

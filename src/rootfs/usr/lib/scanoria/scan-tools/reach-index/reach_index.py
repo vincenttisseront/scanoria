@@ -201,11 +201,29 @@ class Lines:
 
 
 IDENT = r"[A-Za-z_$][\w$]*"
-JS_IMPORT_RE = re.compile(r"\bimport\s+(?:type\s+)?([\w$*{}\s,]{1,500}?)\s+from\s*['\"]([^'\"\n]{1,300})['\"]")
+# « import CLAUSE from 'x' » et « export CLAUSE from 'x' » : sans expression à
+# retour arrière, le mot-clé est cherché puis la clause lue dans une fenêtre bornée.
+JS_KEYWORD_RE = re.compile(r"\b(import|export)\s")
+JS_FROM_RE = re.compile(r"\sfrom\s*['\"]([^'\"\n]{1,300})['\"]")
+JS_CLAUSE_WINDOW = 600
 JS_SIDE_RE = re.compile(r"\bimport\s*['\"]([^'\"\n]{1,300})['\"]")
-JS_EXPORT_FROM_RE = re.compile(r"\bexport\s+[\w$*{}\s,]{1,500}?\s+from\s*['\"]([^'\"\n]{1,300})['\"]")
 JS_REQUIRE_RE = re.compile(r"(?:\b(?:const|let|var)\s+(" + IDENT + r"|\{[^}]{0,500}\})\s*=\s*)?\brequire\s*\(\s*['\"]([^'\"\n]{1,300})['\"]\s*\)")
 JS_DYNAMIC_RE = re.compile(r"\bimport\s*\(\s*['\"]([^'\"\n]{1,300})['\"]\s*\)")
+
+
+def js_from_clauses(code):
+    """(mot-clé, position, clause, module) pour chaque « import|export CLAUSE from 'module' »."""
+    for m in JS_KEYWORD_RE.finditer(code):
+        window = code[m.end():m.end() + JS_CLAUSE_WINDOW]
+        f = JS_FROM_RE.search(window)
+        if not f:
+            continue
+        clause = window[:f.start()].strip()
+        if not clause or not all(c.isalnum() or c.isspace() or c in "_$*{}," for c in clause):
+            continue
+        if m.group(1) == "import" and clause.startswith("type") and clause[4:5].isspace():
+            clause = clause[4:].strip()
+        yield m.group(1), m.start(), clause, f.group(1)
 
 
 def js_bindings(clause):
@@ -253,15 +271,17 @@ def index_js(text, emit):
     lines = Lines(code)
     raw = Lines(text)
     bindings = {}
-    for m in JS_IMPORT_RE.finditer(code):
-        spec = m.group(2)
+    for keyword, pos, clause, spec in js_from_clauses(code):
         if is_relative(spec):
             continue
-        line = lines.line(m.start())
-        for local, imported in js_bindings(m.group(1)):
+        line = lines.line(pos)
+        if keyword == "export":
+            emit("import", line, spec, "", raw.excerpt(line))
+            continue
+        for local, imported in js_bindings(clause):
             bindings[local] = (spec, imported if imported not in ("default", "*") else spec)
             emit("import", line, spec, local if imported in ("default", "*") else imported, raw.excerpt(line))
-    for rx in (JS_SIDE_RE, JS_EXPORT_FROM_RE, JS_DYNAMIC_RE):
+    for rx in (JS_SIDE_RE, JS_DYNAMIC_RE):
         for m in rx.finditer(code):
             spec = m.group(1)
             if not is_relative(spec):
@@ -469,11 +489,8 @@ def sarif(idx):
     }
 
 
-def main(argv):
-    if len(argv) != 3:
-        print("usage: reach_index.py <sources> <sortie.sarif>", file=sys.stderr)
-        return 2
-    src, out = argv[1], argv[2]
+def run(src, out):
+    """Index de src écrit dans out (écriture atomique) ; 0 si réussi, 2 si src n'est pas un dossier."""
     if not os.path.isdir(src):
         print("reach-index: sources introuvables", file=sys.stderr)
         return 2
@@ -486,6 +503,20 @@ def main(argv):
     print("reach-index: %d fichiers, %d entrées, langages %s%s" % (
         idx.files, len(idx.results), ",".join(sorted(idx.languages)) or "-", ", tronqué" if idx.truncated else ""))
     return 0
+
+
+SRC_DIR = "/src"
+OUT_DIR = "/out"
+OUT_NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,100}\.sarif")
+
+
+def main(argv):
+    """Point d'entrée du conteneur : sources /src, sortie /out/<nom>.sarif, rien d'autre."""
+    if len(argv) != 3 or argv[1] != SRC_DIR or os.path.dirname(argv[2]) != OUT_DIR \
+            or not OUT_NAME_RE.fullmatch(os.path.basename(argv[2])):
+        print("usage: reach_index.py /src /out/<nom>.sarif", file=sys.stderr)
+        return 2
+    return run(SRC_DIR, os.path.join(OUT_DIR, os.path.basename(argv[2])))
 
 
 if __name__ == "__main__":
