@@ -125,6 +125,14 @@ refresh "$OSV"
 expect "osv-db : deux versions gardées au plus (active et précédente)" "$(versions osv-db)" 2
 expect "osv-db : ancienne base « legacy » retirée" "$(find "$FEEDS/.store/osv-db" -maxdepth 1 -name 'legacy-*' | wc -l)" 0
 
+python3 -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w"); [z.writestr("OSV-%d.json" % i, "{}") for i in range(10)]; z.close()' "$SRV/osv/npm/all.zip"
+refresh "$OSV"
+expect "osv-db : base plus grande acceptée" "${R%% *}" OK
+mkzip "$SRV/osv/npm/all.zip" '{"id": "OSV-1"}'
+refresh "$OSV"
+expect "osv-db : base qui rétrécit brutalement refusée" "${R%% *}/$(grep -c '1 entries instead of 10' <<< "$R")" E_FEED_UNAVAILABLE/1
+expect "osv-db : base précédente gardée après refus" "$(python3 -c 'import sys, zipfile; print(len(zipfile.ZipFile(sys.argv[1]).infolist()))' "$FEEDS/osv-db/osv-scalibr/npm/all.zip")" 10
+python3 -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w"); [z.writestr("OSV-%d.json" % i, "{}") for i in range(10)]; z.close()' "$SRV/osv/npm/all.zip"
 refresh "$OSV" '{"ecosystems": [".."]}'
 expect "osv-db : écosystème « .. » refusé" "${R%% *}" E_INVALID_PARAM
 refresh "$OSV" '{"ecosystems": ["Absent"]}'
@@ -178,6 +186,7 @@ bad "chemin « .. » dans l'archive" dotdot . "unexpected entry"
 bad "fichier en trop" extra . "unexpected entry"
 bad "metadata.json absent" nometa . "lacks metadata.json"
 bad "index d'images non pris en charge" ok '{schemaVersion: 2, manifests: []}' "image index"
+bad "empreinte d'un type inattendu" ok '.layers[0].digest = 5' "unexpected answer"
 expect "trivy-db : état stale après échec" "$(status trivy-db status)" stale
 expect "trivy-db : aucun extrait hors de la base" "$(find "$TMP" -name 'evade.db' | wc -l)" 0
 manifest ok

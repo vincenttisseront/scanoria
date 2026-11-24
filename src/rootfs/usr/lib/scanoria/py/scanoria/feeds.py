@@ -21,8 +21,11 @@ Disposition sur disque :
   /var/lib/scanoria/feeds/.store/<id>/<v>/   versions (active et précédente)
   /var/lib/scanoria/feeds/.store/<id>/status.json
 Une nouvelle version est construite à côté, puis le lien est remplacé par
-rename(2) : une analyse en cours garde l'ancienne base, une base valide n'est
-jamais cassée par un échec. Fichiers 0644 et répertoires 0755 (root), lus
+rename(2) : une analyse déjà lancée garde la base qu'elle a montée (la version
+précédente est conservée jusqu'à la bascule suivante), et une base valide n'est
+jamais cassée par un échec. Intégrité : HTTPS avec certificat vérifié et, pour
+trivy-db, empreinte de la couche annoncée par le manifeste ; aucune signature
+de l'éditeur n'existe pour ces bases (les lots hors ligne signés arrivent en 0.6). Fichiers 0644 et répertoires 0755 (root), lus
 en lecture seule par l'utilisateur 65534 des conteneurs.
 """
 
@@ -433,6 +436,12 @@ def fetch_any(m, options, work, deadline):
                         raise DownloadError("source is not https")
                     return dict(fetch_osv(m, ref, options, work, deadline), source=ref), work
                 return dict(fetch_oci(ref, work, deadline), source=ref), os.path.join(work, "data")
+            except (TypeError, KeyError, ValueError, AttributeError) as e:
+                # Document distant inattendu (types JSON hostiles) : refusé, jamais E_INTERNAL.
+                e = DownloadError("unexpected answer (%s)" % type(e).__name__)
+                common.log("feed %s: %s: %s" % (m["id"], host_of(kind, ref), e))
+                last = "%s: %s" % (host_of(kind, ref), e)
+                break
             except DownloadError as e:
                 common.log("feed %s: %s: %s" % (m["id"], host_of(kind, ref), e))
                 last = "%s: %s" % (host_of(kind, ref), e)
@@ -512,10 +521,20 @@ def swap(mid, newdir):
     if os.path.isdir(lp) and not os.path.islink(lp):
         # Répertoire réel laissé par une version antérieure (0.2 à 0.3.3) : rangé
         # dans le magasin, retiré au prochain nettoyage.
-        os.rename(lp, os.path.join(store_dir(mid), "legacy-" + secrets.token_hex(4)))
+        legacy = os.path.join(store_dir(mid), "legacy-" + secrets.token_hex(4))
+        os.rename(lp, legacy)
+    else:
+        legacy = None
     tmp = os.path.join(FEEDS, ".%s.%s.link" % (mid, secrets.token_hex(4)))
-    os.symlink(os.path.relpath(newdir, FEEDS), tmp)
-    os.replace(tmp, lp)
+    try:
+        os.symlink(os.path.relpath(newdir, FEEDS), tmp)
+        os.replace(tmp, lp)
+    except OSError:
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+        if legacy and not os.path.lexists(lp):
+            os.rename(legacy, lp)
+        raise
     return previous
 
 
@@ -565,6 +584,25 @@ def public_status(mid):
             "error": st.get("error"), "checked_at": st.get("checked_at")}
 
 
+SHRINK_RATIO = 0.5
+
+
+def check_shrink(prev, details, size_mb):
+    """Refuse une base nettement plus petite que la base active (réponse dégradée,
+    miroir incomplet) : la bonne base est gardée et l'échec signalé."""
+    if prev.get("status") not in ("ok", "stale"):
+        return
+    old_eco = (prev.get("details") or {}).get("ecosystems") or {}
+    for eco, n in (details.get("ecosystems") or {}).items():
+        old = old_eco.get(eco)
+        if isinstance(old, int) and old > 0 and n < old * SHRINK_RATIO:
+            raise DownloadError("%s: %d entries instead of %d, new database refused" % (eco, n, old))
+    old_size = prev.get("size_mb")
+    if details.get("layer") and isinstance(old_size, (int, float)) and old_size > 0 \
+            and size_mb < old_size * SHRINK_RATIO:
+        raise DownloadError("database shrank from %s MB to %s MB, new database refused" % (old_size, size_mb))
+
+
 def refresh(m, options=None, timeout=DEFAULT_TIMEOUT):
     """Télécharge la base du feed m et l'active. Fail(E_FEED_UNAVAILABLE) en cas d'échec,
     la base précédente restant active."""
@@ -589,24 +627,28 @@ def refresh(m, options=None, timeout=DEFAULT_TIMEOUT):
         details, data = fetch_any(m, options, work, deadline)
         _readable(data)
         size = _du_mb(data)
+        check_shrink(prev, details, size)
         final = os.path.join(sd, "%s-%s" % (common.now().strftime("%Y%m%dT%H%M%SZ"), secrets.token_hex(4)))
         os.rename(data, final)
         previous = swap(mid, final)
+        st = {"id": mid, "source": kind, "updated_at": common.iso(common.now()), "checked_at": started,
+              "size_mb": size, "status": "ok", "error": None, "details": details}
+        write_status(mid, st)
+        prune(mid, previous)
     except (DownloadError, OSError) as e:
         reason = str(e) if isinstance(e, DownloadError) else "local error (%s)" % (e.strerror or type(e).__name__)
         st = dict(prev, checked_at=started, error=reason[:500],
                   status="stale" if has_data(mid) else "failed")
-        write_status(mid, st)
+        try:
+            write_status(mid, st)
+        except OSError:
+            pass
         raise Fail("E_FEED_UNAVAILABLE",
                    "database %s cannot be downloaded from the appliance (%s); check access to %s "
                    "or wait for the offline import (0.6)" % (mid, reason, source_host(m)),
                    {"feed": mid, "host": source_host(m), "reason": reason[:500]})
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    st = {"id": mid, "source": kind, "updated_at": common.iso(common.now()), "checked_at": started,
-          "size_mb": size, "status": "ok", "error": None, "details": details}
-    write_status(mid, st)
-    prune(mid, previous)
     return public_status(mid)
 
 
