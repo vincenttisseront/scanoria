@@ -34,6 +34,15 @@ export const ReachContext = z.strictObject({
 })
 export type ReachContext = z.infer<typeof ReachContext>
 
+/**
+ * Écosystèmes où le nom du composant est le nom importé (npm, Go) : là
+ * seulement, « aucun import relevé » permet de dire « appel improbable ».
+ * Ailleurs (PyPI, Maven), la correspondance est une heuristique.
+ */
+export function exactImportNames(ecosystem: string | null | undefined): boolean {
+  return ['npm', 'go', 'golang'].includes((ecosystem ?? '').toLowerCase())
+}
+
 /** Langages dont reach-index relève les imports pour un écosystème (purl type ou nom OSV). */
 export function ecosystemLanguages(ecosystem: string | null | undefined): string[] {
   switch ((ecosystem ?? '').toLowerCase()) {
@@ -68,18 +77,23 @@ export function moduleMatches(ecosystem: string | null | undefined, name: string
     case 'npm':
       return module === name || module.startsWith(`${name}/`)
     case 'pypi': {
-      const top = module.split('.')[0]!
       const known = PYPI_IMPORTS[name.toLowerCase()]
-      if (known) return known.some(k => module === k || module.startsWith(`${k}.`))
-      const n = pyNorm(name).replace(/^python_/, '')
-      return pyNorm(top) === n || pyNorm(top) === pyNorm(name)
+      if (known?.some(k => module === k || module.startsWith(`${k}.`))) return true
+      // Chaque préfixe du module (google, google.auth…) comparé au nom normalisé
+      // (google-auth → google_auth, ruamel.yaml → ruamel_yaml, python-jose → jose).
+      const wanted = new Set([pyNorm(name), pyNorm(name).replace(/^python_/, '')])
+      const parts = module.split('.')
+      return parts.some((_, i) => wanted.has(pyNorm(parts.slice(0, i + 1).join('.'))))
     }
     case 'go': case 'golang':
       return module === name || module.startsWith(`${name}/`)
     case 'maven': {
-      // groupe:artefact (ou groupe/artefact) : les paquets Java commencent par le groupe.
+      // groupe:artefact (ou groupe/artefact) : les paquets Java commencent par le groupe, ou par
+      // son parent (com.fasterxml.jackson.core:jackson-databind → com.fasterxml.jackson.databind).
       const group = name.split(/[:/]/)[0]!
-      return group.length > 2 && (module === group || module.startsWith(`${group}.`))
+      const segs = group.split('.')
+      const prefixes = [group, ...(segs.length >= 3 ? [segs.slice(0, -1).join('.')] : [])].filter(g => g.length > 2)
+      return prefixes.some(g => module === g || module.startsWith(`${g}.`))
     }
     default:
       return module === name

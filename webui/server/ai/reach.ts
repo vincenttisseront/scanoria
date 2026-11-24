@@ -98,7 +98,9 @@ export function parseReachSarif(doc: unknown): ReachIndex | null {
   return {
     languages: [...new Set(languages)].slice(0, 10),
     files: typeof meta.files === 'number' && Number.isInteger(meta.files) && meta.files >= 0 ? Math.min(meta.files, 10_000_000) : 0,
-    truncated: meta.truncated === true || results.length > MAX_ENTRIES,
+    // Index incomplet (fichiers sautés ou illisibles, erreurs de syntaxe) : traité comme tronqué.
+    truncated: meta.truncated === true || results.length > MAX_ENTRIES
+      || (typeof meta.skipped === 'number' && meta.skipped > 0) || (typeof meta.errors === 'number' && meta.errors > 0),
     entries,
   }
 }
@@ -115,16 +117,17 @@ export function reachContext(index: ReachIndex, pkg: { ecosystem?: string, name?
   const sorted = [...matching].sort((a, b) => rank(a) - rank(b) || a.path.localeCompare(b.path) || a.line - b.line)
   const locations: ReachLocationCtx[] = sorted.slice(0, MAX_REACH_LOCATIONS).map(e => ({
     kind: e.kind,
-    path: e.path,
+    // Tout ce qui vient de l'index est masqué : chemin, module, symbole et extrait.
+    path: redactText(e.path).text.slice(0, 512),
     line: e.line,
     symbol: redactText(e.symbol).text.slice(0, 200),
-    module: e.module,
+    module: redactText(e.module).text.slice(0, 300),
     // Masqué avant découpe (aucun secret coupé et donc méconnu), puis après.
     excerpt: redactText(redactText(e.excerpt).text.slice(0, MAX_EXCERPT_CHARS)).text.slice(0, MAX_EXCERPT_CHARS),
   }))
   return boundContext({
     index: { languages: index.languages as ReachContext['index']['languages'], files: index.files, truncated: index.truncated || matching.length > MAX_REACH_LOCATIONS },
-    symbols: symbols.slice(0, 20).map(s => s.slice(0, 200)),
+    symbols: symbols.slice(0, 20).map(s => redactText(s).text.slice(0, 200)).filter(Boolean),
     locations,
   })
 }
@@ -159,7 +162,10 @@ const symbolsOf = (pkg: unknown): string[] => {
 export async function enqueueReachability(db: Queryable, input: { scanId: string, projectId: string, scansDir: string }): Promise<number> {
   try {
     if (!(await connectorEnabled())) return 0
-    const s = await db.query<{ job_id: string | null }>('SELECT job_id FROM scans WHERE id = $1 AND project_id = $2', [input.scanId, input.projectId])
+    // Projet exclu : l'index n'est même pas lu.
+    const s = await db.query<{ job_id: string | null }>(
+      `SELECT s.job_id FROM scans s JOIN projects p ON p.id = s.project_id
+        WHERE s.id = $1 AND s.project_id = $2 AND NOT p.ai_opt_out AND p.archived_at IS NULL`, [input.scanId, input.projectId])
     const jobId = s.rows[0]?.job_id
     if (!jobId) return 0
     const index = await readScanIndex(input.scansDir, jobId)

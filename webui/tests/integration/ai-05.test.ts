@@ -285,6 +285,19 @@ describe.skipIf(!DATABASE_URL)('tâches IA de la 0.5 (PostgreSQL réel, faux Oll
     expect((await pool.query(`SELECT count(*)::int AS n FROM ai_tasks WHERE kind = 'assess-reachability'`)).rows[0]!.n).toBe(n0)
   })
 
+  it('I11 : une tâche encore en file reçoit le contexte de la dernière analyse', async () => {
+    const vuln = await finding(beta, {
+      tool: 'osv-scanner', rule: 'GHSA-q', category: 'sca', severity: 'high', title: 'q', vuln_ids: ['CVE-2026-0030'],
+      package: { ecosystem: 'npm', name: 'minimist', version: '1.0.0', fixed: [] },
+    })
+    const ctx = (path: string) => ({ index: { languages: ['javascript' as const], files: 1, truncated: false }, symbols: [], locations: [{ kind: 'call' as const, path, line: 1, symbol: 'minimist', module: 'minimist', excerpt: 'minimist()' }] })
+    const a = await enqueueAiTask(pool, { kind: 'assess-reachability', subjectType: 'finding', subjectId: vuln, projectId: beta, priority: 10, context: ctx('old.js') })
+    const b = await enqueueAiTask(pool, { kind: 'assess-reachability', subjectType: 'finding', subjectId: vuln, projectId: beta, priority: 10, context: ctx('new.js') })
+    expect(b).toBe(a)
+    expect(JSON.stringify((await task(a!)).context)).toContain('new.js')
+    await drain()
+  })
+
   it('I18 : licences à revoir ou inhabituelles, identifiants seulement ; rien pour un projet exclu', async () => {
     const s = await scan(alpha)
     await pool.query(

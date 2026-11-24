@@ -86,6 +86,10 @@ export async function enqueueAiTask(db: Queryable, req: AiTaskRequest): Promise<
     const sameContext = (c: unknown) => !given || JSON.stringify(c ?? null) === JSON.stringify(given)
     const found = existing.rows.find(r => r.status !== 'done' || sameContext(r.context))
     if (found) {
+      // Tâche encore en file avec un autre contexte (nouvelle analyse) : elle prend le plus récent.
+      if (found.status === 'queued' && given && !sameContext(found.context)) {
+        await db.query(`UPDATE ai_tasks SET context = $2 WHERE id = $1 AND status = 'queued'`, [found.id, JSON.stringify(given)])
+      }
       if (found.status === 'queued' && priority >= AI_PRIORITY.interactive) {
         await db.query('UPDATE ai_tasks SET priority = GREATEST(priority, $2) WHERE id = $1', [found.id, priority])
       }

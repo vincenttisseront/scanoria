@@ -22,12 +22,14 @@ type: scanner
 categories: [sca]
 license:
   spdx: AGPL-3.0-or-later
-  url: https://github.com/vincenttisseront/scanoria/blob/main/LICENSE
+  url: https://spdx.org/licenses/AGPL-3.0-or-later.html
   restrictions: none
   verified_at: "2026-11-24"
+# Outil livré avec l'appliance (src/rootfs/usr/lib/scanoria/scan-tools/reach-index, AGPL-3.0-or-later) ;
+# l'amont ci-dessous est celui de l'image qui l'exécute.
 upstream:
-  homepage: https://github.com/vincenttisseront/scanoria
-  source: https://github.com/vincenttisseront/scanoria/tree/main/src/rootfs/usr/lib/scanoria/scan-tools/reach-index
+  homepage: https://www.python.org/
+  source: https://github.com/docker-library/python
 image: docker.io/library/python@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
 version: "1.0.0"
 resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 200 }

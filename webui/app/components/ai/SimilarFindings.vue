@@ -34,6 +34,10 @@ const data = ref<SimilarResponse | null>(null)
 const selected = ref<string[]>([])
 let timer: ReturnType<typeof setTimeout> | null = null
 let disposed = false
+// Une seule lecture prise en compte (la dernière) ; relances espacées puis arrêtées.
+let seq = 0
+let polls = 0
+const MAX_POLLS = 20
 
 const visible = computed(() => !!data.value?.enabled && data.value.state !== 'off' && data.value.state !== 'opt-out')
 const mark = computed(() => (data.value?.model ? t('ai.explain.mark', { model: `${data.value.model}${data.value.model_digest ? ` (${data.value.model_digest.slice(0, 12)})` : ''}` }) : ''))
@@ -41,20 +45,31 @@ const mark = computed(() => (data.value?.model ? t('ai.explain.mark', { model: `
 async function load() {
   if (timer) clearTimeout(timer)
   timer = null
+  const mine = ++seq
+  let next: SimilarResponse | null
   try {
-    data.value = await api<SimilarResponse>('/api/ai/similar', { query: { finding_id: props.findingId } })
+    next = await api<SimilarResponse>('/api/ai/similar', { query: { finding_id: props.findingId } })
   }
   catch {
-    data.value = null
+    next = null
   }
+  if (mine !== seq || disposed) return
+  data.value = next
   selected.value = selected.value.filter(id => data.value?.items.some(i => i.id === id))
-  if (!disposed && data.value?.state === 'pending') timer = setTimeout(load, props.pollMs)
+  if (data.value?.state === 'pending' && polls < MAX_POLLS) {
+    timer = setTimeout(load, Math.min(30_000, props.pollMs * 1.5 ** polls))
+    polls++
+  }
+}
+function reload() {
+  polls = 0
+  void load()
 }
 watch(() => props.findingId, () => {
   selected.value = []
-  void load()
+  reload()
 })
-onMounted(load)
+onMounted(reload)
 onBeforeUnmount(() => {
   disposed = true
   if (timer) clearTimeout(timer)
@@ -105,6 +120,7 @@ async function apply() {
   if (ok < ids.length) toast.add({ title: t('ai.similar.partial', { failed: ids.length - ok }), color: 'warning' })
   selected.value = []
   emit('triaged')
+  polls = 0
   await load()
 }
 </script>

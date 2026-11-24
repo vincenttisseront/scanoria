@@ -7,7 +7,6 @@
     "driver": {
      "name": "reach-index",
      "version": "1.0.0",
-     "informationUri": "https://github.com/vincenttisseront/scanoria",
      "rules": [
       {
        "id": "reach-index/import",
@@ -41,7 +40,8 @@
      ],
      "files": 5,
      "truncated": false,
-     "errors": 0
+     "errors": 0,
+     "skipped": 0
     }
    },
    "results": [

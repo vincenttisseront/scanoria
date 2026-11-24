@@ -69,6 +69,7 @@ class Index:
         self.languages = set()
         self.files = 0
         self.errors = 0
+        self.skipped = 0  # fichiers de code non lus (taille, lien, illisible) et dossiers de code embarqué sautés
         self.truncated = False
 
     def add(self, kind, path, line, module, symbol, excerpt, language):
@@ -200,9 +201,9 @@ class Lines:
 
 
 IDENT = r"[A-Za-z_$][\w$]*"
-JS_IMPORT_RE = re.compile(r"\bimport\s+(?:type\s+)?([\w$*{}\s,]+?)\s+from\s*['\"]([^'\"\n]{1,300})['\"]")
+JS_IMPORT_RE = re.compile(r"\bimport\s+(?:type\s+)?([\w$*{}\s,]{1,500}?)\s+from\s*['\"]([^'\"\n]{1,300})['\"]")
 JS_SIDE_RE = re.compile(r"\bimport\s*['\"]([^'\"\n]{1,300})['\"]")
-JS_EXPORT_FROM_RE = re.compile(r"\bexport\s+[\w$*{}\s,]+?\s+from\s*['\"]([^'\"\n]{1,300})['\"]")
+JS_EXPORT_FROM_RE = re.compile(r"\bexport\s+[\w$*{}\s,]{1,500}?\s+from\s*['\"]([^'\"\n]{1,300})['\"]")
 JS_REQUIRE_RE = re.compile(r"(?:\b(?:const|let|var)\s+(" + IDENT + r"|\{[^}]{0,500}\})\s*=\s*)?\brequire\s*\(\s*['\"]([^'\"\n]{1,300})['\"]\s*\)")
 JS_DYNAMIC_RE = re.compile(r"\bimport\s*\(\s*['\"]([^'\"\n]{1,300})['\"]\s*\)")
 
@@ -374,17 +375,39 @@ def read_regular(path):
     return data.decode("utf-8", errors="replace")
 
 
-def walk(root):
-    """(chemin relatif, chemin complet, langage), sans suivre de lien, profondeur bornée."""
+# Dossiers de code embarqué du projet : sautés, mais l'index se dit alors incomplet.
+VENDORED_DIRS = {"vendor", "third_party"}
+
+
+def walk(root, idx):
+    """(chemin relatif, chemin complet, langage), sans suivre de lien, profondeur bornée.
+
+    Ce qui n'est pas lu alors que ce pourrait être du code du projet (lien
+    symbolique, dossier de code embarqué, profondeur dépassée) est compté dans
+    idx.skipped : un index incomplet ne permet pas de dire « jamais appelé ».
+    """
     root = os.path.abspath(root)
     for base, dirs, files in os.walk(root, followlinks=False):
         rel_base = os.path.relpath(base, root)
         depth = 0 if rel_base == "." else rel_base.count(os.sep) + 1
-        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not os.path.islink(os.path.join(base, d)) and depth < MAX_DEPTH)
+        keep = []
+        for d in sorted(dirs):
+            if d in SKIP_DIRS:
+                if d in VENDORED_DIRS:
+                    idx.skipped += 1
+                continue
+            if os.path.islink(os.path.join(base, d)) or depth >= MAX_DEPTH:
+                idx.skipped += 1
+                continue
+            keep.append(d)
+        dirs[:] = keep
         for f in sorted(files):
             lang = LANG_BY_EXT.get(os.path.splitext(f)[1].lower())
+            if not lang:
+                continue
             full = os.path.join(base, f)
-            if not lang or os.path.islink(full):
+            if os.path.islink(full):
+                idx.skipped += 1
                 continue
             rel = f if rel_base == "." else os.path.join(rel_base, f)
             yield rel.replace(os.sep, "/"), full, lang
@@ -392,12 +415,13 @@ def walk(root):
 
 def build(root):
     idx = Index()
-    for rel, full, lang in walk(root):
+    for rel, full, lang in walk(root, idx):
         if idx.files >= MAX_FILES:
             idx.truncated = True
             break
         text = read_regular(full)
         if text is None:
+            idx.skipped += 1
             continue
         idx.files += 1
         idx.languages.add(lang)
@@ -429,7 +453,6 @@ def sarif(idx):
             "tool": {"driver": {
                 "name": "reach-index",
                 "version": VERSION,
-                "informationUri": "https://github.com/vincenttisseront/scanoria",
                 "rules": [
                     {"id": "reach-index/import", "shortDescription": {"text": "Module imported by the code"},
                      "defaultConfiguration": {"level": "none"}},
@@ -439,7 +462,7 @@ def sarif(idx):
             }},
             "properties": {"scanoria/reach-index": {
                 "version": INDEX_VERSION, "languages": sorted(idx.languages), "files": idx.files,
-                "truncated": idx.truncated, "errors": idx.errors,
+                "truncated": idx.truncated, "errors": idx.errors, "skipped": idx.skipped,
             }},
             "results": idx.results,
         }],

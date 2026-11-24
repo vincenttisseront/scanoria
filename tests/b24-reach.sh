@@ -115,6 +115,10 @@ has "$HE" "import boom.py 1 os os" && ok "boom.py indexé statiquement (import o
 grep -q 'pwned-from-node-modules\|ignored_vendor' <<< "$HE" && ko "node_modules ou vendor indexé" || ok "node_modules et vendor ignorés"
 grep -q 'outside_secret_module' <<< "$HE" && ko "lien symbolique suivi" || ok "liens symboliques (fichier et dossier) jamais suivis"
 grep -q 'huge_module' <<< "$HE" && ko "fichier de plus de 1 Mio indexé" || ok "fichier trop gros ignoré"
+# Lien (fichier, dossier), vendor et fichier trop gros : comptés, l'index se dit incomplet.
+expect "fichiers et dossiers sautés comptés (index incomplet)" \
+	"$(jq -r '.runs[0].properties["scanoria/reach-index"].skipped >= 4' "$TMP/out/h.sarif")" true
+expect "banc d'essai : rien de sauté" "$(jq -r '.runs[0].properties["scanoria/reach-index"].skipped' "$TMP/out/tb.sarif")" 0
 expect "erreur de syntaxe comptée sans arrêt" "$(jq -r '.runs[0].properties["scanoria/reach-index"].errors' "$TMP/out/h.sarif")" 1
 has "$HE" "call zz_after.py 2 good_after_broken good_after_broken.run" && ok "fichier suivant l'erreur indexé" || ko "analyse arrêtée après l'erreur"
 grep -q 'commented-out\|block-comment' <<< "$HE" && ko "import en commentaire relevé" || ok "imports en commentaire ignorés"
@@ -137,6 +141,13 @@ EOF
 run_tool "$B" "$TMP/out/b.sarif" > /dev/null
 expect "plus de 2000 entrées dans un fichier : borné et signalé" \
 	"$(jq -r '[(.runs[0].results | length <= 2000), .runs[0].properties["scanoria/reach-index"].truncated] | map(tostring) | join(",")' "$TMP/out/b.sarif")" true,true
+# Motif pathologique pour les expressions JavaScript (près de 1 Mio) : temps borné.
+R="$TMP/redos"
+mkdir -p "$R"
+python3 -c 'import sys; open(sys.argv[1], "w").write("import a " * 110000)' "$R/a.js"
+start=$SECONDS
+rc=0; (cd "$TMP" && timeout 60 python3 -I "$TOOL" "$R" "$TMP/out/r.sarif") > /dev/null 2>&1 || rc=$?
+expect "motif pathologique : terminé en moins de 60 s (code $rc, $((SECONDS - start)) s)" "$rc" 0
 rc=0; run_tool > /dev/null 2>&1 || rc=$?
 expect "sans argument : refusé (code 2)" "$rc" 2
 rc=0; run_tool "$TMP/absent" "$TMP/out/x.sarif" > /dev/null 2>&1 || rc=$?

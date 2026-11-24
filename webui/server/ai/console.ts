@@ -46,13 +46,13 @@ const subjectFits = (b: { kind: string, subject_id: string }) => (TASKS[b.kind]?
 const SUBJECT_ISSUE = { message: 'subject_id does not match the task', path: ['subject_id'] }
 
 export const ExplainBody = z.strictObject({
-  kind: z.enum(TASK_KINDS as [string, ...string[]]),
+  kind: z.enum(COMPLETION_KINDS as [string, ...string[]]),
   subject_id: z.string().min(1).max(400),
   locale: z.enum(['fr', 'en']).optional(),
 }).refine(subjectFits, SUBJECT_ISSUE)
 
 export const OutputQuery = z.strictObject({
-  kind: z.enum(TASK_KINDS as [string, ...string[]]),
+  kind: z.enum(COMPLETION_KINDS as [string, ...string[]]),
   subject_id: z.string().min(1).max(400),
   locale: z.enum(['fr', 'en']).optional(),
 }).refine(subjectFits, SUBJECT_ISSUE)

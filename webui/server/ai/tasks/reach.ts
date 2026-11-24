@@ -18,7 +18,7 @@ import { z } from 'zod'
 import { redactText } from '../redact'
 import { sanitizeText } from '../sanitize'
 import { findingRow, oneOf, pickPackage, text, type TaskDefinition } from '../task-kit'
-import { ecosystemLanguages, ReachContext } from '../reach-context'
+import { ecosystemLanguages, exactImportNames, ReachContext } from '../reach-context'
 
 export const REACHABILITY = ['probable', 'improbable', 'indeterminate'] as const
 
@@ -136,9 +136,11 @@ export const assessReachability: TaskDefinition<ReachInput, ReachOutput> = {
     const citedRefs = [...new Set(reasons.map(r => r.ref).filter(r => r > 0))]
     let reachability = out.reachability
     // « Probable » sans emplacement cité, ou « improbable » sur un index qui ne
-    // couvre pas le langage ou a été tronqué : redevient « indéterminé ».
+    // couvre pas le langage, est incomplet, ou sans aucun emplacement quand le
+    // nom importé n'est pas certain (PyPI, Maven) : redevient « indéterminé ».
     const unsupported = (reachability === 'probable' && citedRefs.length === 0)
-      || (reachability === 'improbable' && (input.index.truncated || !input.index.covers_ecosystem))
+      || (reachability === 'improbable' && (input.index.truncated || !input.index.covers_ecosystem
+        || (input.locations.length === 0 && !exactImportNames(input.vulnerability.package?.ecosystem))))
     if (unsupported) reachability = 'indeterminate'
     return {
       reachability,

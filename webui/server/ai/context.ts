@@ -62,8 +62,11 @@ export function sanitizeReachContext(context: unknown): ReachContext | null {
   if (!parsed.success) return null
   return boundContext({
     ...parsed.data,
+    symbols: parsed.data.symbols.map(s => redactText(s).text.slice(0, 200)).filter(Boolean),
     locations: parsed.data.locations.map(l => ({
       ...l,
+      path: redactText(l.path).text.slice(0, 512) || '-',
+      module: redactText(l.module).text.slice(0, 300) || '-',
       symbol: redactText(l.symbol).text.slice(0, 200),
       excerpt: redactText(l.excerpt).text.slice(0, MAX_EXCERPT_CHARS),
     })),
