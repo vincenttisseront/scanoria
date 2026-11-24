@@ -10,7 +10,87 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.2.0 — non publiée
+## 0.3.0 — non publiée
+
+Analyses : les dépôts de l'entreprise sont analysés par les modules installés,
+les résultats réunis et triés, et un quality gate rend un verdict exploitable
+par la CI. Première aide de l'IA par un serveur Ollama externe, optionnelle.
+
+### Ajouté
+- **Projets et forges** (F1) : forges Forgejo et GitHub vérifiées puis
+  parcourues chaque heure, et projets découverts analysés à chaque commit.
+  On ajoute aussi un projet par son URL (jeton, ou clé SSH avec clé d'hôte
+  confirmée) ou par une archive. L'assistant d'ajout détecte langages,
+  gestionnaires de paquets, IaC et workflows. Il propose profil, quality gate,
+  planification et modules, sans rien installer sans confirmation. Les
+  secrets sont chiffrés en base (AES-256-GCM).
+- **File d'analyses** (`scanoria-worker`) : priorités release > PR >
+  planifié, anti-famine et quotas par projet (G17). Le plan de chaque analyse
+  est figé et peut être rejoué à l'identique (G11). Les erreurs
+  d'infrastructure sont relancées et jamais confondues avec « aucun
+  résultat » (G12). Section Analyses de la console et API `/api/scans`.
+- **Exécution confinée** (`scanoria-runner`, root) : chaque demande est
+  contrôlée comme hostile et le plan est vérifié. La récupération Git se fait
+  dans un conteneur confiné, puis chaque scanner tourne dans un conteneur
+  jetable sans réseau, avec ses bornes et ses mesures. Les sorties sont
+  vérifiées contre leur contrat (G2) et l'analyse reprend après un
+  redémarrage. gitleaks parcourt l'historique complet.
+- **Résultats unifiés** : ingestion SARIF et CycloneDX bornée, empreintes
+  stables (G19), gravités normalisées et éditables par l'administrateur avec
+  audit (G5), et rapport de couverture (G15). Pour le tri, un résultat
+  réapparu redevient `nouveau` et un résultat disparu passe `corrigé`. Les
+  exceptions sont motivées, limitées à un an et révocables. Sections
+  Résultats, Exceptions et Gravités.
+- **Suivi des secrets** (F7) : états `à révoquer`, `révoqué` et
+  `faux positif`, avec auteur et date. Ni la valeur ni l'extrait d'un secret
+  ne sont jamais gardés.
+- **Paquets malveillants** (H4) : un avis `MAL-` bloque toujours, sans
+  exception ni faux positif possible.
+- **Quality gate** : verdict `passed`, `failed` ou `inconclusive`, avec ses
+  raisons ordonnées et les actions qui le débloqueraient. Un outil absent, en
+  erreur ou incomplet rend le verdict non concluant (G13). Section Quality
+  gates et page Intégration CI de chaque projet.
+- **API pour la CI** : jetons par projet (seule leur empreinte est gardée),
+  `POST /api/projects/:id/scans` et `GET /api/scans/:id/verdict`, badge
+  désactivé par défaut. Client `scanoria-scan` qui rend 0 (passé), 1 (échec),
+  2 (non concluant) ou 3 (erreur d'usage ou d'accès).
+- **IA par un Ollama externe** (I1, I2, I9, I23) : seule l'adresse est à
+  saisir, et l'activation se confirme une fois. Le service système résout et
+  épingle le serveur, et n'ouvre la sortie que pour le service `scanoria-ai`.
+  Les modèles sont choisis par tâche, avec la raison affichée. Chaque tâche
+  passe un banc d'essai qui la désactive si elle échoue. Résultats et
+  verdicts sont expliqués avec la mention « proposé par IA ». Rien de secret
+  ne sort, le code analysé est traité comme donnée, et la console est
+  identique sans connecteur.
+- Migrations `003` à `005`.
+
+### Corrigé
+- **Extraction des mises à jour** : `zstd` était arrêté trop tôt, ce qui
+  faisait échouer une mise à jour par `E_ARCHIVE`, au hasard ou à coup sûr
+  avec un gros lot. Les mises à jour activent désormais les services ajoutés
+  par une nouvelle version.
+
+### À savoir avant de mettre à jour
+- Une appliance 0.1 ou 0.2 extrait la mise à jour avec l'ancien code : le
+  passage en ligne vers la 0.3 peut échouer par `E_ARCHIVE`. L'échec est
+  propre et rien n'est modifié. Dans ce cas, réinstaller depuis l'ISO 0.3.
+
+### Limites connues
+- Forges : la console doit pouvoir joindre la forge, et un nom DNS interne
+  non résolu n'est pas signalé. Une URL hors forge connue est analysée chaque
+  jour, sans détection. Une branche supprimée n'est pas signalée. GitLab
+  n'est pas encore pris en charge.
+- Runner : IPv4 seulement. Le pic mémoire d'un scanner est parfois absent.
+  Le service n'a pas encore de durcissement systemd.
+- Résultats : deux secrets de même longueur sur une même ligne partagent une
+  empreinte. Une nouvelle correspondance de gravité s'applique à l'analyse
+  suivante.
+- IA : le jeton porteur d'un proxy devant Ollama n'est pas encore accepté. Il
+  arrive en 0.4, avec une copie plus restreinte de la clé de chiffrement pour
+  `scanoria-ai`. Deux masquages des secrets coexistent et seront réunis.
+- Limite de débit de l'API gardée en mémoire (remise à zéro au redémarrage).
+
+## 0.2.0 — 2026-11-24
 
 Moteur de modules : le catalogue signé, l'installation des outils depuis la
 console et l'accès aux applications par leur nom.

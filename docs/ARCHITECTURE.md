@@ -744,6 +744,7 @@ le calcul.
 
 `Authorization: Bearer scn_…` (jeton de projet, `api_tokens`, seule l'empreinte
 SHA-256 est gardée). `POST /api/projects/:id/scans {ref, profile?}` → `202
-{scan_id, url}` ; `GET /api/scans/:id` → état et verdict. Le client
+{scan_id, url}` ; `GET /api/scans/:id/verdict` → état et verdict (`GET
+/api/scans/:id` est la route de la console, par session). Le client
 `scanoria-scan` attend le verdict et rend 0 (passed), 1 (failed), 2
 (inconclusive), 3 (erreur d'utilisation ou d'accès).
