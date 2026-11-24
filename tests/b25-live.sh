@@ -120,12 +120,13 @@ hx "$A" refresh-catalog '{}'
 expect "A : catalogue réel installé" "$(code)" OK
 GL_IMG=$(img gitleaks)
 # L'image ne doit venir que du lot : retirée du stockage de podman avant tout.
-podman rmi -f "$GL_IMG" > /dev/null 2>&1 || true
+podman rmi -f "$GL_IMG" "$(img git-fetch)" > /dev/null 2>&1 || true
 start=$SECONDS
 hx "$A" export-bundle '{"modules": ["gitleaks", "osv-db"]}'
 echo "durée de l'export : $((SECONDS - start)) s, taille : $(out .size_bytes) octets"
 expect "A : export" "$(code)" OK
-expect "A : contenu du lot" "$(out '.images | join(",")')/$(out '.feeds | join(",")')/$(out .testbeds)" gitleaks/osv-db/1
+# gitleaks requiert git-fetch (G1) : le lot porte les deux images et les deux bancs d'essai.
+expect "A : contenu du lot" "$(out '.images | sort | join(",")')/$(out '.feeds | join(",")')/$(out .testbeds)" git-fetch,gitleaks/osv-db/2
 BUNDLE="$A/var/lib/scanoria/bundles/$(out .name)"
 expect "A : lot signé par sa clé" "$(out .signer_fingerprint)" "$(jq -r .appliance_key.fingerprint "$A/var/lib/scanoria/offline/status.json")"
 expect "A : export sans pull dans podman" "$(podman image exists "$GL_IMG" && echo présente || echo absente)" absente
@@ -144,7 +145,7 @@ hx "$B" import-bundle '{"upload_id": "'"$id"'"}' --offline
 echo "durée de l'import : $((SECONDS - start)) s"
 expect "B : import hors ligne" "$(code)" OK
 expect "B : index du catalogue installé" "$(out .catalog.installed)/$(jq -r .version "$B/var/lib/scanoria/catalog/catalog-index.json")" true/1
-expect "B : image chargée par son empreinte" "$(podman image exists "$GL_IMG" && echo présente || echo absente)" présente
+expect "B : images chargées par leur empreinte" "$(podman image exists "$GL_IMG" && podman image exists "$(img git-fetch)" && echo présentes || echo absentes)" présentes
 expect "B : base osv-db, date d'origine gardée" "$(jq -r .updated_at "$B/var/lib/scanoria/feeds/.store/osv-db/status.json")" "$FEED_AT"
 expect "B : téléversement supprimé" "$([[ -e "$B/var/lib/scanoria/uploads/$id" ]] && echo reste || echo supprimé)" supprimé
 

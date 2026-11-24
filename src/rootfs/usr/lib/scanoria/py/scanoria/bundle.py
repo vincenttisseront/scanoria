@@ -298,8 +298,15 @@ def check_layout(dest, blobs, digest):
 def load_layout(dest, image, timeout):
     """Charge la disposition vérifiée dans le stockage de podman sous <dépôt>@<empreinte>."""
     repo, digest = image_ref(image)
-    r = common.run("skopeo", ["copy", "--quiet", "--preserve-digests", "oci:" + dest,
-                              "containers-storage:%s@%s" % (repo, digest)], timeout=timeout, stderr_tail=400)
+    # skopeo écrit les couches avec le masque du processus : celui du helper
+    # (027) rendrait les fichiers de l'image illisibles pour l'utilisateur
+    # confiné 65534 (« Permission denied » à l'exécution, mesuré en CI).
+    old = os.umask(0o022)
+    try:
+        r = common.run("skopeo", ["copy", "--quiet", "--preserve-digests", "oci:" + dest,
+                                  "containers-storage:%s@%s" % (repo, digest)], timeout=timeout, stderr_tail=400)
+    finally:
+        os.umask(old)
     if r.returncode != 0:
         raise Fail("E_BUNDLE_IMAGE", "image %s could not be loaded (%s)" % (
             repo, (r.stderr or b"").decode("utf-8", "replace").strip()[-200:] or "skopeo %d" % r.returncode))

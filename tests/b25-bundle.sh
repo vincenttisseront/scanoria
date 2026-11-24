@@ -62,7 +62,8 @@ cat > "$STUBS/skopeo" <<-EOF
 		dir:*) mkdir -p "\${dst#dir:}" && cp "$IMG"/* "\${dst#dir:}/" ;;
 		containers-storage:*)
 			[[ -f "\${src#oci:}/index.json" ]] || exit 1
-			echo "\${dst#containers-storage:}" >> "\$SCANORIA_TEST_ROOT/loaded-images" ;;
+			echo "\${dst#containers-storage:}" >> "\$SCANORIA_TEST_ROOT/loaded-images"
+			umask > "\$SCANORIA_TEST_ROOT/load-umask" ;;
 		*) exit 1 ;;
 		esac ;;
 	*) exit 1 ;;
@@ -257,6 +258,7 @@ hx "$B" import-bundle '{"upload_id": "'"$(upload "$B" "$GOOD")"'"}'
 expect "import : OK" "$(code)" OK
 expect "import : index du catalogue installé" "$(out .catalog.installed)/$(jq -r .version "$B/var/lib/scanoria/catalog/catalog-index.json")" true/12
 expect "import : banc d'essai" "$(sha256sum "$B/var/lib/scanoria/catalog/testbeds/$TB" | cut -d' ' -f1)" "$TB_SHA"
+expect "import : couches écrites lisibles par l'utilisateur confiné (umask 022)" "$(cat "$B/load-umask")" 0022
 expect "import : image chargée par son empreinte" "$(cat "$B/loaded-images")" "registry.exemple.test/scanoria/gitleaks@$DIGEST"
 expect "import : base appliquée, date d'origine gardée (G16)" "$(out '.feeds[0].applied')/$(jq -r .updated_at "$B/var/lib/scanoria/feeds/.store/osv-db/status.json")" "true/$FEED_AT"
 expect "import : base lisible par OSV-Scanner" "$([[ -f "$B/var/lib/scanoria/feeds/osv-db/osv-scalibr/npm/all.zip" ]] && echo oui)" oui
