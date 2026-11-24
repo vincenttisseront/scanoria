@@ -44,6 +44,8 @@ describe('modèles', () => {
     expect(sel.tasks['explain-finding']).toMatchObject({ model: 'a', reason: 'admin-default' })
     expect(sel.tasks['explain-verdict']).toMatchObject({ model: 'b', reason: 'admin-choice' })
     expect(sel.embedding).toMatchObject({ model: 'e1', reason: 'admin-choice' })
+    expect(selectModels(models, ['explain-finding'], { 'default': 'a', 'explain-finding': 'zz' }).tasks['explain-finding'])
+      .toMatchObject({ model: 'a', reason: 'admin-choice-missing-default' })
     // Nom saisi à la main absent du serveur : choix automatique, signalé.
     const missing = selectModels(models, ['explain-finding'], { default: 'zz', embedding: 'a' })
     expect(missing.tasks['explain-finding']).toMatchObject({ model: 'b', reason: 'admin-choice-missing' })

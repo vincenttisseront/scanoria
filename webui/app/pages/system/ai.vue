@@ -31,7 +31,7 @@ interface AiStatusResponse {
     resolution: { pinned: string[], current: string[], changed: boolean, error: string | null } | null
     candidate: { url: string, version: string, addresses: string[], insecure: boolean } | null
   } | null
-  probe: { status: string, error: string | null, at: string | null, version: string | null, pending?: boolean } | null
+  probe: { status: string, error: string | null, at: string | null, version: string | null, pending?: boolean, stalled?: boolean } | null
   models: { name: string, capabilities: string[], parameters_b?: number | null, context?: number | null }[]
   models_at?: string | null
   embedding: { model: string, reason: string } | null
@@ -158,7 +158,7 @@ const PROBE_POLL_MS = 1500
 const PROBE_POLL_MAX = 40
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 async function waitProbe() {
-  for (let i = 0; i < PROBE_POLL_MAX && info.value?.probe?.pending; i++) {
+  for (let i = 0; i < PROBE_POLL_MAX && info.value?.probe?.pending && !info.value.probe.stalled; i++) {
     await sleep(PROBE_POLL_MS)
     await refresh(true)
   }
@@ -170,7 +170,8 @@ async function rediscover() {
     await refresh(true)
     await waitProbe()
     const p = info.value?.probe
-    if (p?.pending) toast.add({ title: t('ai.models.stillRunning'), color: 'info', icon: 'i-lucide-loader' })
+    if (p?.stalled) toast.add({ title: t('ai.models.stalled'), color: 'warning', icon: 'i-lucide-triangle-alert' })
+    else if (p?.pending) toast.add({ title: t('ai.models.stillRunning'), color: 'info', icon: 'i-lucide-loader' })
     else if (p?.status === 'error') toast.add({ title: t('ai.models.unreachable', { cause: outcomeLabel(p.error ?? 'error') }), color: 'error', icon: 'i-lucide-circle-x' })
     else toast.add({ title: t('ai.models.discovered', { n: info.value?.models.length ?? 0 }), color: 'success', icon: 'i-lucide-circle-check' })
   }
@@ -181,7 +182,9 @@ async function rediscover() {
     probing.value = false
   }
 }
-const probeBusy = computed(() => probing.value || !!info.value?.probe?.pending)
+// Demande en attente depuis plus de deux minutes : scanoria-ai ne la traite pas.
+const probeStalled = computed(() => !!info.value?.probe?.stalled)
+const probeBusy = computed(() => probing.value || (!!info.value?.probe?.pending && !probeStalled.value))
 const probeFailed = computed(() => !probeBusy.value && info.value?.probe?.status === 'error')
 
 const AUTO = '__auto__'
@@ -195,7 +198,7 @@ const completionModels = computed(() => completionList.value.map(m => m.name))
 function modelLabel(m: ModelRow) {
   const parts = [m.name]
   if (typeof m.parameters_b === 'number') parts.push(m.parameters_b >= 1 ? `${Math.round(m.parameters_b * 10) / 10} B` : `${Math.round(m.parameters_b * 1000)} M`)
-  if (typeof m.context === 'number') parts.push(t('ai.models.contextK', { k: Math.round(m.context / 1024) }))
+  if (typeof m.context === 'number') parts.push(m.context >= 1024 ? t('ai.models.contextK', { k: Math.round(m.context / 1024) }) : t('ai.models.contextTokens', { n: m.context }))
   return parts.join(' · ')
 }
 /** Éléments d'une liste : automatique, modèles du serveur, choix actuel absent du serveur, saisie libre. */
@@ -218,6 +221,11 @@ const custom = reactive<Record<'default' | 'embedding', { open: boolean, value: 
   default: { open: false, value: '' },
   embedding: { open: false, value: '' },
 })
+const customOpen = (key: 'default' | 'embedding') => custom[key].open
+const customValue = (key: 'default' | 'embedding') => custom[key].value
+function setCustom(key: 'default' | 'embedding', v: string | number | null | undefined) {
+  custom[key].value = v == null ? '' : String(v)
+}
 const customValid = (key: 'default' | 'embedding') => MODEL_NAME_RE.test(custom[key].value.trim())
 function pickGlobal(key: 'default' | 'embedding', value: string) {
   if (value === OTHER) {
@@ -494,6 +502,15 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
           {{ t('ai.models.discovering') }}
         </p>
         <UAlert
+          v-else-if="probeStalled"
+          class="mb-3"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-triangle-alert"
+          data-testid="ai-probe-stalled"
+          :title="t('ai.models.stalled')"
+        />
+        <UAlert
           v-else-if="probeFailed"
           class="mb-3"
           color="error"
@@ -516,38 +533,39 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
           data-testid="ai-model-pickers"
         >
           <div
-            v-for="key in (['default', 'embedding'] as const)"
-            :key="key"
-            :data-testid="`ai-pick-${key}`"
+            v-for="which in (['default', 'embedding'] as const)"
+            :key="which"
+            :data-testid="`ai-pick-${which}`"
           >
             <p class="mb-1 text-sm font-medium">
-              {{ t(key === 'default' ? 'ai.models.generation' : 'ai.models.embedding') }}
+              {{ t(which === 'default' ? 'ai.models.generation' : 'ai.models.embedding') }}
             </p>
             <template v-if="isAdmin">
               <USelect
-                :model-value="(key === 'default' ? info.defaults?.generation : info.defaults?.embedding) ?? AUTO"
-                :items="key === 'default' ? generationItems : embeddingItems"
-                :loading="savingKind === key"
-                :disabled="savingKind === key"
+                :model-value="(which === 'default' ? info.defaults?.generation : info.defaults?.embedding) ?? AUTO"
+                :items="which === 'default' ? generationItems : embeddingItems"
+                :loading="savingKind === which"
+                :disabled="savingKind === which"
                 class="w-full"
-                @update:model-value="pickGlobal(key, $event)"
+                @update:model-value="pickGlobal(which, $event)"
               />
               <div
-                v-if="custom[key].open"
+                v-if="customOpen(which)"
                 class="mt-2 flex gap-2"
               >
                 <UInput
-                  v-model="custom[key].value"
-                  :placeholder="key === 'default' ? 'qwen2.5-coder:14b' : 'nomic-embed-text'"
+                  :model-value="customValue(which)"
+                  :placeholder="which === 'default' ? 'qwen2.5-coder:14b' : 'nomic-embed-text'"
                   class="flex-1 font-mono"
-                  :data-testid="`ai-custom-${key}`"
-                  @keydown.enter="saveCustom(key)"
+                  :data-testid="`ai-custom-${which}`"
+                  @update:model-value="setCustom(which, $event)"
+                  @keydown.enter="saveCustom(which)"
                 />
                 <UButton
                   :label="t('ai.models.use')"
-                  :disabled="!customValid(key)"
-                  :loading="savingKind === key"
-                  @click="saveCustom(key)"
+                  :disabled="!customValid(which)"
+                  :loading="savingKind === which"
+                  @click="saveCustom(which)"
                 />
               </div>
             </template>
@@ -555,11 +573,14 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
               v-else
               class="font-mono text-sm"
             >
-              {{ (key === 'default' ? info.defaults?.generation : info.defaults?.embedding) ?? t('ai.models.automatic') }}
+              {{ (which === 'default' ? info.defaults?.generation : info.defaults?.embedding) ?? t('ai.models.automatic') }}
             </p>
           </div>
         </div>
-        <p class="mb-2 text-sm text-muted">
+        <p
+          v-if="isAdmin"
+          class="mb-2 text-sm text-muted"
+        >
           {{ t('ai.models.perTask') }}
         </p>
         <div class="overflow-x-auto">

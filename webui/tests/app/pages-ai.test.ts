@@ -196,7 +196,7 @@ describe('page Système › IA', () => {
 
   it('liste déroulante des modèles : rédaction et embedding, saisie libre, découverte suivie, serveur injoignable', async () => {
     setUser('admin')
-    let status = activeStatus({
+    let status: Record<string, unknown> = activeStatus({
       models: [
         { name: 'qwen-test:14b', capabilities: ['completion'], parameters_b: 14.8, context: 32768 },
         { name: 'small-test:3b', capabilities: ['completion'], parameters_b: 3, context: 8192 },
@@ -257,6 +257,18 @@ describe('page Système › IA', () => {
     expect(alert).toContain('Liste des modèles indisponible : jeton refusé par le serveur (401 ou 403).')
     expect(alert).toContain('dernière liste connue')
     expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ color: 'error' }))
+  })
+
+  it('découverte jamais traitée : avertissement au lieu d’une attente sans fin', async () => {
+    setUser('admin')
+    route('GET', '/api/ai/status', () => activeStatus({ probe: { status: 'queued', error: null, at: null, version: null, pending: true, stalled: true } }))
+    route('GET', '/api/ai/calls', () => ({ calls: [] }))
+    route('GET', '/api/ai/agreement', () => ({ days: 90, items: [] }))
+    const w = await mountIn(AiPage)
+    await settle()
+    expect(w.find('[data-testid="ai-probe-stalled"]').text()).toContain('Le service IA ne traite pas la demande')
+    expect(w.find('[data-testid="ai-probe-pending"]').exists()).toBe(false)
+    expect(button('Redécouvrir les modèles').disabled).toBe(false)
   })
 
   it('découverte en cours : indicateur d’attente et bouton occupé', async () => {

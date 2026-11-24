@@ -15,7 +15,7 @@ export interface ModelInfo {
   family: string | null
 }
 
-export type SelectionReason = 'admin-choice' | 'admin-default' | 'only-model' | 'best-balance' | 'largest-context' | 'admin-choice-missing'
+export type SelectionReason = 'admin-choice' | 'admin-default' | 'admin-choice-missing-default' | 'only-model' | 'best-balance' | 'largest-context' | 'admin-choice-missing'
 
 /**
  * Clés réservées des choix forcés (appliance_settings ai.models), à côté des
@@ -96,7 +96,7 @@ export function selectModels(models: ModelInfo[], taskKinds: readonly string[], 
     const own = overrides[kind]
     const forced = own ? completion.find(m => m.name === own) : undefined
     if (forced) tasks[kind] = choice(forced, 'admin-choice')
-    else if (forcedDefault) tasks[kind] = choice(forcedDefault, 'admin-default')
+    else if (forcedDefault) tasks[kind] = choice(forcedDefault, own ? 'admin-choice-missing-default' : 'admin-default')
     else if (ranked.length === 0) tasks[kind] = null
     else tasks[kind] = choice(ranked[0]!, own || fallback ? 'admin-choice-missing' : ranked.length === 1 ? 'only-model' : 'best-balance')
   }
