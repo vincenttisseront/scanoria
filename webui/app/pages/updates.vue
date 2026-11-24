@@ -193,6 +193,7 @@ const anyRunning = computed(() =>
   checkReq.running.value || installReq.running.value || rollbackReq.running.value
   || policyReq.running.value || uploadReq.running.value || !!uploading.value,
 )
+const vigilanceBanner = ref<{ load: () => Promise<void> } | null>(null)
 const codeLabel = (code: string | null | undefined) => (code && te(`codes.${code}`) ? t(`codes.${code}`) : code ?? '')
 </script>
 
@@ -202,6 +203,7 @@ const codeLabel = (code: string | null | undefined) => (code && te(`codes.${code
       :data="data"
       :failed="failed"
     />
+    <VigilanceBanner ref="vigilanceBanner" />
 
     <div
       v-if="state"
@@ -480,6 +482,8 @@ const codeLabel = (code: string | null | undefined) => (code && te(`codes.${code
         :empty="t('common.none')"
       />
     </UCard>
+
+    <VigilanceAppliancePanel @changed="vigilanceBanner?.load()" />
 
     <ConfirmModal
       v-model:open="installModal"

@@ -209,6 +209,10 @@ assemble_stage() { # srcroot webui_output dest repo
 	validate_rootfs "$stage/rootfs" || return 1
 	mkdir -p "$stage/rootfs/usr/share/scanoria"
 	jq -n --arg repo "$repo" '{repo: $repo}' > "$stage/rootfs/usr/share/scanoria/update-source.json"
+	if [[ -f "$stage/webui/console.cdx.json" ]]; then
+		mkdir -p "$stage/rootfs/usr/share/scanoria/sbom"
+		mv "$stage/webui/console.cdx.json" "$stage/rootfs/usr/share/scanoria/sbom/console.cdx.json"
+	fi
 	# Liste des fichiers déployés (chemins absolus sur l'appliance), MANIFEST compris.
 	(
 		cd "$stage/rootfs"
@@ -312,6 +316,22 @@ build_webui() { # work
 		npm run build
 	)
 	[[ -f "$1/webui/.output/server/index.mjs" ]] || die "la construction n'a pas produit webui/.output"
+}
+
+# F19 (0.6) : SBOM CycloneDX de la console (dépendances de production, lues
+# dans package-lock.json), livré dans le lot signé sous
+# /usr/share/scanoria/sbom/console.cdx.json. Rendu déterministe : horodatage
+# = SOURCE_DATE_EPOCH, numéro de série dérivé du contenu. Un échec n'arrête
+# pas la construction : l'appliance signale alors un trou de couverture.
+console_sbom() { # work
+	local out="$1/webui/.output/console.cdx.json" raw serial built
+	raw=$(cd "$1/webui" && npm sbom --sbom-format=cyclonedx --omit=dev --package-lock-only 2> /dev/null) \
+		|| { log "AVERTISSEMENT : SBOM de la console non produit (npm sbom)"; return 0; }
+	built=$(date -u -d "@${SOURCE_DATE_EPOCH:-0}" +%Y-%m-%dT%H:%M:%SZ)
+	serial=$(jq -cS 'del(.serialNumber, .metadata.timestamp)' <<< "$raw" | sha256sum | cut -c1-32)
+	serial="${serial:0:8}-${serial:8:4}-5${serial:13:3}-a${serial:17:3}-${serial:20:12}"
+	jq --arg s "urn:uuid:$serial" --arg t "$built" '.serialNumber = $s | .metadata.timestamp = $t' <<< "$raw" > "$out" \
+		|| { log "AVERTISSEMENT : SBOM de la console illisible"; rm -f "$out"; }
 }
 
 check_pubkey() { # src
@@ -459,6 +479,7 @@ in_container() { # mode
 		build_iso "$work/src" "$work" "$out" "$cache" "$version" "$out"
 	else
 		build_webui "$work/src"
+		console_sbom "$work/src"
 		stage=$(assemble_stage "$work/src" "$work/src/webui/.output" "$work/stage" "$repo") \
 			|| die "assemblage du lot refusé"
 		if [[ "$mode" == stage ]]; then

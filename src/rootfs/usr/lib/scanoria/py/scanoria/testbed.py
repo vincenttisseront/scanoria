@@ -238,11 +238,47 @@ def _mkdirs(base, rel):
             raise Fail("E_ARCHIVE", "path conflict in the testbed archive")
 
 
+CACHE = common.VARLIB + "/modules/testbeds"
+SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def _from_cache(digest, dest):
+    """Archive déjà vérifiée (0.6, canaris G14 hors ligne) : copiée si son empreinte concorde."""
+    path = os.path.join(CACHE, digest + ".tar.zst")
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_ARCHIVE:
+        return False
+    shutil.copyfile(path, dest)
+    if selfupdate.sha256_file(dest) == digest:
+        return True
+    os.unlink(dest)
+    return False
+
+
+def _to_cache(digest, src):
+    try:
+        os.makedirs(CACHE, mode=0o700, exist_ok=True)
+        tmp = os.path.join(CACHE, ".%s.part" % digest)
+        shutil.copyfile(src, tmp)
+        os.chmod(tmp, 0o600)
+        os.rename(tmp, os.path.join(CACHE, digest + ".tar.zst"))
+    except OSError as e:
+        common.log("testbed cache not written: %s" % e)
+
+
 def fetch_archive(manifest, dest):
-    """Télécharge et vérifie l'archive du banc d'essai déclarée dans l'index."""
+    """Télécharge et vérifie l'archive du banc d'essai déclarée dans l'index.
+
+    0.6 : l'archive vérifiée est gardée par empreinte, pour que les canaris
+    nocturnes (G14) rejouent le banc d'essai sans Internet."""
     name, digest = manifest.get("testbed_archive"), manifest.get("testbed_sha256")
     if not isinstance(name, str) or not isinstance(digest, str):
         raise Fail("E_TESTBED", "module %s has no testbed in the catalog" % manifest["id"])
+    if SHA256_RE.match(digest) and _from_cache(digest, dest):
+        return
     src = catalogverify.source_info()
     if src is None:
         raise Fail("E_PRECONDITION", "catalog source unknown: refresh the catalog")
@@ -252,6 +288,8 @@ def fetch_archive(manifest, dest):
         raise Fail("E_NETWORK", "cannot download the testbed (HTTP %d)" % code)
     if selfupdate.sha256_file(dest) != digest:
         raise Fail("E_CHECKSUM", "testbed checksum mismatch")
+    if SHA256_RE.match(digest):
+        _to_cache(digest, dest)
 
 
 # --------------------------------------------------------------------------

@@ -69,7 +69,11 @@ export const scanJobSchema = z.strictObject({
     id: moduleId,
     version: z.string().min(1).max(64),
     options: z.record(z.string(), z.unknown()).optional(),
+    // 0.6 (B, contrats 24 et 25) : version figée ou candidate d'un essai.
+    image_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
   })).min(1).max(64).refine(list => new Set(list.map(m => JSON.stringify(m))).size === list.length),
+  // 0.6 (B, contrat 25) : analyse d'essai F13.
+  trial: z.boolean().optional(),
 })
 export type ScanJob = z.infer<typeof scanJobSchema>
 

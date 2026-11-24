@@ -46,6 +46,9 @@ export const REQUEST_TYPES = [
   'restore-module',
   'reset-service-admin',
   'package-dates',
+  'self-sbom',
+  'run-canaries',
+  'start-trial',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -64,6 +67,7 @@ export const RESULT_CODES = [
   'E_SONAR_UNAVAILABLE', 'E_SONAR_ADMIN', 'E_SONAR_API',
   'E_DTRACK_UNAVAILABLE', 'E_DTRACK_ADMIN', 'E_DTRACK_API',
   'E_EXPORT_FAILED',
+  'E_CANARY_FAILED', 'E_TRIAL_INVALID', 'E_TRIAL_IMAGE', 'E_SELFSBOM_IMAGE', 'E_SELFSBOM_OUTPUT',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 
@@ -163,6 +167,17 @@ export const requestParamSchemas = {
   'backup-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE) }),
   'restore-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE), backup: z.string().regex(BACKUP_ID_RE) }),
   'reset-service-admin': z.strictObject({ id: z.string().regex(MODULE_ID_RE) }),
+  // 0.6 (B) : F19, G14, F13.
+  'self-sbom': z.strictObject({}),
+  'run-canaries': z.strictObject({
+    ids: z.array(z.string().regex(MODULE_ID_RE)).min(1).max(64).refine(unique, { message: 'duplicate' }).optional(),
+  }),
+  'start-trial': z.strictObject({
+    module: z.string().regex(MODULE_ID_RE),
+    version: z.string().regex(MODULE_VERSION_RE),
+    trial_id: uuidSchema.optional(),
+    action: z.enum(['start', 'abandon']).optional(),
+  }),
 } satisfies Record<RequestType, z.ZodType>
 
 export type RequestParams<T extends RequestType> = z.infer<(typeof requestParamSchemas)[T]>

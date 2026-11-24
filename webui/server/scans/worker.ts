@@ -30,10 +30,15 @@ import { aiLogContext } from '../ai/context'
 import type { WorkerConfig } from './config'
 import { awaitPackageDates, recordDatesGap } from '../sbom/dates'
 import { isRecorrelation, recorrelationPlan, recorrelationSource, reportRecorrelation } from './recorrelate'
+import { loadPins } from '../vigilance/pins'
+import { readVigilanceState } from '../vigilance/state'
+import { TRIAL_TRIGGER, concludeTrial, isTrialScan, recordTrialModule } from '../vigilance/trials'
 
 export interface WorkerPaths {
   modulesStateFile: string
   catalogIndexFile: string
+  /** 0.6 (B) : images retenues par le helper (versions figées, candidates d'un essai). */
+  vigilanceStateFile?: string
 }
 
 type Log = (msg: string) => void
@@ -190,7 +195,9 @@ export class ScanWorker {
           await client.query(
             `INSERT INTO scan_modules (scan_id, module_id, module_version, image_digest, feeds, status, error_class)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [scan.id, m.id, m.version, m.image_digest, JSON.stringify(m.feeds), isMissing ? 'missing' : 'pending', isMissing ? 'input' : null])
+            [scan.id, m.id, m.version, m.image_digest, JSON.stringify(m.feeds), isMissing ? 'missing' : 'pending',
+              // 0.6 (B) : une version figée ou candidate absente est une erreur d'infrastructure (G12).
+              isMissing ? (m.alternate ? 'infra' : 'input') : null])
         }
         const runnable = plan.modules.filter(m => !missing.some(x => x.id === m.id))
         const coverage = JSON.stringify({ gaps: plan.gaps })
@@ -245,8 +252,9 @@ export class ScanWorker {
     if (!state.available) throw new Deferred(err('E_MODULES_STATE', 'infra', 'installed modules state is unavailable'))
     const existing = scan.plan ? parsePlan(scan.plan) : null
     if (scan.plan && !existing) throw new ScanFailure(err('E_SCAN_PLAN', 'input', 'stored plan is invalid'))
+    const retained = this.paths.vigilanceStateFile ? await this.retainedImages() : undefined
     if (existing) {
-      const { missing } = replayAvailability(existing, state.modules)
+      const { missing } = replayAvailability(existing, state.modules, retained)
       return { plan: existing, missing }
     }
     const pr = await client.query<{ source_kind: 'git' | 'archive', spdx_license: string | null }>(
@@ -270,6 +278,8 @@ export class ScanWorker {
           installed: state.modules,
           catalog,
           timeoutOverrides: await loadTimeoutOverrides(client),
+          // 0.6 (B, contrat 24) : versions figées du projet (G6).
+          pins: await loadPins(client, scan.project_id),
         })
     const plan: ScanPlan = {
       version: PLAN_VERSION,
@@ -281,7 +291,14 @@ export class ScanWorker {
       gaps,
       timeout_s: planTimeout(modules),
     }
-    return { plan, missing: [] }
+    // Version figée absente de la machine : « missing », classe infra (contrat 24).
+    return { plan, missing: replayAvailability(plan, state.modules, retained).missing.filter(m => m.alternate) }
+  }
+
+  /** Images retenues publiées par le helper ; null si l'état est illisible (le runner tranche alors). */
+  private async retainedImages(): Promise<import('../vigilance/pins').RetainedImage[] | null> {
+    const st = await readVigilanceState(this.paths.vigilanceStateFile!)
+    return st.available ? st.retained : null
   }
 
   /** Tâche du runner ; le secret de la source est déchiffré ici, au dernier moment, et jamais journalisé. */
@@ -319,7 +336,10 @@ export class ScanWorker {
       project_id: scan.project_id,
       created_at: new Date().toISOString(),
       source,
-      modules: modules.map(m => ({ id: m.id, version: m.version, options: m.options })),
+      modules: modules.map(m => ({ id: m.id, version: m.version, options: m.options,
+        // 0.6 (B, contrats 24 et 25) : le runner ne lance cette empreinte que si le helper la retient.
+        ...(m.alternate && m.image_digest ? { image_digest: m.image_digest } : {}) })),
+      ...(scan.trigger === TRIAL_TRIGGER ? { trial: true } : {}),
     }
     const parsed = scanJobSchema.safeParse(job)
     // Message générique : la tâche peut contenir un secret, jamais recopié.
@@ -456,6 +476,8 @@ export class ScanWorker {
   private async recordModules(scan: ActiveRow, result: ScanResult, plan: ScanPlan | null, redact: (t: string) => string): Promise<boolean> {
     const rows = await this.pool.query<{ module_id: string, status: ScanModuleStatus }>('SELECT module_id, status FROM scan_modules WHERE scan_id = $1', [scan.id])
     let complete = result.status === 'ok'
+    // 0.6 (B, contrat 25) : une analyse d'essai n'ingère rien, elle compare (G19).
+    const trial = await isTrialScan(this.pool, scan.id)
     for (const row of rows.rows) {
       const m = result.modules.find(x => x.id === row.module_id)
       if (!m) {
@@ -475,6 +497,19 @@ export class ScanWorker {
         this.log(`scan ${scan.id} module ${m.id}: image digest differs from the plan`)
         status = 'error'
         errorClass = 'infra'
+      }
+      else if (m.status === 'ok' && trial) {
+        const outputs = Object.fromEntries(Object.entries(m.outputs).filter((e): e is [string, string] => typeof e[1] === 'string'))
+        const out = await recordTrialModule(this.pool, { scanId: scan.id, moduleId: m.id, resultDir: resultDir(this.cfg.scansDir, scan.job_id), outputs })
+          .catch((e: unknown) => {
+            this.log(`scan ${scan.id} module ${m.id}: trial comparison failed: ${(e as Error).message}`)
+            return null
+          })
+        if (out === null) {
+          status = 'invalid-output'
+          errorClass = 'tool'
+        }
+        else count = out
       }
       else if (m.status === 'ok') {
         try {
@@ -617,6 +652,11 @@ export class ScanWorker {
    * enregistré, puis explication IA demandée (contrat 7, sans effet si l'IA est inactive).
    */
   async conclude(scanId: string, outcome: { status: 'done' | 'error', error: RunnerError | null, complete: boolean }): Promise<void> {
+    // 0.6 (B, contrat 25) : analyse d'essai, ni résultats, ni verdict, ni IA, ni statut.
+    if (await isTrialScan(this.pool, scanId)) {
+      await concludeTrial(this.pool, scanId, outcome).catch((e: unknown) => this.log(`scan ${scanId}: trial: ${(e as Error).message}`))
+      return
+    }
     // 0.5 (B) : une re-corrélation ne déclare jamais un résultat corrigé (contrat 16) ;
     // une release attend les dates de publication de ses composants (H5).
     const complete = outcome.complete && !(await isRecorrelation(this.pool, scanId))

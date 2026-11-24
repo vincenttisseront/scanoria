@@ -7,6 +7,7 @@ import { defineEventHandler } from 'h3'
 import { getConfig } from '../utils/config'
 import { getRunningVersion } from '../utils/appliance'
 import { PROJECT_OPS, projectSchemas } from '../projects/openapi'
+import { VIGILANCE_OPS, vigilanceSchemas } from '../vigilance/openapi'
 
 type Role = 'public' | 'viewer' | 'operator' | 'admin'
 
@@ -107,6 +108,7 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/badges/{name}': { get: { summary: 'Latest verdict badge, /api/badges/<project slug>.svg (404 unless enabled for the project)', role: 'public' } },
   '/api/badges/projects/{id}': { put: { summary: 'Enable or disable the public badge of a project (disabled by default)', role: 'operator', body: 'BadgeUpdate' } },
   ...PROJECT_OPS,
+  ...VIGILANCE_OPS,
   '/api/scans': {
     get: { summary: 'Scan queue (status=active, in worker order) or history (filters: project, status, verdict, trigger; paginated)', role: 'viewer' },
     post: { summary: 'Queue a manual scan {project_id, ref?, profile?}; 200 when merged into an identical queued scan', role: 'operator', body: 'ScanCreate', status: 202 },
@@ -351,6 +353,7 @@ export default defineEventHandler(async () => {
           properties: { password: { type: 'string', minLength: 12, maxLength: 1024 }, must_change_password: { type: 'boolean' } },
         },
         ...projectSchemas(),
+        ...vigilanceSchemas(),
         FindingStatus: {
           type: 'object', additionalProperties: false, required: ['status'],
           properties: {

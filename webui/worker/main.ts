@@ -66,7 +66,7 @@ async function main(): Promise<void> {
     service = new WorkerService({
       pool,
       cfg,
-      paths: { modulesStateFile: consoleCfg.modulesStateFile, catalogIndexFile: consoleCfg.catalogIndexFile },
+      paths: { modulesStateFile: consoleCfg.modulesStateFile, catalogIndexFile: consoleCfg.catalogIndexFile, vigilanceStateFile: consoleCfg.vigilanceStateFile },
       integrations: defaultIntegrations,
       version: version(consoleCfg.versionFile),
       log,

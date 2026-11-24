@@ -60,7 +60,10 @@
             "backup-module",
             "restore-module",
             "reset-service-admin",
-            "package-dates"
+            "package-dates",
+            "self-sbom",
+            "run-canaries",
+            "start-trial"
           ]
         }
       ]
@@ -132,7 +135,12 @@
         "E_DTRACK_UNAVAILABLE",
         "E_DTRACK_ADMIN",
         "E_DTRACK_API",
-        "E_EXPORT_FAILED"
+        "E_EXPORT_FAILED",
+        "E_CANARY_FAILED",
+        "E_TRIAL_INVALID",
+        "E_TRIAL_IMAGE",
+        "E_SELFSBOM_IMAGE",
+        "E_SELFSBOM_OUTPUT"
       ]
     },
     "message": {

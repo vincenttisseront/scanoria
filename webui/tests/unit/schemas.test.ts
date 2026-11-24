@@ -188,6 +188,26 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
     valid: [{ id: 'sonarqube' }],
     invalid: [{}, { id: 'Sonar' }, { id: '../sonarqube' }, { id: 'sonarqube', password: 'x' }],
   },
+  'self-sbom': {
+    valid: [{}],
+    invalid: [{ subject: 'console' }, { ids: ['gitleaks'] }],
+  },
+  'run-canaries': {
+    valid: [{}, { ids: ['gitleaks', 'osv-scanner'] }],
+    invalid: [{ ids: [] }, { ids: ['../gitleaks'] }, { ids: ['Gitleaks'] }, { ids: 'gitleaks' }, { all: true }],
+  },
+  'start-trial': {
+    valid: [
+      { module: 'gitleaks', version: '8.30.1' },
+      { module: 'gitleaks', version: '8.30.1', trial_id: '0b6f9c2e-1d3a-4c5b-8e7f-9a0b1c2d3e4f', action: 'start' },
+      { module: 'gitleaks', version: '8.30.1', trial_id: '0b6f9c2e-1d3a-4c5b-8e7f-9a0b1c2d3e4f', action: 'abandon' },
+    ],
+    invalid: [
+      {}, { module: 'gitleaks' }, { module: '../gitleaks', version: '8.30.1' }, { module: 'gitleaks', version: '8.30.1;rm' },
+      { module: 'gitleaks', version: '8.30.1', action: 'adopt' }, { module: 'gitleaks', version: '8.30.1', trial_id: 'x' },
+      { module: 'gitleaks', version: '8.30.1', image: 'ghcr.io/x@sha256:00' },
+    ],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {

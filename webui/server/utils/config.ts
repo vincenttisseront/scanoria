@@ -19,6 +19,12 @@ export interface ConsoleConfig {
   modulesStateFile: string
   /** État DNS publié par le helper (contrat 4). */
   dnsStatusFile: string
+  /** 0.6 (B) : état de vigilance publié par le helper (images retenues, SBOM de l'appliance). */
+  vigilanceStateFile: string
+  /** 0.6 (B) : SBOM et SARIF de l'appliance (F19), publiés par le helper. */
+  vigilanceSelfDir: string
+  /** 0.6 (B, G6) : versions figées publiées par la console pour le helper. */
+  pinsFile: string
   /** Prend l'adresse cliente dans X-Real-IP quand la connexion vient de la boucle locale (nginx). */
   trustProxy: boolean
   /** Applique les migrations au démarrage du serveur (en plus de migrate.mjs). */
@@ -46,6 +52,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConsoleConfig 
     catalogIndexFile: env.NUXT_CATALOG_INDEX_FILE || '/var/lib/scanoria/catalog/catalog-index.json',
     modulesStateFile: env.NUXT_MODULES_STATE_FILE || '/var/lib/scanoria/modules/state.json',
     dnsStatusFile: env.NUXT_DNS_STATUS_FILE || '/var/lib/scanoria/dns/status.json',
+    vigilanceStateFile: env.NUXT_VIGILANCE_STATE_FILE || '/var/lib/scanoria/vigilance/state.json',
+    vigilanceSelfDir: env.NUXT_VIGILANCE_SELF_DIR || '/var/lib/scanoria/vigilance/self',
+    pinsFile: env.NUXT_PINS_FILE || '/var/lib/scanoria/console/pins.json',
     trustProxy: bool(env.NUXT_TRUST_PROXY, true),
     migrateOnStart: bool(env.NUXT_MIGRATE_ON_START, true),
     ingestIntervalMs: Number.isFinite(interval) && interval >= 200 ? interval : 5000,

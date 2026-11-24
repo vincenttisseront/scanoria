@@ -35,7 +35,7 @@ import urllib.parse
 
 import contextlib
 
-from . import catalogverify, common, feeds, fetch, modules, sbom, schema, svcnet, testbed
+from . import catalogverify, common, feeds, fetch, modules, sbom, schema, svcnet, testbed, vigilance
 from .common import Fail
 
 
@@ -373,6 +373,16 @@ def plan(reg, job):
         mid, ver = item["id"], item["version"]
         e = reg["modules"].get(mid)
         m = e.get("manifest") if isinstance(e, dict) else None
+        # 0.6 (B, contrats 24 et 25) : version figée par le projet ou candidate d'un essai.
+        alt = vigilance.alternate(e, item) if isinstance(m, dict) and e.get("status") == "healthy" \
+            and e.get("enabled") is True else None
+        if alt is False:
+            out.append((_module_entry(mid, ver, "missing", _err(
+                "E_IMAGE_MISSING", "infra", "version %s of module %s is not kept on this appliance" % (ver, mid))),
+                None))
+            continue
+        if alt is not None:
+            m = alt
         if not isinstance(m, dict) or e.get("status") != "healthy" or e.get("enabled") is not True \
                 or m.get("version") != ver:
             out.append((_module_entry(mid, ver, "missing", _err(
