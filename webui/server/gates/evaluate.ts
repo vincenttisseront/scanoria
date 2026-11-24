@@ -452,10 +452,15 @@ export function planIsPre05(plan: unknown): boolean {
   return rules !== undefined && isPre05(rules)
 }
 
+/** G11 : règle de la 0.6 absente d'un plan plus ancien = désactivée au rejeu (G16 seulement signalé). */
+const PRE_06_RULES = { feed_max_age_days: null } as const
+
 export function rulesFromPlan(plan: unknown): GateRules | null {
   const rules = (plan as { gate?: { rules?: unknown } } | null)?.gate?.rules
   if (rules === undefined) return null
-  const parsed = GateRules.safeParse(isPre05(rules) ? { ...PRE_05_RULES, ...rules } : rules)
+  if (typeof rules !== 'object' || rules === null || Array.isArray(rules)) return null
+  const pre06 = 'feed_max_age_days' in rules ? {} : PRE_06_RULES
+  const parsed = GateRules.safeParse(isPre05(rules) ? { ...PRE_05_RULES, ...pre06, ...rules } : { ...pre06, ...rules })
   return parsed.success ? parsed.data : null
 }
 

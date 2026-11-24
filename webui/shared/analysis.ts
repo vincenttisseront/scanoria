@@ -71,6 +71,8 @@ export const GateRules = z.object({
   kev_blocks: z.boolean().default(true), // H3 : CVE du catalogue KEV bloquante, quelle que soit sa gravité
   epss_block_from: z.number().min(0).max(1).nullable().default(0.1), // H3 : EPSS au-dessus du seuil bloquant ; null = ignoré
   quarantine_days: z.number().int().min(0).max(90).default(7), // H5 : 0 = pas de quarantaine
+  // 0.6 (contrat 20, figé par l'intégrateur)
+  feed_max_age_days: z.number().int().min(1).max(365).nullable().default(7), // G16 : base plus vieille = non concluant ; null = seulement signalé
 }).strict()
 export type GateRules = z.infer<typeof GateRules>
 
@@ -119,5 +121,5 @@ export const ExceptionTargets = {
 export type ExceptionKind = (typeof EXCEPTION_KINDS)[number]
 
 /** Sujets d'une tâche IA (ai_tasks.subject_type, migration 006). */
-export const AI_SUBJECT_TYPES = ['finding', 'scan', 'testbed', 'rule', 'module', 'license'] as const
+export const AI_SUBJECT_TYPES = ['finding', 'scan', 'testbed', 'rule', 'module', 'license', 'appliance'] as const
 export type AiSubjectType = (typeof AI_SUBJECT_TYPES)[number]

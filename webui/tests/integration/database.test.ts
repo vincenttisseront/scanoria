@@ -54,19 +54,54 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
     })
   })
 
+  describe('socle 0.6 (012)', () => {
+    it('essais, résultats externes, statut not-applicable et réutilisation', async () => {
+      const q = db.pool
+      const p = (await q.query<{ id: string }>(`SELECT id FROM profiles ORDER BY slug LIMIT 1`)).rows[0]!.id
+      const g = (await q.query<{ id: string, rules: Record<string, unknown> }>(`SELECT id, rules FROM gates WHERE slug = 'defaut'`)).rows[0]!
+      expect(g.rules.feed_max_age_days).toBe(7)
+      const project = (await q.query<{ id: string }>(
+        `INSERT INTO projects (slug, name, source_kind, profile_id, gate_id) VALUES ('socle06', 'socle06', 'archive', $1, $2) RETURNING id`, [p, g.id])).rows[0]!.id
+      const digest = `sha256:${'a'.repeat(64)}`
+      const trial = (await q.query<{ id: string }>(
+        `INSERT INTO module_trials (module_id, from_version, to_version, to_digest) VALUES ('trivy', '1.0.0', '1.1.0', $1) RETURNING id`, [digest])).rows[0]!.id
+      await expect(q.query(`INSERT INTO module_trials (module_id, from_version, to_version, to_digest) VALUES ('trivy', '1.0.0', '1.2.0', $1)`, [digest]))
+        .rejects.toThrow(/module_trials_running_idx/)
+      const mk = async (n: number, trigger: string, trialId: string | null, ext: string | null) => (await q.query<{ id: string }>(
+        `INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id, trial_id, external_source)
+         VALUES ($1, $2, $3, 5, 'main', $4, $5, $6, $7::jsonb) RETURNING id`, [project, n, trigger, p, g.id, trialId, ext])).rows[0]!.id
+      const t = await mk(1, 'trial', trial, null)
+      await expect(mk(2, 'trial', null, null)).rejects.toThrow(/scans_trial_id/)
+      await expect(mk(3, 'manual', trial, null)).rejects.toThrow(/scans_trial_id/)
+      await mk(4, 'external', null, '{"tool": "outil-interne", "format": "sarif"}')
+      await expect(mk(5, 'external', null, null)).rejects.toThrow(/scans_external_source/)
+      await expect(mk(6, 'manual', null, '{"tool": "x"}')).rejects.toThrow(/scans_external_source/)
+      await q.query(`INSERT INTO result_cache (cache_key, module_id, image_digest, results_count) VALUES ($1, 'trivy', $2, 0)`, ['b'.repeat(64), digest])
+      await q.query(`INSERT INTO scan_modules (scan_id, module_id, module_version, status, reused_from) VALUES ($1, 'trivy', '1.1.0', 'ok', $2)`, [t, 'b'.repeat(64)])
+      await q.query(`INSERT INTO scan_modules (scan_id, module_id, module_version, status) VALUES ($1, 'hadolint', '2.0.0', 'not-applicable')`, [t])
+      await q.query('DELETE FROM result_cache')
+      expect((await q.query(`SELECT reused_from FROM scan_modules WHERE scan_id = $1 AND module_id = 'trivy'`, [t])).rows[0].reused_from).toBeNull()
+      await q.query('DELETE FROM module_trials WHERE id = $1', [trial])
+      expect((await q.query('SELECT 1 FROM scans WHERE id = $1', [t])).rowCount).toBe(0)
+      await expect(q.query(`INSERT INTO self_vulns (subject, vuln_id, purl, severity) VALUES ('module:Trivy', 'CVE-2026-0001', 'pkg:npm/x', 'high')`))
+        .rejects.toThrow(/self_vulns_subject_check/)
+      await q.query('DELETE FROM projects WHERE id = $1', [project])
+    })
+  })
+
   describe('migrations', () => {
     it('crée toutes les tables et enregistre chaque migration avec son empreinte', async () => {
       const { rows } = await db.pool.query<{ table_name: string }>(
         `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1`,
       )
       expect(rows.map(r => r.table_name)).toEqual([
-        'ai_cache', 'ai_calls', 'ai_embeddings', 'ai_feedback', 'ai_tasks', 'api_tokens', 'appliance_settings', 'audit_log', 'credentials', 'exceptions',
-        'findings', 'forges', 'gates', 'helper_requests', 'license_policies', 'module_samples', 'profiles', 'projects', 'roles', 'sbom_components', 'scan_findings', 'scan_modules',
-        'scans', 'schema_migrations', 'sessions', 'severity_maps', 'update_history', 'users', 'vuln_intel',
+        'ai_cache', 'ai_calls', 'ai_embeddings', 'ai_feedback', 'ai_tasks', 'api_tokens', 'appliance_settings', 'audit_log', 'canary_runs', 'content_detection', 'credentials', 'exceptions',
+        'findings', 'forges', 'gates', 'helper_requests', 'license_policies', 'module_samples', 'module_trials', 'offline_bundles', 'profiles', 'project_module_pins', 'projects', 'result_cache', 'roles', 'sbom_components', 'scan_findings', 'scan_modules',
+        'scans', 'schema_migrations', 'self_vulns', 'sessions', 'severity_maps', 'trusted_keys', 'update_history', 'users', 'vuln_intel',
       ])
       const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       const files = loadMigrationsFromDir(MIGRATIONS_DIR)
-      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql'])
+      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql', '012_offline.sql'])
       expect(mig.rows).toEqual(files.map((f, i) => ({ version: i + 1, name: f.name, checksum: f.checksum })))
     })
 
