@@ -250,19 +250,33 @@ def latest_atom_fallback(repo, tmp):
     return best
 
 
+def best_release(repo, objs, stable_only):
+    """Plus haute version vX.Y.Z d'une liste de releases de l'API."""
+    cands = [r for r in (from_release_obj(repo, o) for o in objs) if r]
+    if stable_only:
+        cands = [r for r in cands if not r["prerelease"]]
+    return max(cands, key=lambda r: common.parse_version(r["version"]), default=None)
+
+
 def find_latest(repo, channel, tmp):
     if channel == "stable":
         code, obj = api_get(tmp, "/repos/%s/releases/latest" % repo)
         if code == 200:
             rel = from_release_obj(repo, obj)
-            return rel if rel and not rel["prerelease"] else None
+            if rel is not None:
+                return None if rel["prerelease"] else rel
+            # releases/latest désigne une release qui n'est pas une version de
+            # la console (index du catalogue catalog-v<N>) : on parcourt la liste.
+            code, obj = api_get(tmp, "/repos/%s/releases?per_page=50" % repo)
+            if code == 200 and isinstance(obj, list):
+                return best_release(repo, obj, True)
+            return None
         if code == 404:
             return None
         return latest_stable_fallback(repo, tmp)
     code, obj = api_get(tmp, "/repos/%s/releases?per_page=20" % repo)
     if code == 200 and isinstance(obj, list):
-        cands = [r for r in (from_release_obj(repo, o) for o in obj) if r]
-        return max(cands, key=lambda r: common.parse_version(r["version"]), default=None)
+        return best_release(repo, obj, False)
     if code == 404:
         return None
     return latest_atom_fallback(repo, tmp)

@@ -334,6 +334,31 @@ EOF
 expect "release proposée : stable, rejet, brouillon, canal, tag, 404, replis ; apply --version" "$offered" \
 	"OK E_VERSION E_VERSION E_VERSION OK E_VERSION E_NOT_FOUND OK E_VERSION E_VERSION OK E_VERSION E_VERSION"
 
+# --- 7. Dernière version stable, même si releases/latest est l'index du catalogue ---------------
+latest=$(python3 -I -B - "$ROOT/src/rootfs/usr/lib/scanoria/py" "$TMP" <<-'EOF'
+	import sys
+	sys.path.insert(0, sys.argv[1])
+	from scanoria import selfupdate as su
+	def rel(tag, pre=False):
+	    return {"tag_name": tag, "name": tag, "draft": False, "prerelease": pre}
+	LIST = [rel("catalog-v2"), rel("v0.3.0", True), rel("v0.2.0"), rel("v0.1.0"), rel("catalog-v1")]
+	def run(answers, channel="stable"):
+	    it = iter(answers)
+	    su.api_get = lambda tmp, path: next(it)
+	    r = su.find_latest("exemple/scanoria", channel, sys.argv[2])
+	    return r["version"] if r else "none"
+	print(" ".join([
+	    run([(200, rel("v0.2.0"))]),
+	    run([(200, rel("v0.3.0", True))]),
+	    run([(200, rel("catalog-v2")), (200, LIST)]),
+	    run([(200, rel("catalog-v1")), (200, [rel("catalog-v1"), rel("v0.1.0", True)])]),
+	    run([(200, rel("catalog-v1")), (403, None)]),
+	    run([(200, LIST)], "prerelease"),
+	]))
+EOF
+)
+expect "dernière stable : latest, pré-version, catalogue → liste, aucune stable, limite, canal pré-version" \
+	"$latest" "0.2.0 none 0.2.0 none none 0.3.0"
 
 echo
 echo "b02 : $PASS réussi(s), $FAIL échec(s)"
