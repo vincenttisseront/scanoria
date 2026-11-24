@@ -124,6 +124,7 @@ describe('à propos', () => {
     expect(w.text()).toContain('Code source de la version 0.1.0')
     expect(w.find(`a[href="${ABOUT.source_url}"]`).exists()).toBe(true)
     expect(w.find(`a[href="${ABOUT.license_url}"]`).exists()).toBe(true)
+    expect(w.find('[data-testid="about-data-notices"]').text()).toContain('EPSS, FIRST.org')
   })
 
   it('dépôt d’origine inconnu : avertissement (anglais)', async () => {

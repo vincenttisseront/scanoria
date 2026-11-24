@@ -17,7 +17,14 @@ Sources (déclarées par le manifeste signé, feed.source) :
   import » (feed.hydrate : index de la base reconstruits, import.json écrit)
   dans un conteneur jetable confiné, sans réseau, de l'image épinglée du
   manifeste, puis rangée dans la disposition de GRYPE_DB_CACHE_DIR :
-  <base>/6/vulnerability.db et <base>/6/import.json.
+  <base>/6/vulnerability.db et <base>/6/import.json ;
+- « https » au format epss-csv (EPSS de FIRST, CSV compressé) ou kev-json
+  (catalogue KEV de la CISA) : un seul fichier, validé ligne par ligne, puis
+  normalisé en <base>/export.jsonl.gz. Le manifeste déclare alors
+  « feed.export: {format: jsonl.gz} » et le helper publie ce fichier pour la
+  console dans /var/lib/scanoria/feeds-export/<id>.jsonl.gz (contrat 17 de la
+  0.5, root:scanoria 0640, écriture atomique). La console ne lit jamais
+  /var/lib/scanoria/feeds/.
 
 Rien de téléchargé n'est exécuté (seule une image épinglée lit une base, hors
 réseau) et aucun conteneur n'a de réseau : seul curl
@@ -44,6 +51,7 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import tarfile
 import urllib.parse
 import zipfile
@@ -591,6 +599,8 @@ def fetch_any(m, options, work, deadline):
                     if (m.get("feed") or {}).get("format") == GRYPE_FORMAT:
                         details, data = fetch_grype(m, ref, work, deadline)
                         return dict(details, source=ref), data
+                    if feed_format(m) in INTEL_FORMATS:
+                        return dict(fetch_intel(m, ref, work, deadline), source=ref), os.path.join(work, "data")
                     return dict(fetch_osv(m, ref, options, work, deadline), source=ref), work
                 return dict(fetch_oci(ref, work, deadline), source=ref), os.path.join(work, "data")
             except (TypeError, KeyError, ValueError, AttributeError) as e:
@@ -767,6 +777,10 @@ def check_shrink(prev, details, size_mb):
         old = old_eco.get(eco)
         if isinstance(old, int) and old > 0 and n < old * SHRINK_RATIO:
             raise DownloadError("%s: %d entries instead of %d, new database refused" % (eco, n, old))
+    old_rows = (prev.get("details") or {}).get("rows")
+    rows = details.get("rows")
+    if isinstance(old_rows, int) and old_rows > 0 and isinstance(rows, int) and rows < old_rows * SHRINK_RATIO:
+        raise DownloadError("%d entries instead of %d, new database refused" % (rows, old_rows))
     old_size = prev.get("size_mb")
     if (details.get("layer") or details.get("archive")) and isinstance(old_size, (int, float)) and old_size > 0 \
             and size_mb < old_size * SHRINK_RATIO:
@@ -819,6 +833,8 @@ def refresh(m, options=None, timeout=DEFAULT_TIMEOUT):
                    {"feed": mid, "host": source_host(m), "reason": reason[:500]})
     finally:
         shutil.rmtree(work, ignore_errors=True)
+    if export_format(m):
+        publish_export(mid)
     return public_status(mid)
 
 
@@ -830,6 +846,7 @@ def remove(mid):
     elif os.path.isdir(lp):
         shutil.rmtree(lp, ignore_errors=True)
     shutil.rmtree(store_dir(mid), ignore_errors=True)
+    remove_export(mid)
 
 
 def require_ready(manifest):
@@ -838,3 +855,205 @@ def require_ready(manifest):
         if not has_data(fid):
             raise Fail("E_FEED_UNAVAILABLE", "database %s is empty: %s cannot run without it; "
                        "update the database from the Catalog" % (fid, manifest.get("id")), {"feed": fid})
+
+
+# --------------------------------------------------------------------------
+# Renseignement sur les vulnérabilités (0.5, H3) : EPSS et KEV, export pour la
+# console (contrat 17)
+# --------------------------------------------------------------------------
+
+EXPORT_DIR = common.VARLIB + "/feeds-export"
+EXPORT_FILE = "export.jsonl.gz"
+INTEL_FORMATS = ("epss-csv", "kev-json")
+MAX_EPSS_GZ = 64 << 20
+MAX_EPSS_CSV = 512 << 20
+MAX_EPSS_ROWS = 2_000_000
+MAX_KEV_JSON = 64 << 20
+MAX_KEV_ROWS = 200_000
+MAX_CSV_LINE = 4096
+CVE_RE = re.compile(r"CVE-[0-9]{4}-[0-9]{4,12}\Z")
+DAY_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
+EPSS_META_RE = re.compile(r"#model_version:([A-Za-z0-9._-]{1,40}),score_date:([0-9]{4}-[0-9]{2}-[0-9]{2})")
+
+
+def feed_format(m):
+    return (m.get("feed") or {}).get("format")
+
+
+def export_format(m):
+    """« jsonl.gz » si le manifeste demande l'export pour la console, sinon None."""
+    exp = (m.get("feed") or {}).get("export")
+    if exp is None:
+        return None
+    if not isinstance(exp, dict) or exp.get("format") != "jsonl.gz":
+        raise Fail("E_PRECONDITION", "feed %s declares an unsupported export" % m.get("id"))
+    return "jsonl.gz"
+
+
+def _unit(text, what, line):
+    """Nombre dans [0, 1], écrit en décimal simple (aucun nan, inf ni exposant hostile)."""
+    if not re.match(r"[0-9]{0,2}(\.[0-9]{1,12})?([eE]-?[0-9]{1,2})?\Z", text) or not re.search(r"[0-9]", text):
+        raise DownloadError("line %d: invalid %s value" % (line, what))
+    v = float(text)
+    if not 0.0 <= v <= 1.0:
+        raise DownloadError("line %d: %s out of range" % (line, what))
+    return v
+
+
+def parse_epss(path, out):
+    """CSV EPSS compressé (« #model_version:…,score_date:… », puis cve,epss,percentile).
+
+    Écrit une ligne {vuln_id, epss, epss_percentile} par CVE dans out ; retourne
+    les détails. Toute ligne invalide refuse le fichier entier : la base
+    précédente reste active."""
+    seen = set()
+    meta = {}
+    header = None
+    total = 0
+    try:
+        with gzip.open(path, "rb") as f, gzip.GzipFile(out, "wb", mtime=0) as w:
+            for n, raw in enumerate(iter(lambda: f.readline(MAX_CSV_LINE + 1), b""), start=1):
+                total += len(raw)
+                if total > MAX_EPSS_CSV:
+                    raise DownloadError("EPSS file too large once uncompressed")
+                if len(raw) > MAX_CSV_LINE:
+                    raise DownloadError("line %d: too long" % n)
+                try:
+                    text = raw.decode("ascii").strip()
+                except UnicodeDecodeError:
+                    raise DownloadError("line %d: not ASCII" % n)
+                if not text:
+                    continue
+                if text.startswith("#"):
+                    mm = EPSS_META_RE.match(text)
+                    if header is None and mm:
+                        meta = {"model_version": mm.group(1), "score_date": mm.group(2)}
+                    continue
+                cols = [c.strip() for c in text.split(",")]
+                if header is None:
+                    header = [c.lower() for c in cols]
+                    if not {"cve", "epss", "percentile"} <= set(header):
+                        raise DownloadError("EPSS header lacks cve, epss or percentile")
+                    idx = (header.index("cve"), header.index("epss"), header.index("percentile"))
+                    continue
+                if len(cols) != len(header):
+                    raise DownloadError("line %d: %d columns instead of %d" % (n, len(cols), len(header)))
+                cve = cols[idx[0]].upper()
+                if not CVE_RE.match(cve):
+                    raise DownloadError("line %d: invalid CVE identifier" % n)
+                if cve in seen:
+                    raise DownloadError("line %d: duplicate %s" % (n, cve))
+                seen.add(cve)
+                if len(seen) > MAX_EPSS_ROWS:
+                    raise DownloadError("too many EPSS rows")
+                row = {"vuln_id": cve, "epss": _unit(cols[idx[1]], "epss", n),
+                       "epss_percentile": _unit(cols[idx[2]], "percentile", n)}
+                w.write((json.dumps(row, separators=(",", ":")) + "\n").encode("ascii"))
+    except (OSError, EOFError, zlib_error()) as e:
+        if isinstance(e, DownloadError):
+            raise
+        raise DownloadError("EPSS file unreadable (%s)" % type(e).__name__)
+    if header is None or not seen:
+        raise DownloadError("EPSS file has no scores")
+    return dict(meta, rows=len(seen))
+
+
+def _valid_day(text):
+    import datetime
+    if not isinstance(text, str) or not DAY_RE.match(text):
+        return False
+    try:
+        datetime.date.fromisoformat(text)
+    except ValueError:
+        return False
+    return True
+
+
+def parse_kev(path, out):
+    """Catalogue KEV de la CISA (JSON) → une ligne {vuln_id, kev: true, kev_added} par CVE."""
+    try:
+        doc = common.load_json_file(path, MAX_KEV_JSON)
+    except (OSError, common.JsonError):
+        raise DownloadError("KEV catalog is not valid JSON")
+    if not isinstance(doc, dict) or not isinstance(doc.get("vulnerabilities"), list):
+        raise DownloadError("KEV catalog has no vulnerability list")
+    vulns = doc["vulnerabilities"]
+    if not vulns or len(vulns) > MAX_KEV_ROWS:
+        raise DownloadError("KEV catalog has an unexpected number of entries (%d)" % len(vulns))
+    count = doc.get("count")
+    if isinstance(count, int) and not isinstance(count, bool) and count != len(vulns):
+        raise DownloadError("KEV catalog announces %d entries but lists %d" % (count, len(vulns)))
+    rows = {}
+    for i, v in enumerate(vulns):
+        if not isinstance(v, dict):
+            raise DownloadError("KEV entry %d is not an object" % i)
+        cve = v.get("cveID")
+        if not isinstance(cve, str) or not CVE_RE.match(cve.strip().upper()):
+            raise DownloadError("KEV entry %d: invalid CVE identifier" % i)
+        added = v.get("dateAdded")
+        if not _valid_day(added):
+            raise DownloadError("KEV entry %d: invalid dateAdded" % i)
+        cve = cve.strip().upper()
+        # Une CVE listée deux fois garde sa première date d'ajout.
+        if cve not in rows or added < rows[cve]:
+            rows[cve] = added
+    with gzip.GzipFile(out, "wb", mtime=0) as w:
+        for cve in sorted(rows):
+            w.write((json.dumps({"vuln_id": cve, "kev": True, "kev_added": rows[cve]},
+                                separators=(",", ":")) + "\n").encode("ascii"))
+    version = doc.get("catalogVersion")
+    return {"rows": len(rows),
+            "catalog_version": version if isinstance(version, str) and len(version) <= 40 else None}
+
+
+def fetch_intel(m, ref, work, deadline):
+    """Source https d'un seul fichier (EPSS ou KEV) → <work>/data/export.jsonl.gz."""
+    fmt = feed_format(m)
+    if "{" in ref:
+        raise Fail("E_PRECONDITION", "feed %s: invalid source" % m["id"])
+    dest = os.path.join(work, "download")
+    _expect_200(curl(ref, dest, MAX_EPSS_GZ if fmt == "epss-csv" else MAX_KEV_JSON, deadline.left()), fmt)
+    data = os.path.join(work, "data")
+    os.mkdir(data, 0o700)
+    out = os.path.join(data, EXPORT_FILE)
+    details = parse_epss(dest, out) if fmt == "epss-csv" else parse_kev(dest, out)
+    os.unlink(dest)
+    return details
+
+
+def export_path(mid):
+    return os.path.join(EXPORT_DIR, "%s.jsonl.gz" % _check_id(mid))
+
+
+def publish_export(mid):
+    """Copie l'export de la base active vers feeds-export/<id>.jsonl.gz (root:scanoria
+    0640, rename(2) atomique). E_EXPORT_FAILED si la copie échoue : la base reste
+    active et la console garde l'import précédent."""
+    src = os.path.join(link_path(mid), EXPORT_FILE)
+    try:
+        fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        raise Fail("E_EXPORT_FAILED", "database %s has no export for the console" % mid, {"feed": mid})
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_EPSS_GZ * 4:
+            raise Fail("E_EXPORT_FAILED", "database %s: unexpected export file" % mid, {"feed": mid})
+        with os.fdopen(fd, "rb") as f:
+            fd = None
+            data = f.read(MAX_EPSS_GZ * 4 + 1)
+        common.shared_dir(EXPORT_DIR)
+        common.atomic_write(export_path(mid), data, 0o640, group_scanoria=True)
+    except OSError as e:
+        raise Fail("E_EXPORT_FAILED", "database %s cannot be exported for the console (%s)"
+                   % (mid, e.strerror or type(e).__name__), {"feed": mid})
+    finally:
+        if fd is not None:
+            os.close(fd)
+    return export_path(mid)
+
+
+def remove_export(mid):
+    try:
+        os.unlink(export_path(mid))
+    except FileNotFoundError:
+        pass

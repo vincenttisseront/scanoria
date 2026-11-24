@@ -7,6 +7,8 @@
 
 import type { Queryable } from '../utils/db'
 import { redact } from './redact'
+import { INTEL_COLUMNS, intelJoin } from '../intel/lookup'
+import { groupsFor, type FindingGroup } from './correlation'
 
 /** Statut effectif : une acceptation échue redevient « nouveau » d'elle-même. */
 export const EFFECTIVE_STATUS = `CASE WHEN f.status = 'accepted' AND f.status_until < current_date THEN 'new' ELSE f.status END`
@@ -25,6 +27,11 @@ export interface FindingFilter {
   secret?: boolean
   malicious?: boolean
   q?: string
+  /** H3 (0.5) : EPSS minimal (0 à 1), CVE du catalogue KEV. */
+  epss_min?: number
+  kev?: boolean
+  /** F16 (0.5) : un résultat par problème (groupe de résultats recoupés). */
+  grouped?: boolean
   limit: number
   offset: number
 }
@@ -53,6 +60,14 @@ export interface FindingRow {
   is_new: boolean
   first_seen_at: string
   updated_at: string
+  /** H3 (0.5) */
+  epss: number | null
+  epss_percentile: number | null
+  kev: boolean
+  kev_added: string | null
+  /** F16 (0.5) : groupe de résultats recoupés (null sans clé de recoupement). */
+  correlation_key: string | null
+  group?: FindingGroup | null
 }
 
 const TS = (col: string) => `to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`
@@ -74,6 +89,8 @@ function where(f: Omit<FindingFilter, 'limit' | 'offset'>, params: unknown[]): s
   }
   if (f.secret !== undefined) clauses.push(`f.secret_type IS ${f.secret ? 'NOT ' : ''}NULL`)
   if (f.malicious !== undefined) add('f.malicious = ?', f.malicious)
+  if (f.epss_min !== undefined) add('round(intel.epss::numeric, 6) >= ?::numeric', f.epss_min)
+  if (f.kev !== undefined) clauses.push(f.kev ? 'intel.kev' : 'NOT intel.kev')
   if (f.q) {
     const like = `%${f.q.replace(/[\\%_]/g, m => `\\${m}`)}%`
     add('(f.title ILIKE ? OR f.rule_id ILIKE $X OR f.path ILIKE $X OR array_to_string(f.vuln_ids, \' \') ILIKE $X OR f.package->>\'name\' ILIKE $X)'.replace(/\$X/g, `$${params.length + 1}`), like)
@@ -85,23 +102,54 @@ const LIST_COLUMNS = `f.id, f.project_id, p.slug AS project_slug, p.name AS proj
   f.category, f.severity, f.native_severity, f.title, f.path, f.start_line, f.vuln_ids, f.package, f.malicious,
   f.secret_type, f.secret_state, ${EFFECTIVE_STATUS} AS status, to_char(f.status_until, 'YYYY-MM-DD') AS status_until,
   (${IS_NEW}) AS is_new,
-  ${TS('f.created_at')} AS first_seen_at, ${TS('f.updated_at')} AS updated_at`
+  ${TS('f.created_at')} AS first_seen_at, ${TS('f.updated_at')} AS updated_at,
+  ${INTEL_COLUMNS}, f.correlation_key`
 
-const ORDER = `ORDER BY f.malicious DESC,
-  CASE f.severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END DESC,
-  f.updated_at DESC, f.id`
+const SEV_RANK = `CASE f.severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END`
+/**
+ * Tri par défaut : paquets malveillants, CVE exploitées (KEV), puis, pour les
+ * vulnérabilités (sca, container, sbom), EPSS avant la gravité (H3) ; les
+ * autres résultats sont rangés par gravité. Décidé ligne par ligne.
+ */
+const VULN_ROW = `f.category IN ('sca', 'container', 'sbom')`
+const PRIORITY = `CASE WHEN ${VULN_ROW} THEN COALESCE(round(intel.epss::numeric, 6), 0) * 10 + ${SEV_RANK} / 10.0 ELSE ${SEV_RANK} / 10.0 END`
+
+function orderBy(): string {
+  return 'ORDER BY x.malicious DESC, x.kev DESC, x.priority DESC, x.sev_rank DESC, x.updated_at DESC, x.id'
+}
 
 export async function listFindings(db: Queryable, filter: FindingFilter): Promise<{ items: FindingRow[], total: number }> {
   const params: unknown[] = []
   const clause = where(filter, params)
-  const total = await db.query<{ n: string }>(`SELECT count(*) AS n FROM findings f ${clause}`, params)
-  params.push(filter.limit, filter.offset)
-  const rows = await db.query<FindingRow>(
-    `SELECT ${LIST_COLUMNS} FROM findings f JOIN projects p ON p.id = f.project_id ${clause} ${ORDER}
-      LIMIT $${params.length - 1} OFFSET $${params.length}`,
+  const from = `FROM findings f JOIN projects p ON p.id = f.project_id ${intelJoin('f')} ${clause}`
+  // F16 : en mode groupé, un seul résultat par (projet, clé de recoupement) : le plus grave.
+  const group = `PARTITION BY f.project_id, COALESCE(f.correlation_key, f.id::text)`
+  const total = await db.query<{ n: string }>(
+    filter.grouped
+      ? `SELECT count(*) AS n FROM (SELECT DISTINCT f.project_id, COALESCE(f.correlation_key, f.id::text) ${from}) g`
+      : `SELECT count(*) AS n ${from}`,
     params,
   )
-  return { items: rows.rows, total: Number(total.rows[0]?.n ?? 0) }
+  params.push(filter.limit, filter.offset)
+  const rows = await db.query<FindingRow & { sev_rank?: number, grp_rn?: number, priority?: number }>(
+    `SELECT x.* FROM (
+       SELECT ${LIST_COLUMNS}, ${SEV_RANK} AS sev_rank, ${PRIORITY} AS priority,
+              row_number() OVER (${group} ORDER BY f.malicious DESC, ${SEV_RANK} DESC, f.id) AS grp_rn
+         ${from}
+     ) x ${filter.grouped ? 'WHERE x.grp_rn = 1' : ''}
+     ${orderBy()}
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params,
+  )
+  const items = rows.rows.map(({ sev_rank: _s, grp_rn: _g, priority: _p, ...r }) => r as FindingRow)
+  await attachGroups(db, items)
+  return { items, total: Number(total.rows[0]?.n ?? 0) }
+}
+
+/** « Confirmé par N outils » : groupe de chaque résultat qui a une clé de recoupement. */
+async function attachGroups(db: Queryable, items: FindingRow[]): Promise<void> {
+  const groups = await groupsFor(db, items.filter(i => i.correlation_key).map(i => ({ project_id: i.project_id, key: i.correlation_key! })))
+  for (const i of items) i.group = i.correlation_key ? groups.get(`${i.project_id}|${i.correlation_key}`) ?? null : null
 }
 
 export interface FindingDetail extends FindingRow {
@@ -131,6 +179,7 @@ export async function getFinding(db: Queryable, id: string): Promise<FindingDeta
             (f.status = 'accepted' AND f.status_until < current_date) AS accepted_expired,
             CASE WHEN f.secret_state = 'to-revoke' THEN (current_date - f.created_at::date) END AS revoke_pending_days
        FROM findings f JOIN projects p ON p.id = f.project_id
+       ${intelJoin('f')}
        LEFT JOIN users ub ON ub.id = f.status_by
        LEFT JOIN users us ON us.id = f.secret_state_by
       WHERE f.id = $1`,
@@ -144,7 +193,9 @@ export async function getFinding(db: Queryable, id: string): Promise<FindingDeta
       WHERE sf.finding_id = $1 ORDER BY s.queued_at DESC LIMIT 20`,
     [id],
   )
-  return { ...row, scans: scans.rows }
+  const detail = { ...row, scans: scans.rows }
+  await attachGroups(db, [detail])
+  return detail
 }
 
 export interface SummaryRow {

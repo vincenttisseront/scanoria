@@ -13,6 +13,8 @@ import { consumeBootstrapAdmin } from './bootstrap'
 import { IngestMemory, ingestResults, markRunning } from './ingest'
 import { readPublishedState } from './appliance'
 import { purgeSessions } from './sessions'
+import { syncIntel } from '../intel/import'
+import { backfillCorrelationKeys } from '../findings/correlation'
 import { packageDatesTick } from '../sbom/dates'
 import { UUID_V4_RE } from '#shared/schemas'
 
@@ -61,6 +63,8 @@ export async function ingestNow(): Promise<void> {
     // 0.5 (B, H5) : dates de publication des composants, par le helper.
     await packageDatesTick(pool, cfg.requestsDir)
     ticks += 1
+    // H3 (0.5) : exports EPSS et KEV du helper importés environ chaque minute.
+    if (ticks % 12 === 1) await syncIntelNow(pool, cfg.modulesStateFile)
     if (ticks % 720 === 1) {
       await purgeSessions(pool)
       await purgeOldUploads(cfg.uploadsDir, await referencedUploads(pool))
@@ -71,6 +75,18 @@ export async function ingestNow(): Promise<void> {
   }
   finally {
     ingestRunning = false
+  }
+}
+
+async function syncIntelNow(pool: ReturnType<typeof getPool>, modulesStateFile: string): Promise<void> {
+  const results = await syncIntel(pool, { modulesStateFile }).catch((err: Error) => {
+    console.error('[intel] error:', err.message)
+    return []
+  })
+  for (const r of results) {
+    if (r.action === 'imported') console.log(`[intel] ${r.feed}: ${r.rows} CVE imported (${r.changed} changed, ${r.cleared} cleared, ${r.skipped} invalid lines skipped)`)
+    else if (r.action === 'cleared') console.log(`[intel] ${r.feed}: feed removed, ${r.cleared} values cleared`)
+    else if (r.action === 'error') console.error(`[intel] ${r.feed}: import failed (${r.error})`)
   }
 }
 
@@ -136,6 +152,12 @@ export async function startConsole(loadMigrations: () => Promise<Migration[]>): 
     }
   }
   if (stopped) return
+  // F16 (0.5) : clé de recoupement des résultats d'avant la 0.5, par lots, une seule fois.
+  void backfillCorrelationKeys(getPool())
+    .then((r) => {
+      if (r.scanned) console.log(`[correlation] backfill: ${r.scanned} findings scanned, ${r.updated} keys set`)
+    })
+    .catch(err => console.error('[correlation] backfill error:', (err as Error).message))
   ingestTimer = setInterval(() => void ingestNow(), cfg.ingestIntervalMs)
   ingestTimer.unref()
   void ingestNow()

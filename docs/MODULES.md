@@ -34,6 +34,8 @@ qui est risqué ou irréversible (licence restrictive, désinstallation).
 | `trivy` | scanner | sca, iac, container, secrets | 0.76.2 | Apache-2.0 | `trivy-db` |
 | `trivy-db` | feed | sca, container | format 2 | Apache-2.0 (données : conditions des sources) | — |
 | `osv-db` | feed | sca | format 1 | CC-BY-4.0 | — |
+| `epss` | feed (exporté pour la console) | sca | format 1 | EPSS de FIRST (gratuit, attribution) | — |
+| `kev` | feed (exporté pour la console) | sca | format 1 | CC0-1.0 | — |
 | `git-fetch` | scanner (système) | system | 2.54.1 | GPL-2.0-only (Git) | — |
 | `syft` | scanner | sbom | 1.57.2 | Apache-2.0 | — |
 | `grype` | scanner | sca, sbom | 0.122.1 | Apache-2.0 | `grype-db` |
@@ -135,6 +137,21 @@ Disposition des bases fournies :
 |---|---|---|
 | `trivy-db` | `/feeds/trivy-db` | répertoire de cache Trivy : `db/trivy.db`, `db/metadata.json` |
 | `osv-db` | `/feeds/osv-db` | `osv-scalibr/<écosystème>/all.zip` (export OSV) |
+| `epss` | aucun conteneur | `export.jsonl.gz` : `{vuln_id, epss, epss_percentile}` par CVE |
+| `kev` | aucun conteneur | `export.jsonl.gz` : `{vuln_id, kev: true, kev_added}` par CVE |
+
+**Bases exportées pour la console (0.5, contrat 17).** Un `feed` peut déclarer
+`feed.export: {format: jsonl.gz}`. Après chaque mise à jour réussie, le helper
+copie l'export de la base active dans
+`/var/lib/scanoria/feeds-export/<id>.jsonl.gz` (root:scanoria 0640, `rename(2)`
+atomique) ; la console l'importe dans `vuln_intel` par lots, de façon
+idempotente, et ne lit jamais `/var/lib/scanoria/feeds/`. Une copie impossible
+rend `E_EXPORT_FAILED`, la base restant active. Les formats `epss-csv` (CSV
+compressé de FIRST) et `kev-json` (catalogue de la CISA) sont validés ligne
+par ligne : une seule ligne invalide (colonne manquante, valeur hors de
+[0, 1], CVE mal formée, doublon, date impossible, nombre annoncé faux) refuse
+tout le fichier et garde la base précédente. Ces bases ne sont requises par
+aucun scanner : elles alimentent le quality gate (H3) et les Résultats.
 
 En 0.2, les modules `feed` sont déclaratifs (manifeste seulement) : leur mise à
 jour planifiée et les lots hors ligne signés arrivent en 0.6 (§ 9).

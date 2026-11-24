@@ -926,6 +926,21 @@
               "maximum": 7200
             }
           }
+        },
+        "export": {
+          "description": "Export de la base pour la console (0.5, contrat 17) : le helper écrit /var/lib/scanoria/feeds-export/<id>.jsonl.gz après chaque mise à jour (EPSS, KEV).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format"
+          ],
+          "properties": {
+            "format": {
+              "enum": [
+                "jsonl.gz"
+              ]
+            }
+          }
         }
       },
       "allOf": [
