@@ -51,6 +51,8 @@ EOF
 cat > "$STUBS/systemctl" <<-EOF
 	#!/bin/bash
 	echo "systemctl \$*" >> "$TMP/calls.log"
+	[[ "\$1" == try-reload-or-restart ]] && exit "\$(cat "$TMP/reload-rc" 2> /dev/null || echo 0)"
+	exit 0
 EOF
 # ip : adresses de l'appliance lues dans $TMP/ip4 et $TMP/ip6 (absent = pas de route).
 cat > "$STUBS/ip" <<-EOF
@@ -89,7 +91,7 @@ rt() {
 	EOF
 }
 svc() { printf '{"id":"%s","hostname":"%s","port":%s,"enabled":%s}' "$1" "$2" "$3" "$4"; }
-tree_hash() { (cd "$D" 2> /dev/null && find . -mindepth 1 -printf '%p %y %l\n' | sort && cat ./* 2> /dev/null) | sha256sum | cut -c1-16; }
+tree_hash() { (cd "$D" 2> /dev/null && find . -mindepth 1 -printf '%p %y %l\n' | sort && { cat ./* 2> /dev/null || true; }) | sha256sum | cut -c1-16; }
 listing() { find "$D" -mindepth 1 -printf '%f\n' | LC_ALL=C sort | tr '\n' ' '; }
 set_name() { printf '{"fqdn": "%s"}\n' "$1" > "$T/etc/scanoria/appliance.json"; }
 
@@ -175,6 +177,23 @@ expect "nginx -t en échec : sites.json inchangé" "$(sha256sum < "$T/var/lib/sc
 expect "nginx -t en échec : aucun rechargement" "$(grep -c 'reload' "$TMP/calls.log" || true)" 0
 rm -f "$TMP/nginx-rc"
 
+# Échec du rechargement : sites d'avant remis.
+echo 1 > "$TMP/reload-rc"
+expect "rechargement en échec → E_INTERNAL" "$(rt 'routing.apply(None, json.loads(a[0]))' "$L")" "FAIL E_INTERNAL"
+expect "rechargement en échec : sites d'avant remis" "$(tree_hash)" "$before"
+rm -f "$TMP/reload-rc"
+# Échec d'écriture au milieu (répertoire planté à la place d'un site) : rien à moitié appliqué.
+mkdir "$D/module-dtrack.conf"
+before=$(tree_hash)
+expect "écriture impossible → E_INTERNAL" "$(rt 'routing.apply(None, json.loads(a[0]))' "$L")" "FAIL E_INTERNAL"
+expect "écriture impossible : sites d'avant remis" "$(tree_hash)" "$before"
+rmdir "$D/module-dtrack.conf"
+before=$(tree_hash)
+chmod 0777 "$D"
+expect "répertoire des sites inscriptible par tous → E_PRECONDITION" "$(rt 'routing.apply(None, [])')" "FAIL E_PRECONDITION"
+chmod 0755 "$D"
+expect "répertoire refusé : sites inchangés" "$(tree_hash)" "$before"
+
 # --- 4. Liens symboliques plantés ----------------------------------------------------------------
 echo 'intact' > "$TMP/target"
 ln -sf "$TMP/target" "$D/module-sonarqube.conf"
@@ -193,6 +212,14 @@ grep -qF "server_name sonarqube.audit.exemple.test;" "$D/module-sonarqube.conf" 
 grep -qF "proxy_pass http://127.0.0.1:18001;" "$D/module-sonarqube.conf" && ok "resync : port repris de sites.json" || ko "resync : port"
 set_name "$N"
 rt 'routing.resync()' > /dev/null
+mv "$T/var/lib/scanoria/routing/sites.json" "$TMP/sites.bak"
+jq -n '{modules: [{id: "sonarqube", type: "service", enabled: true, route: {hostname: "sonarqube.x", url: "https://x/"}}]}' \
+	> "$T/var/lib/scanoria/modules/state.json"
+before=$(tree_hash)
+expect "resync sans sites.json, modules routés → E_PRECONDITION" "$(rt 'routing.resync()')" "FAIL E_PRECONDITION"
+expect "resync refusé : sites des modules conservés" "$(tree_hash)" "$before"
+mv "$TMP/sites.bak" "$T/var/lib/scanoria/routing/sites.json"
+rm "$T/var/lib/scanoria/modules/state.json"
 
 # --- 6. check-dns ----------------------------------------------------------------------------------
 echo 192.0.2.10 > "$TMP/ip4"
@@ -228,6 +255,9 @@ grep -q "resolvectl query --legend=no --synthesize=no --cache=no -p dns -t A sca
 expect "check-dns : sortie (noms non résolus)" "$(jq -c '[.output.ok, .output.not_resolved]' <<< "$res")" "[false,[\"*.$N\",\"sonarqube.$N\"]]"
 expect "status.json : 0640" "$(stat -c %a "$S")" 640
 
+printf '%s: 192.0.2.10                      -- link: eth0\n\n-- Information acquired via protocol DNS in 1.2ms.\n' "$N" > "$TMP/dns/$N.A"
+"$HELPER" exec --origin cli --type check-dns --params '{}' > /dev/null 2>&1 || true
+expect "sortie courte de resolvectl (nom: adresse) comprise" "$(jq -r "[.records[] | select(.name == \"$N\" and .type == \"A\") | .ok] | join(\" \")" "$S")" true
 rm -f "$TMP/ip6"
 "$HELPER" exec --origin cli --type check-dns --params '{}' > /dev/null 2>&1 || true
 expect "sans IPv6 : A seulement" "$(jq -r '[.records[].type] | unique | join(" ")' "$S")" "A"

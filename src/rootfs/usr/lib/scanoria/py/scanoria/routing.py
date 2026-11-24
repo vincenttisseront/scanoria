@@ -114,8 +114,9 @@ def render(fqdn, services):
 def _sites_dir():
     os.makedirs(SITES_DIR, mode=0o755, exist_ok=True)
     st = os.lstat(SITES_DIR)
-    if not stat.S_ISDIR(st.st_mode) or (not common.TEST_ROOT and st.st_uid != 0):
-        raise Fail("E_PRECONDITION", "%s is not a root-owned directory" % SITES_DIR)
+    if not stat.S_ISDIR(st.st_mode) or (not common.TEST_ROOT and st.st_uid != 0) \
+            or st.st_mode & 0o022:
+        raise Fail("E_PRECONDITION", "%s is not a root-owned directory writable by root only" % SITES_DIR)
 
 
 def _managed(name):
@@ -131,7 +132,8 @@ def _snapshot():
         path = os.path.join(SITES_DIR, n)
         st = os.lstat(path)
         if stat.S_ISREG(st.st_mode):
-            with open(path, "rb") as f:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as f:
                 snap[n] = f.read()
         else:  # lien ou autre : jamais suivi, toujours retiré
             snap[n] = None
@@ -153,7 +155,10 @@ def _install(files, snap):
 def _restore(snap):
     for n in os.listdir(SITES_DIR):
         if _managed(n) and snap.get(n) is None:
-            os.unlink(os.path.join(SITES_DIR, n))
+            try:
+                os.unlink(os.path.join(SITES_DIR, n))
+            except OSError:  # répertoire planté : laissé tel quel, nginx -t le refusera
+                pass
     for n, data in snap.items():
         if data is not None:
             common.atomic_write(os.path.join(SITES_DIR, n), data, 0o644, group_scanoria=False)
@@ -185,12 +190,21 @@ def apply(fqdn, services, timeout=120):
     files = render(fqdn, services)
     _sites_dir()
     snap = _snapshot()
-    _install(files, snap)
+    try:
+        _install(files, snap)
+    except OSError as e:  # disque plein, entrée inattendue : rien à moitié appliqué
+        _restore(snap)
+        raise Fail("E_INTERNAL", "cannot write module sites (%s); previous sites restored"
+                   % e.strerror) from e
     r = common.run("nginx", ["-t", "-q"], timeout=timeout)
     if r.returncode != 0:
         _restore(snap)
         raise Fail("E_INTERNAL", "nginx configuration test failed; previous module sites restored")
-    common.run("systemctl", ["try-reload-or-restart", "nginx.service"], timeout=timeout)
+    r = common.run("systemctl", ["try-reload-or-restart", "nginx.service"], timeout=timeout)
+    if r.returncode != 0:
+        _restore(snap)
+        common.run("systemctl", ["try-reload-or-restart", "nginx.service"], timeout=timeout)
+        raise Fail("E_INTERNAL", "nginx reload failed; previous module sites restored")
     os.makedirs(os.path.dirname(SITES_FILE), mode=0o750, exist_ok=True)
     common.write_json(SITES_FILE, {"fqdn": fqdn, "applied_at": common.iso(common.now()),
                                    "services": services})
@@ -221,6 +235,10 @@ def resync(timeout=120):
     if fqdn is None:
         return False
     rec = recorded()
+    if rec is None and any(m.get("route") for m in (_state_services() or {}).values()):
+        # Liste perdue alors que des modules sont routés : ne jamais effacer leurs
+        # sites ; le moteur des modules la republie à sa prochaine opération.
+        raise Fail("E_PRECONDITION", "routing/sites.json missing while modules are routed")
     if rec is not None and rec.get("fqdn") == fqdn and os.path.isfile(os.path.join(SITES_DIR, CATCHALL)):
         return False
     apply(fqdn, rec["services"] if rec else [], timeout)

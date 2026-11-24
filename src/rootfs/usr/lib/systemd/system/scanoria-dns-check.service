@@ -11,6 +11,8 @@ ConditionPathExists=/etc/scanoria/appliance.json
 
 [Service]
 Type=oneshot
+# Attente possible du verrou du helper (TIMEOUTS check-dns + 60 s) puis contrôle.
+TimeoutStartSec=300
 ExecStart=/usr/sbin/scanoria-helper exec --origin timer --type check-dns --params {}
 UMask=0027
 PrivateTmp=yes

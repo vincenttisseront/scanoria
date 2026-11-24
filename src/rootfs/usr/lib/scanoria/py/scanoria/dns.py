@@ -23,6 +23,7 @@ import json
 import os
 import re
 import secrets
+import time
 
 from . import common, routing, schema
 from .common import Fail
@@ -31,7 +32,10 @@ STATUS_FILE = common.VARLIB + "/dns/status.json"
 # Destinations de documentation (RFC 5737, RFC 3849) : seule la route est
 # consultée, aucun paquet n'est émis.
 ROUTE_PROBES = (("A", "-4", "192.0.2.1"), ("AAAA", "-6", "2001:db8::1"))
+# Sortie de « resolvectl query -t TYPE » : « nom IN A adresse  -- link: … » ;
+# forme courte « nom: adresse » acceptée aussi (autres versions de systemd).
 RR_RE = re.compile(r"^\S+\s+IN\s+(A|AAAA)\s+([0-9A-Fa-f.:]{2,45})(\s|$)", re.ASCII | re.MULTILINE)
+SHORT_RE = re.compile(r"^\s*(?:\S+:)?\s+([0-9A-Fa-f.:]{2,45})(\s|$)", re.ASCII | re.MULTILINE)
 MAX_RESOLVED = 16
 
 
@@ -64,17 +68,18 @@ def lookup(name, rtype, timeout=20):
     if r.returncode != 0:
         return []
     want = 4 if rtype == "A" else 6
+    found = [m.group(2) for m in RR_RE.finditer(r.text) if m.group(1) == rtype]
+    if not found and " IN " not in r.text:
+        found = [m.group(1) for m in SHORT_RE.finditer(r.text)]
     out = set()
-    for m in RR_RE.finditer(r.text):
-        if m.group(1) != rtype:
-            continue
+    for s in found:
         try:
-            a = ipaddress.ip_address(m.group(2))
+            a = ipaddress.ip_address(s)
         except ValueError:
             continue
         if a.version == want:
             out.add(str(a))
-    return sorted(out)[:MAX_RESOLVED]
+    return sorted(out)
 
 
 def names_to_check(fqdn):
@@ -92,17 +97,21 @@ def names_to_check(fqdn):
     return names
 
 
-def check(fqdn, timeout=20):
+def check(fqdn, timeout=20, budget=None):
     """Rapport DNS (non écrit)."""
     records = []
     if fqdn is not None:
         expected = appliance_addresses()
         types = [t for t in ("A", "AAAA") if t in expected] or ["A"]
+        end = time.monotonic() + budget if budget else None
         for shown, query in names_to_check(fqdn):
             for t in types:
-                resolved = lookup(query, t, timeout)
+                left = timeout if end is None else min(timeout, end - time.monotonic())
+                resolved = lookup(query, t, max(1, int(left))) if left >= 1 else []
                 exp = expected.get(t)
-                records.append({"name": shown, "type": t, "expected": exp, "resolved": resolved,
+                shown_list = ([exp] if exp in resolved else []) + [a for a in resolved if a != exp]
+                records.append({"name": shown, "type": t, "expected": exp,
+                                "resolved": shown_list[:MAX_RESOLVED],
                                 "ok": exp is not None and exp in resolved})
     return {"fqdn": fqdn, "checked_at": common.iso(common.now()), "records": records}
 
@@ -124,7 +133,10 @@ def act_check_dns(c):
             synced = routing.resync(c.left())
         except Fail as e:  # le contrôle DNS reste utile même si nginx refuse les sites
             routing_error = e.message
-    status = check(fqdn)
+        except Exception as e:  # noqa: BLE001 — idem pour une erreur imprévue
+            common.log("routing resync failed: %r" % (e,))
+            routing_error = "internal error"
+    status = check(fqdn, budget=max(10, c.left() - 10))
     write_status(status)
     if fqdn is None:
         raise Fail("E_PRECONDITION", "appliance name not set")
