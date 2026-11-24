@@ -7,13 +7,14 @@
 // si le projet est marqué « aucun envoi à l'IA » ; ne lève jamais d'erreur :
 // l'IA ne doit jamais faire échouer une analyse (§ 3.5).
 
+import type { AiSubjectType } from '#shared/analysis'
 import type { Queryable } from '../utils/db'
 import { aiPaths, loadEndpoint } from './config'
 import { TASKS } from './tasks'
 
 export interface AiTaskRequest {
   kind: string
-  subjectType: 'finding' | 'scan' | 'testbed'
+  subjectType: AiSubjectType
   subjectId: string
   projectId: string | null
   locale?: 'fr' | 'en'

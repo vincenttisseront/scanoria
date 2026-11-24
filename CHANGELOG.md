@@ -10,7 +10,24 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.3.0 — non publiée
+## 0.3.1 — non publiée
+
+Correctif de la 0.3.0, qui n'a pas reçu ce commit à temps.
+
+### Corrigé
+- **Demandes au service root refusées** : avec `ProtectSystem=strict`, le
+  répertoire de dépôt et celui d'arrivée des demandes étaient deux montages
+  distincts, et le renommage final échouait (`EXDEV`). Aucune action de la
+  console vers le service root n'aboutissait : recherche de mise à jour,
+  certificat, modules… Le worker avait le même défaut sur la file des
+  analyses. Constaté sur une appliance 0.1.0.
+
+### À savoir avant de mettre à jour
+- Sur une appliance 0.1 à 0.3.0, ce défaut empêche aussi la console de
+  demander la mise à jour. Réinstaller depuis l'ISO 0.3.1, ou appliquer
+  d'abord la surcharge systemd provisoire, puis mettre à jour.
+
+## 0.3.0 — 2026-11-24
 
 Analyses : les dépôts de l'entreprise sont analysés par les modules installés,
 les résultats réunis et triés, et un quality gate rend un verdict exploitable

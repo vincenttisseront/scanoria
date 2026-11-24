@@ -111,3 +111,7 @@ export const ExceptionTargets = {
   module: z.object({ module_id: z.string().regex(MODULE_ID_RE) }).strict(),
 } as const
 export type ExceptionKind = (typeof EXCEPTION_KINDS)[number]
+
+/** Sujets d'une tâche IA (ai_tasks.subject_type, migration 006). */
+export const AI_SUBJECT_TYPES = ['finding', 'scan', 'testbed', 'rule', 'module'] as const
+export type AiSubjectType = (typeof AI_SUBJECT_TYPES)[number]
