@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module OWASP Dependency-Track (service permanent, CLAUDE.md § 5.1). Version,
+# empreinte d'image et licence relevées en amont le 2026-11-24 : image
+# docker.io/dependencytrack/bundled, étiquette 4.14.7 (API et interface web
+# sur le même port, index OCI multi-architecture) ; LICENSE.txt Apache-2.0 du
+# tag 4.14.7 de DependencyTrack/dependency-track.
+# PostgreSQL de l'appliance (base mod_dependency_track). Mémoire : l'API
+# demande au moins 4,5 Go (documentation amont) ; la limite du conteneur est
+# le double du minimum déclaré (moteur des services, 0.4).
+# Mise en service automatique par le helper (dtrack.py) : mot de passe admin
+# aléatoire (jamais affiché ni en base), équipe « Scanoria (analyses) » et sa
+# clé d'API (scan-token, lue par le runner pour dtrack-upload), télémétrie
+# coupée. Les SBOM arrivent par le module dtrack-upload.
+# Accès sortant : Dependency-Track tient ses propres miroirs de vulnérabilités
+# (NVD, OSV, EPSS) et interroge les registres de paquets (méta-données des
+# composants) ; le réseau du module sort par la passerelle de Podman (§ 3.2).
+# Le mode hors ligne arrive en 0.6.
+id: dependency-track
+name: OWASP Dependency-Track
+description:
+  fr: Suivi des SBOM, des composants, des licences et des vulnérabilités dans le temps, avec son interface web.
+  en: Tracks SBOMs, components, licenses and vulnerabilities over time, with its web interface.
+type: service
+categories: [sbom, sca, licenses]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/DependencyTrack/dependency-track/blob/4.14.7/LICENSE.txt
+  restrictions: none
+  verified_at: "2026-11-24"
+  notes: Les miroirs de vulnérabilités de Dependency-Track gardent les conditions de leurs sources (NVD, OSV, GitHub).
+upstream:
+  homepage: https://dependencytrack.org
+  source: https://github.com/DependencyTrack/dependency-track
+image: docker.io/dependencytrack/bundled@sha256:dc3d9a87c74271663d65deafe83fbd7bc83062f0d5cded4ccb7d281d8245c781
+version: "4.14.7"
+resources: { min_ram_mb: 4608, min_cpu: 2, disk_mb: 10240 }
+hostname: dtrack
+requires: { modules: [], feeds: [], appliance: ">=0.5.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: true }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+service:
+  port: 8080
+  health_path: /api/version
+  units:
+    - { name: dependency-track }
+  volumes:
+    - { name: data, path: /data }
+  backup: [data]
+  env:
+    ALPINE_DATABASE_MODE: external
+    ALPINE_DATABASE_URL: "{db_url_jdbc}"
+    ALPINE_DATABASE_DRIVER: org.postgresql.Driver
+    ALPINE_DATABASE_USERNAME: "{db_user}"
+    # Aucune télémétrie envoyée à l'éditeur.
+    TELEMETRY_SUBMISSION_ENABLED_DEFAULT: "false"
+  secrets:
+    - { name: db-password, env: ALPINE_DATABASE_PASSWORD }
+  # Le mot de passe admin et la clé d'API d'analyse sont créés par dtrack.py
+  # dans le même répertoire de secrets, sans être montés dans le conteneur.
+  egress:
+    - nvd.nist.gov
+    - services.nvd.nist.gov
+    - osv-vulnerabilities.storage.googleapis.com
+    - epss.empiricalsecurity.com
+    - registry.npmjs.org
+    - pypi.org
+    - repo1.maven.org
+    - proxy.golang.org
+upgrade: { policy: on-demand }

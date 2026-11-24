@@ -10,7 +10,14 @@ Sources (déclarées par le manifeste signé, feed.source) :
   manifeste, couche), empreinte SHA-256 de la couche vérifiée, extraction sûre
   (fichiers ordinaires seulement, aucun lien ni chemin sortant) dans la
   disposition lue par « trivy --cache-dir » : <base>/db/trivy.db et
-  <base>/db/metadata.json.
+  <base>/db/metadata.json ;
+- « https » au format « grype-db » (grype-db, 0.5) : la liste publiée par
+  Anchore (latest.json, schéma v6) donne l'archive et son empreinte SHA-256,
+  vérifiée avant tout usage ; l'archive est ensuite préparée par « grype db
+  import » (feed.hydrate : index de la base reconstruits, import.json écrit)
+  dans un conteneur jetable confiné, sans réseau, de l'image épinglée du
+  manifeste, puis rangée dans la disposition de GRYPE_DB_CACHE_DIR :
+  <base>/6/vulnerability.db et <base>/6/import.json ;
 - « https » au format epss-csv (EPSS de FIRST, CSV compressé) ou kev-json
   (catalogue KEV de la CISA) : un seul fichier, validé ligne par ligne, puis
   normalisé en <base>/export.jsonl.gz. Le manifeste déclare alors
@@ -19,7 +26,8 @@ Sources (déclarées par le manifeste signé, feed.source) :
   0.5, root:scanoria 0640, écriture atomique). La console ne lit jamais
   /var/lib/scanoria/feeds/.
 
-Rien de téléchargé n'est exécuté et aucun conteneur n'a de réseau : seul curl
+Rien de téléchargé n'est exécuté (seule une image épinglée lit une base, hors
+réseau) et aucun conteneur n'a de réseau : seul curl
 (HTTPS, certificat vérifié, tailles et délais bornés, proxy de
 /etc/environment s'il existe) sort de l'appliance.
 
@@ -64,6 +72,16 @@ MAX_METADATA = 64 << 10
 DEFAULT_TIMEOUT = 3000
 TRIVY_LAYER_TYPE = "application/vnd.aquasec.trivy.db.layer.v1.tar+gzip"
 TRIVY_FILES = ("trivy.db", "metadata.json")
+GRYPE_FORMAT = "grype-db"
+GRYPE_MODEL = "6"
+GRYPE_FILES = ("vulnerability.db", "import.json")
+MAX_LISTING = 64 << 10
+MAX_GRYPE_ARCHIVE = 2 << 30
+MAX_GRYPE_DB = 8 << 30
+# Nom publié par Anchore : vulnerability-db_v6.1.4_2026-11-24T04:16:48Z_1764000000.tar.zst
+GRYPE_ARCHIVE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+:-]{0,200}\.tar\.(zst|gz|xz)\Z")
+GRYPE_SCHEMA_RE = re.compile(r"v?6\.[0-9]{1,4}\.[0-9]{1,4}\Z")
+HYDRATE_TIMEOUT = 1800
 MANIFEST_TYPES = ("application/vnd.oci.image.manifest.v1+json",
                   "application/vnd.docker.distribution.manifest.v2+json")
 ECOSYSTEM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,39}\Z")
@@ -423,6 +441,131 @@ def fetch_oci(ref, work, deadline):
 
 
 # --------------------------------------------------------------------------
+# Source https au format grype-db (Grype, 0.5)
+# --------------------------------------------------------------------------
+
+def grype_listing(path):
+    """Contrôle de latest.json : (archive, empreinte hexadécimale, schéma, date de construction)."""
+    try:
+        doc = common.load_json_file(path, MAX_LISTING)
+    except (OSError, common.JsonError, Fail):
+        raise DownloadError("listing unreadable")
+    if not isinstance(doc, dict):
+        raise DownloadError("listing is not an object")
+    if doc.get("status") not in (None, "active"):
+        raise DownloadError("listing status is %r" % str(doc.get("status"))[:20])
+    name, checksum, schema_v = doc.get("path"), doc.get("checksum"), doc.get("schemaVersion")
+    if not isinstance(name, str) or not GRYPE_ARCHIVE_RE.match(name) or ".." in name:
+        raise DownloadError("listing has an invalid archive path")
+    dm = DIGEST_RE.match(checksum) if isinstance(checksum, str) else None
+    if not dm:
+        raise DownloadError("listing has no sha256 checksum")
+    if not isinstance(schema_v, str) or not GRYPE_SCHEMA_RE.match(schema_v):
+        raise DownloadError("unsupported database schema %r" % str(schema_v)[:20])
+    built = doc.get("built") if isinstance(doc.get("built"), str) and len(doc["built"]) <= 40 else None
+    return name, dm.group(1), schema_v, built
+
+
+def hydrate_spec(m):
+    h = (m.get("feed") or {}).get("hydrate")
+    if not isinstance(h, dict) or not isinstance(h.get("image"), str) or \
+            not catalogverify.IMAGE_RE.match(h["image"]):
+        raise Fail("E_PRECONDITION", "feed %s declares no valid hydrate image" % m.get("id"))
+    cmd = h.get("command")
+    catalogverify._check_command(cmd, m.get("id"))
+    env = h.get("env") or {}
+    if not isinstance(env, dict) or any(not isinstance(k, str) or not catalogverify.ENV_KEY_RE.match(k)
+                                        or not isinstance(v, str) or len(v) > 500 for k, v in env.items()):
+        raise Fail("E_PRECONDITION", "feed %s declares an invalid hydrate env" % m.get("id"))
+    mem = h.get("memory_mb") if isinstance(h.get("memory_mb"), int) and not isinstance(h.get("memory_mb"), bool) \
+        else 2048
+    t = h.get("timeout_s") if isinstance(h.get("timeout_s"), int) and not isinstance(h.get("timeout_s"), bool) \
+        else HYDRATE_TIMEOUT
+    return {"id": "%s-hydrate" % m["id"], "image": h["image"], "command": list(cmd), "env": dict(env),
+            "resources": {"min_ram_mb": max(128, min(mem, 16384)), "min_cpu": 1},
+            "timeout": max(30, min(t, 7200))}
+
+
+def hydrate(spec, dbdir, deadline):
+    """« grype db import » de l'image épinglée, confiné et sans réseau, sur dbdir monté en /db."""
+    from . import testbed
+    if common.run("podman", ["image", "exists", spec["image"]], timeout=60).returncode != 0:
+        r = common.run("podman", ["pull", "--quiet", spec["image"]], timeout=min(1200, deadline.left()))
+        if r.returncode != 0:
+            raise DownloadError("cannot pull the image that prepares the database")
+    testbed._give_to_container(dbdir)
+    rc, hint = testbed.run_confined(spec, spec["command"], [(dbdir, "/db", "rw")],
+                                   timeout=min(spec["timeout"], deadline.left()), env=spec["env"], with_stderr=True)
+    if rc != 0:
+        raise DownloadError("database preparation failed (exit %d)%s" % (rc, (": " + hint[-200:]) if hint else ""))
+
+
+def collect_grype(cache, data):
+    """Copie <cache>/6/{vulnerability.db, import.json} dans data/6 : fichiers ordinaires seulement."""
+    src = os.path.join(cache, GRYPE_MODEL)
+    if not os.path.isdir(src) or os.path.islink(src):
+        raise DownloadError("prepared database not found")
+    dst = os.path.join(data, GRYPE_MODEL)
+    os.makedirs(dst, mode=0o700)
+    total = 0
+    for n in GRYPE_FILES:
+        p = os.path.join(src, n)
+        try:
+            fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError:
+            raise DownloadError("prepared database lacks %s" % n)
+        with os.fdopen(fd, "rb") as f:
+            st = os.fstat(f.fileno())
+            if not stat_isreg(st) or st.st_size == 0:
+                raise DownloadError("prepared database: %s is not a regular file" % n)
+            total += st.st_size
+            if total > MAX_GRYPE_DB:
+                raise DownloadError("prepared database too large")
+            os.set_blocking(f.fileno(), True)
+            out = os.open(os.path.join(dst, n), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(out, "wb") as o:
+                shutil.copyfileobj(f, o, 1 << 20)
+    try:
+        meta = common.load_json_file(os.path.join(dst, "import.json"), MAX_METADATA)
+    except (OSError, common.JsonError, Fail):
+        raise DownloadError("import.json unreadable")
+    if not isinstance(meta, dict) or not str(meta.get("digest", "")).startswith("xxh64:"):
+        raise DownloadError("import.json has no database digest")
+    return meta
+
+
+def stat_isreg(st):
+    import stat as _stat
+    return _stat.S_ISREG(st.st_mode)
+
+
+def fetch_grype(m, ref, work, deadline):
+    listing = os.path.join(work, "latest.json")
+    _expect_200(curl(ref, listing, MAX_LISTING, min(120, deadline.left())), "listing")
+    name, hexd, schema_v, built = grype_listing(listing)
+    # Archive à côté de la liste (chemin relatif publié par Anchore), même hôte, HTTPS.
+    url = urllib.parse.urljoin(ref, urllib.parse.quote(name))
+    if urllib.parse.urlsplit(url).netloc != urllib.parse.urlsplit(ref).netloc:
+        raise DownloadError("archive is not next to its listing")
+    spec = hydrate_spec(m)
+    dbdir = os.path.join(work, "db")
+    os.mkdir(dbdir, 0o700)
+    archive = os.path.join(dbdir, "archive.tar.zst")
+    _expect_200(curl(url, archive, MAX_GRYPE_ARCHIVE, deadline.left()), "database archive")
+    if sha256_file(archive) != hexd:
+        raise DownloadError("database archive checksum mismatch")
+    os.mkdir(os.path.join(dbdir, "cache"), 0o700)   # GRYPE_DB_CACHE_DIR, créé d'avance
+    hydrate(spec, dbdir, deadline)
+    data = os.path.join(work, "data")
+    os.mkdir(data, 0o700)
+    meta = collect_grype(os.path.join(dbdir, "cache"), data)
+    shutil.rmtree(dbdir, ignore_errors=True)
+    os.unlink(listing)
+    return {"archive": "sha256:" + hexd, "schema": schema_v, "upstream_updated_at": built,
+            "client": meta.get("client_version") if isinstance(meta.get("client_version"), str) else None}, data
+
+
+# --------------------------------------------------------------------------
 # Versions, bascule et état
 # --------------------------------------------------------------------------
 
@@ -453,6 +596,9 @@ def fetch_any(m, options, work, deadline):
                 if kind == "https":
                     if not ref.startswith("https://"):
                         raise DownloadError("source is not https")
+                    if (m.get("feed") or {}).get("format") == GRYPE_FORMAT:
+                        details, data = fetch_grype(m, ref, work, deadline)
+                        return dict(details, source=ref), data
                     if feed_format(m) in INTEL_FORMATS:
                         return dict(fetch_intel(m, ref, work, deadline), source=ref), os.path.join(work, "data")
                     return dict(fetch_osv(m, ref, options, work, deadline), source=ref), work
@@ -636,7 +782,7 @@ def check_shrink(prev, details, size_mb):
     if isinstance(old_rows, int) and old_rows > 0 and isinstance(rows, int) and rows < old_rows * SHRINK_RATIO:
         raise DownloadError("%d entries instead of %d, new database refused" % (rows, old_rows))
     old_size = prev.get("size_mb")
-    if details.get("layer") and isinstance(old_size, (int, float)) and old_size > 0 \
+    if (details.get("layer") or details.get("archive")) and isinstance(old_size, (int, float)) and old_size > 0 \
             and size_mb < old_size * SHRINK_RATIO:
         raise DownloadError("database shrank from %s MB to %s MB, new database refused" % (old_size, size_mb))
 

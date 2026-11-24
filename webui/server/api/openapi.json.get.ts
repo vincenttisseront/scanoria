@@ -136,6 +136,8 @@ const OPS: Record<string, Record<string, Op>> = {
     get: { summary: 'Severity normalization per module, with origin value', role: 'viewer' },
     patch: { summary: 'Change a normalized severity, or reset it to its origin value (severity null)', role: 'admin', body: 'SeverityMapUpdate' },
   },
+  '/api/scans/{id}/sbom': { get: { summary: 'SBOM components of a scan (contract 14): filters q, ecosystem, license, direct; sort name, ecosystem, version, license, direct; paginated (page, per_page ≤ 200); facets, coverage and Dependency-Track link', role: 'viewer' } },
+  '/api/scans/{id}/sbom/export': { get: { summary: 'SBOM of a scan as a CycloneDX 1.6 JSON file, rebuilt from the stored components; audited', role: 'viewer' } },
   // 0.5 (B) : recherche transverse (F3), politique de licences (F8).
   '/api/components': { get: { summary: 'Cross-project component search (F3) in the latest SBOM of each visible project: purl, name, ecosystem, version, version_from/version_to, vuln (aliases included); grouped by project, cursor pagination', role: 'viewer' } },
   '/api/components/export.csv': { get: { summary: 'Same search as /api/components, whole result as CSV (formulas neutralized)', role: 'viewer' } },

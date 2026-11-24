@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module Syft : SBOM CycloneDX 1.6 de chaque analyse qui couvre la catégorie
+# « sbom » (contrat 14 de la 0.5). Version, empreinte d'image et licence
+# relevées en amont le 2026-11-24 (tag v1.57.2, index OCI multi-architecture,
+# même empreinte sur ghcr.io et docker.io ; LICENSE Apache-2.0 du tag).
+# Hors ligne : aucune recherche distante (licences Go, Maven), aucune
+# vérification de mise à jour. Le SBOM est rangé par la console
+# (sbom_components) puis lu, dans la même analyse, par Grype et dtrack-upload
+# (entrée « sbom », /sbom/sbom.cdx.json).
+id: syft
+name: Syft
+description:
+  fr: Inventaire des composants (SBOM CycloneDX) de chaque analyse, avec leurs licences.
+  en: Component inventory (CycloneDX SBOM) of each scan, with licenses.
+type: scanner
+categories: [sbom]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/anchore/syft/blob/v1.57.2/LICENSE
+  restrictions: none
+  verified_at: "2026-11-24"
+upstream:
+  homepage: https://github.com/anchore/syft
+  source: https://github.com/anchore/syft
+image: ghcr.io/anchore/syft@sha256:e97e20b6e6d1699c60296b66ab337941724f9bd06ac279d893eda89601fc4b2a
+version: "1.57.2"
+resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 200 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.5.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive, image]
+  command: ["/syft", "scan", "dir:/src", "--quiet", "--source-name", "scanoria",
+            "--output", "cyclonedx-json@1.6=/out/sbom.cdx.json"]
+  env:
+    SYFT_CHECK_FOR_APP_UPDATE: "false"
+  timeout_s: 900
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  cyclonedx: { path: /out/sbom.cdx.json, version: "1.6" }
+testbed:
+  path: testbed/
+  expect:
+    # Un composant par écosystème du banc d'essai (npm, PyPI, Go).
+    - { rule: minimist, category: sbom, min: 1 }
+    - { rule: six, category: sbom, min: 1 }
+    - { rule: github.com/google/uuid, category: sbom, min: 1 }
+health: { command: ["/syft", "version"] }
+upgrade: { policy: on-demand }

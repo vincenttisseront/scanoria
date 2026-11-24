@@ -1,0 +1,10 @@
+{
+  "name": "banc-essai-scanoria",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Banc d'essai Scanoria : dépendance vulnérable connue, volontairement. Ne jamais installer.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "minimist": "1.2.5"
+  }
+}

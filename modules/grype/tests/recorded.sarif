@@ -1,0 +1,65 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Grype",
+          "version": "0.122.1",
+          "informationUri": "https://github.com/anchore/grype",
+          "rules": [
+            {
+              "id": "GHSA-xvch-5gv4-984h-minimist",
+              "name": "NpmMatcherExactDirectMatch",
+              "shortDescription": {
+                "text": "GHSA-xvch-5gv4-984h critical vulnerability for minimist package"
+              },
+              "fullDescription": {
+                "text": "Prototype Pollution in minimist"
+              },
+              "helpUri": "https://github.com/anchore/grype",
+              "help": {
+                "text": "Vulnerability GHSA-xvch-5gv4-984h\nSeverity: critical\nPackage: minimist\nVersion: 1.2.5\nFix Version: 1.2.6\nType: npm\nLocation: /package-lock.json\nData Namespace: github:language:javascript\nLink: [GHSA-xvch-5gv4-984h](https://github.com/advisories/GHSA-xvch-5gv4-984h)",
+                "markdown": "**Vulnerability GHSA-xvch-5gv4-984h**\n| Severity | Package | Version | Fix Version | Type | Location | Data Namespace | Link |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| critical  | minimist  | 1.2.5  | 1.2.6  | npm  | /package-lock.json  | github:language:javascript  | [GHSA-xvch-5gv4-984h](https://github.com/advisories/GHSA-xvch-5gv4-984h)  |\n"
+              },
+              "properties": {
+                "security-severity": "9.8"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "GHSA-xvch-5gv4-984h-minimist",
+          "level": "error",
+          "message": {
+            "text": "A critical vulnerability in npm package: minimist, version 1.2.5 was found at: /package-lock.json"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "package-lock.json"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1,
+                  "endColumn": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "/package-lock.json",
+                  "fullyQualifiedName": "/package-lock.json"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

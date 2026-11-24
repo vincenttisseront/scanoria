@@ -1,0 +1,38 @@
+{
+ "bomFormat": "CycloneDX",
+ "specVersion": "1.6",
+ "version": 1,
+ "metadata": {
+  "tools": {
+   "components": [
+    {
+     "type": "application",
+     "name": "Dependency-Track",
+     "version": "4.14.7"
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "scanoria:dtrack:project",
+    "value": "3d7c8f2a-5b1e-4c9d-a6f0-2e8b7d4c1a90"
+   }
+  ]
+ },
+ "components": [
+  {
+   "type": "library",
+   "name": "minimist",
+   "version": "1.2.8",
+   "purl": "pkg:npm/minimist@1.2.8",
+   "bom-ref": "6c1f2e3d-0a9b-4c8d-b7e6-f5a4b3c2d1e0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ]
+  }
+ ]
+}

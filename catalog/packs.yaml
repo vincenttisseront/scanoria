@@ -10,19 +10,19 @@
 packs:
   - id: selection-conseillee
     name: Sélection conseillée
-    modules: [gitleaks, osv-scanner, trivy]
+    modules: [gitleaks, osv-scanner, trivy, syft, grype]
     technologies: []
   - id: node
     name: Node.js
-    modules: [gitleaks, osv-scanner, trivy]
+    modules: [gitleaks, osv-scanner, trivy, syft, grype]
     technologies: [javascript, typescript, npm]
   - id: python
     name: Python
-    modules: [gitleaks, osv-scanner, trivy]
+    modules: [gitleaks, osv-scanner, trivy, syft, grype]
     technologies: [python, pip, poetry]
   - id: java
     name: Java
-    modules: [gitleaks, osv-scanner, trivy]
+    modules: [gitleaks, osv-scanner, trivy, syft, grype]
     technologies: [java, maven, gradle]
   - id: iac
     name: IaC

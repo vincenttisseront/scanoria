@@ -1,0 +1,10 @@
+{
+  "name": "banc-essai-sbom",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Banc d'essai Scanoria (SBOM) : ne jamais installer.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "minimist": "1.2.8"
+  }
+}

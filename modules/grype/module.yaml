@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module Grype : vulnérabilités des composants, hors ligne. Version, empreinte
+# d'image et licence relevées en amont le 2026-11-24 (tag v0.122.1, liste de
+# manifestes multi-architecture, même empreinte sur ghcr.io et docker.io ;
+# LICENSE Apache-2.0 du tag). Base : module feed grype-db, montée en lecture
+# seule sur /feeds/grype-db (GRYPE_DB_CACHE_DIR, schéma v6).
+# Aucune mise à jour ni validation d'âge par l'outil : l'âge de la base est
+# géré par l'appliance (CLAUDE.md § 9, G16 en 0.6).
+# Dans une analyse qui a produit un SBOM (Syft, contrat 14), Grype lit ce SBOM
+# (scan.sbom_command) ; sinon il analyse lui-même /src (scan.command).
+id: grype
+name: Grype
+description:
+  fr: Vulnérabilités des dépendances, à partir du SBOM de l'analyse ou du dépôt.
+  en: Dependency vulnerabilities, from the scan's SBOM or from the repository.
+type: scanner
+categories: [sca, sbom]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/anchore/grype/blob/v0.122.1/LICENSE
+  restrictions: none
+  verified_at: "2026-11-24"
+upstream:
+  homepage: https://github.com/anchore/grype
+  source: https://github.com/anchore/grype
+image: ghcr.io/anchore/grype@sha256:661583704a253c0448ed63998b5ea2cd9d5a76ee71eedc4aed439b8ce3e93a1c
+version: "0.122.1"
+resources: { min_ram_mb: 1536, min_cpu: 1, disk_mb: 300 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [grype-db], appliance: ">=0.5.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive, sbom, image]
+  command: ["/grype", "dir:/src", "--quiet", "--output", "sarif", "--file", "/out/result.sarif"]
+  prefers_sbom: true
+  sbom_command: ["/grype", "sbom:/src/sbom.cdx.json", "--quiet", "--output", "sarif", "--file", "/out/result.sarif"]
+  env:
+    GRYPE_DB_CACHE_DIR: /feeds/grype-db
+    GRYPE_DB_AUTO_UPDATE: "false"
+    GRYPE_DB_VALIDATE_AGE: "false"
+    GRYPE_DB_REQUIRE_UPDATE_CHECK: "false"
+    GRYPE_DB_VALIDATE_BY_HASH_ON_START: "false"
+    GRYPE_CHECK_FOR_APP_UPDATE: "false"
+  timeout_s: 1200
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/result.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # minimist 1.2.5 dans package-lock.json (avis GitHub, identifiant de règle
+    # Grype : <vulnérabilité>-<paquet>).
+    - { rule: GHSA-xvch-5gv4-984h-minimist, category: sca, min: 1 }
+health: { command: ["/grype", "version"] }
+upgrade: { policy: on-demand }

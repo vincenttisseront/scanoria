@@ -434,6 +434,10 @@ def run(manifest, timeout=None):
         t = max(10, min(t, timeout or DEFAULT_TIMEOUT))
         cmd = render_command(scan["command"], option_defaults(manifest))
         mounts = [(src, "/src", "ro"), (out, "/out", "rw")] + tools
+        if scan.get("requires_sbom") is True:
+            # Module qui ne lit que le SBOM de l'analyse (contrat 14 de la 0.5) :
+            # le banc d'essai porte son SBOM, sbom.cdx.json, à la racine.
+            mounts.append((src, "/sbom", "ro"))
         started = time.monotonic()
         if svc:
             try:

@@ -129,6 +129,9 @@
         "E_SONAR_UNAVAILABLE",
         "E_SONAR_ADMIN",
         "E_SONAR_API",
+        "E_DTRACK_UNAVAILABLE",
+        "E_DTRACK_ADMIN",
+        "E_DTRACK_API",
         "E_EXPORT_FAILED"
       ]
     },
