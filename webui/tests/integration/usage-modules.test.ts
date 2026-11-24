@@ -202,7 +202,11 @@ describe.skipIf(!DATABASE_URL)('consommation des modules (F14, PostgreSQL réel)
     const task = new UsageTask(db.pool, { stateFile, log: m => logs.push(m) })
     await task.iterate(new Date(now))
     await task.iterate(new Date(now + 1000))
-    const failing = { query: async () => { throw new Error('base indisponible') } } as never
+    const failing = {
+      query: async () => {
+        throw new Error('base indisponible')
+      },
+    } as never
     const broken = new UsageTask(failing, { stateFile, log: m => logs.push(m) })
     await broken.iterate(new Date(now))
     expect(logs.some(l => l.includes('base indisponible'))).toBe(true)

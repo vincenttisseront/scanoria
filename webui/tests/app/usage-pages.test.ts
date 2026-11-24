@@ -104,7 +104,9 @@ describe('onglet Consommation', () => {
     // trou de mesure : la courbe est coupée en deux segments
     expect(document.body.querySelectorAll('svg polyline').length).toBeGreaterThanOrEqual(2)
     expect(document.body.querySelector('svg[role="img"]')!.getAttribute('aria-label')).toContain('2 Go – 2,9 Go')
-    await click(Array.from(document.body.querySelectorAll('button')).find(b => b.textContent?.includes('30 jours'))!)
+    const tab = Array.from(document.body.querySelectorAll('button')).find(b => b.textContent?.trim() === '30 jours')!
+    tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+    await settle()
     expect(bodyText()).toContain('Mémoire sur 30 jours')
   })
 

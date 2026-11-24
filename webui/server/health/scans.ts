@@ -86,9 +86,8 @@ export interface FailedScan {
 
 /** Analyses récentes (30 jours) dont un module a échoué, les plus récentes d'abord. */
 export async function recentFailures(db: Queryable, limit = 50): Promise<FailedScan[]> {
-  const r = await db.query<{
-    id: string, number: number, project_id: string, project_name: string, status: string, finished_at: Date | null, modules: FailedScan['modules']
-  }>(
+  type Row = Omit<FailedScan, 'finished_at'> & { finished_at: Date | null }
+  const r = await db.query<Row>(
     `SELECT s.id, s.number, s.project_id, p.name AS project_name, s.status, s.finished_at,
             jsonb_agg(jsonb_build_object('module_id', m.module_id, 'status', m.status, 'error_class', m.error_class,
                                          'has_log', m.log_path IS NOT NULL) ORDER BY m.module_id) AS modules
