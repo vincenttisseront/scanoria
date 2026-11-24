@@ -59,11 +59,15 @@ outputs:
 testbed:
   path: testbed/
   expect:
-    # Mot de passe en dur (hotspot de sécurité).
+    # Règles actives dans le profil par défaut de SonarQube 26.11 (« Sonar way
+    # core »), relevées sur une vraie instance par tests/b17-live.sh.
+    # Mot de passe en dur (sécurité).
     - { rule: "python:S2068", category: sast, min: 1 }
-    # Requête SQL construite par formatage de chaîne (hotspot de sécurité).
-    - { rule: "python:S2077", category: sast, min: 1 }
-    # Variable locale inutilisée (qualité).
-    - { rule: "python:S1481", category: quality, min: 1 }
+    # Certificat TLS non vérifié (sécurité).
+    - { rule: "python:S4830", category: sast, min: 1 }
+    # Auto-affectation d'une variable (fiabilité, qualité).
+    - { rule: "python:S1656", category: quality, min: 1 }
+    # Conditions identiques dans un if/elif (fiabilité, qualité).
+    - { rule: "python:S1862", category: quality, min: 1 }
 health: { command: ["python3", "--version"] }
 upgrade: { policy: on-demand }

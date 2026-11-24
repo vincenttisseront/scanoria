@@ -46,13 +46,17 @@ describe('SonarQube : SARIF du convertisseur', () => {
 
   it('lit tous les résultats, sans problème de lecture', () => {
     expect(out.issues).toEqual([])
-    expect(out.findings).toHaveLength(4)
+    expect(out.findings).toHaveLength(7)
   })
-  it('code smells en qualité, hotspots en SAST', () => {
+  it('code smells et bugs en qualité, vulnérabilités et hotspots en SAST', () => {
     expect(byRule['python:S1481']!.category).toBe('quality')
     expect(byRule['python:S1192']!.category).toBe('quality')
     expect(byRule['python:S2068']!.category).toBe('sast')
     expect(byRule['python:S2077']!.category).toBe('sast')
+    // Issues de sécurité (VULNERABILITY) en SAST, bugs de fiabilité en qualité.
+    expect(byRule['python:S4830']!.category).toBe('sast')
+    expect(byRule['python:S1656']!.category).toBe('quality')
+    expect(byRule['python:S1862']!.category).toBe('quality')
   })
   it('gravité native lisible, normalisée par la table du manifeste', () => {
     expect(byRule['python:S1481']!.nativeSeverity).toBe('low')
