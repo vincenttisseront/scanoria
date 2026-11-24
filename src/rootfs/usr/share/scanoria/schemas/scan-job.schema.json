@@ -113,7 +113,7 @@
                     "private_key": {
                       "type": "string",
                       "maxLength": 16384,
-                      "pattern": "^-----BEGIN OPENSSH PRIVATE KEY-----"
+                      "pattern": "^-{5}BEGIN OPENSSH PRIVATE KEY-{5}"
                     },
                     "known_hosts": {
                       "type": "string",

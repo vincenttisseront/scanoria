@@ -75,19 +75,21 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
     it('annule une migration fautive en entier (transaction)', async () => {
       const client = await db.pool.connect()
       try {
+        const shipped = loadMigrationsFromDir(MIGRATIONS_DIR)
+        const num = (n: number) => String(n).padStart(3, '0')
+        const broken = `${num(shipped.length + 1)}_broken.sql`
         const list = [
-          ...loadMigrationsFromDir(MIGRATIONS_DIR),
+          ...shipped,
           ...prepareMigrations([
-            { name: '001_x.sql', content: '' },
-            { name: '002_x.sql', content: '' },
-            { name: '003_broken.sql', content: 'CREATE TABLE half_done (id int); SELECT * FROM no_such_table;' },
-          ]).slice(2),
+            ...shipped.map((_m, i) => ({ name: `${num(i + 1)}_x.sql`, content: '' })),
+            { name: broken, content: 'CREATE TABLE half_done (id int); SELECT * FROM no_such_table;' },
+          ]).slice(shipped.length),
         ]
-        await expect(applyMigrations(client, list)).rejects.toThrow(/003_broken.sql failed/)
+        await expect(applyMigrations(client, list)).rejects.toThrow(new RegExp(`${broken} failed`))
         const t = await client.query(`SELECT to_regclass('public.half_done') AS t`)
         expect(t.rows[0].t).toBeNull()
         const v = await client.query('SELECT max(version) AS v FROM schema_migrations')
-        expect(v.rows[0].v).toBe(2)
+        expect(v.rows[0].v).toBe(shipped.length)
       }
       finally {
         client.release()
