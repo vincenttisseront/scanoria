@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Vincent Tisseront
+//
+// Contrats partagés des analyses (0.3, docs/ARCHITECTURE.md § 12). Ils
+// reprennent À L'IDENTIQUE les contraintes de 003_analyses.sql et des schémas
+// scan-job / scan-result ; tests/unit/analysis.test.ts compare les deux.
+// Fichier partagé entre chantiers : ajout seulement.
+
+import { z } from 'zod'
+import { MODULE_ID_RE } from './schemas'
+
+export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'] as const
+export type Severity = (typeof SEVERITIES)[number]
+/** Rang d'une gravité : plus grand = plus grave. */
+export const SEVERITY_RANK: Record<Severity, number> = { critical: 5, high: 4, medium: 3, low: 2, info: 1 }
+
+/** Catégories de modules (catalog/schema/module.schema.json). */
+export const CATEGORIES = [
+  'quality', 'sast', 'secrets', 'sca', 'iac', 'container', 'sbom', 'dast',
+  'lint', 'licenses', 'vuln-management', 'ci',
+] as const
+export type Category = (typeof CATEGORIES)[number]
+
+export const SCAN_TRIGGERS = ['manual', 'schedule', 'commit', 'webhook', 'api', 'release', 'replay'] as const
+export type ScanTrigger = (typeof SCAN_TRIGGERS)[number]
+/** Ordonnancement (G17) : release > PR > manuel > planifié. */
+export const SCAN_PRIORITY: Record<ScanTrigger, number> = {
+  release: 90, webhook: 70, api: 70, manual: 50, replay: 40, commit: 30, schedule: 10,
+}
+
+export const SCAN_STATUSES = ['queued', 'dispatched', 'running', 'ingesting', 'done', 'error', 'cancelled'] as const
+export type ScanStatus = (typeof SCAN_STATUSES)[number]
+export const SCAN_MODULE_STATUSES = [
+  'pending', 'running', 'ok', 'error', 'timeout', 'oom', 'invalid-output', 'missing', 'skipped',
+] as const
+export type ScanModuleStatus = (typeof SCAN_MODULE_STATUSES)[number]
+/** G12 : infra = relancée automatiquement ; tool / input = non concluant. */
+export const ERROR_CLASSES = ['infra', 'tool', 'input'] as const
+export type ErrorClass = (typeof ERROR_CLASSES)[number]
+
+export const VERDICTS = ['passed', 'failed', 'inconclusive'] as const
+export type Verdict = (typeof VERDICTS)[number]
+
+export const FINDING_STATUSES = ['new', 'confirmed', 'false-positive', 'accepted', 'fixed'] as const
+export type FindingStatus = (typeof FINDING_STATUSES)[number]
+export const SECRET_STATES = ['to-revoke', 'revoked', 'false-positive'] as const
+export const EXCEPTION_KINDS = ['path', 'rule', 'vuln', 'finding', 'module'] as const
+export const FORGE_KINDS = ['forgejo', 'github', 'gitlab'] as const
+export const SCHEDULES = ['none', 'daily', 'on-commit'] as const
+
+export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/
+export const COMMIT_RE = /^[0-9a-f]{40,64}$/
+export const FINGERPRINT_RE = /^[0-9a-f]{64}$/
+export const API_TOKEN_RE = /^scn_[A-Za-z0-9]{40}$/
+
+const severity = z.enum(SEVERITIES)
+
+/** Règles d'un quality gate (table gates.rules). Défauts = gate « defaut ». */
+export const GateRules = z.object({
+  new_code_only: z.boolean().default(true),
+  max_secrets: z.number().int().min(0).default(0),
+  vuln_block_from: severity.nullable().default('high'),
+  sast_block_from: severity.nullable().default('high'),
+  iac_block_from: severity.nullable().default('high'),
+  block_malicious: z.literal(true).default(true), // H4 : jamais désactivable
+  inconclusive_blocks: z.literal(true).default(true), // G13 : non concluant = bloquant
+}).strict()
+export type GateRules = z.infer<typeof GateRules>
+
+/** Raison d'un verdict, ordonnée par l'évaluateur ; base de I9 (verdict expliqué). */
+export const VerdictReason = z.object({
+  code: z.enum([
+    'malicious-package', 'secret', 'vuln', 'sast', 'iac', 'other',
+    'module-error', 'module-missing', 'output-invalid', 'coverage-gap', 'feed-stale',
+  ]),
+  blocking: z.boolean(),
+  count: z.number().int().min(0),
+  severity: severity.nullable(),
+  module: z.string().regex(MODULE_ID_RE).nullable(),
+  finding_ids: z.array(z.string().uuid()).max(50),
+  /** Actions qui débloqueraient : corriger, demander une exception, rafraîchir une base, relancer. */
+  actions: z.array(z.enum(['fix', 'request-exception', 'refresh-feed', 'install-module', 'rerun'])),
+}).strict()
+export const VerdictDetails = z.object({
+  verdict: z.enum(VERDICTS),
+  gate_id: z.string().uuid(),
+  rules: GateRules,
+  evaluated_at: z.string(),
+  new_code_only: z.boolean(),
+  counts: z.record(severity, z.number().int().min(0)),
+  reasons: z.array(VerdictReason),
+  exceptions_applied: z.array(z.object({ id: z.string().uuid(), reason: z.string(), expires_on: z.string() }).strict()),
+}).strict()
+export type VerdictDetails = z.infer<typeof VerdictDetails>

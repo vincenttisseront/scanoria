@@ -40,11 +40,13 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
         `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1`,
       )
       expect(rows.map(r => r.table_name)).toEqual([
-        'appliance_settings', 'audit_log', 'helper_requests', 'roles', 'schema_migrations', 'sessions', 'update_history', 'users',
+        'ai_cache', 'ai_calls', 'ai_tasks', 'api_tokens', 'appliance_settings', 'audit_log', 'credentials', 'exceptions',
+        'findings', 'forges', 'gates', 'helper_requests', 'profiles', 'projects', 'roles', 'scan_findings', 'scan_modules',
+        'scans', 'schema_migrations', 'sessions', 'severity_maps', 'update_history', 'users',
       ])
       const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       const files = loadMigrationsFromDir(MIGRATIONS_DIR)
-      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql'])
+      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql'])
       expect(mig.rows).toEqual(files.map((f, i) => ({ version: i + 1, name: f.name, checksum: f.checksum })))
     })
 
@@ -73,19 +75,21 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
     it('annule une migration fautive en entier (transaction)', async () => {
       const client = await db.pool.connect()
       try {
+        const shipped = loadMigrationsFromDir(MIGRATIONS_DIR)
+        const num = (n: number) => String(n).padStart(3, '0')
+        const broken = `${num(shipped.length + 1)}_broken.sql`
         const list = [
-          ...loadMigrationsFromDir(MIGRATIONS_DIR),
+          ...shipped,
           ...prepareMigrations([
-            { name: '001_x.sql', content: '' },
-            { name: '002_x.sql', content: '' },
-            { name: '003_broken.sql', content: 'CREATE TABLE half_done (id int); SELECT * FROM no_such_table;' },
-          ]).slice(2),
+            ...shipped.map((_m, i) => ({ name: `${num(i + 1)}_x.sql`, content: '' })),
+            { name: broken, content: 'CREATE TABLE half_done (id int); SELECT * FROM no_such_table;' },
+          ]).slice(shipped.length),
         ]
-        await expect(applyMigrations(client, list)).rejects.toThrow(/003_broken.sql failed/)
+        await expect(applyMigrations(client, list)).rejects.toThrow(new RegExp(`${broken} failed`))
         const t = await client.query(`SELECT to_regclass('public.half_done') AS t`)
         expect(t.rows[0].t).toBeNull()
         const v = await client.query('SELECT max(version) AS v FROM schema_migrations')
-        expect(v.rows[0].v).toBe(2)
+        expect(v.rows[0].v).toBe(shipped.length)
       }
       finally {
         client.release()
