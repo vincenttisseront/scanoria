@@ -124,10 +124,22 @@ const operationSchema = z.object({
 })
 export type ModuleOperation = z.infer<typeof operationSchema>
 
+/** Base d'un module feed (0.3.4) : âge, taille, état du dernier téléchargement. */
+const feedStatusSchema = z.object({
+  id,
+  updated_at: nullableTimestamp,
+  checked_at: nullableTimestamp.optional(),
+  size_mb: z.number().min(0).nullable(),
+  status: z.enum(['ok', 'stale', 'failed', 'missing']),
+  error: text(500).nullable().optional(),
+})
+export type FeedStatus = z.infer<typeof feedStatusSchema>
+
 export interface ModulesState {
   available: boolean
   modules: InstalledModule[]
   operations: ModuleOperation[]
+  feeds: FeedStatus[]
 }
 
 const dnsRecordSchema = z.object({
@@ -194,12 +206,13 @@ export async function readCatalogIndex(path: string): Promise<CatalogIndex | nul
 
 export async function readModulesState(path: string): Promise<ModulesState> {
   const raw = await readJson(path, 2 * 1024 * 1024)
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { available: false, modules: [], operations: [] }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { available: false, modules: [], operations: [], feeds: [] }
   const doc = raw as Record<string, unknown>
   return {
     available: true,
     modules: keepValid(installedSchema, doc.modules).ok,
     operations: keepValid(operationSchema, doc.operations).ok,
+    feeds: keepValid(feedStatusSchema, doc.feeds).ok,
   }
 }
 

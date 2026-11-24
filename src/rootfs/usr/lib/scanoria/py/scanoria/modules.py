@@ -24,7 +24,7 @@ import shutil
 import time
 import uuid
 
-from . import catalogverify, common, quadlet, schema, testbed
+from . import catalogverify, common, feeds, quadlet, schema, testbed
 from .common import Fail
 
 MODULES_DIR = common.VARLIB + "/modules"
@@ -119,7 +119,9 @@ def public_entry(mid, e):
 def publish(reg):
     st = {"version": 1, "updated_at": common.iso(common.now()),
           "modules": [public_entry(k, reg["modules"][k]) for k in sorted(reg["modules"])],
-          "operations": reg["operations"][-MAX_OPERATIONS:]}
+          "operations": reg["operations"][-MAX_OPERATIONS:],
+          "feeds": [feeds.public_status(k) for k in sorted(reg["modules"])
+                    if feeds.is_declarative(reg["modules"][k]["manifest"])]}
     v = schema.load("schemas", "modules-state")
     errs = v.errors(st)
     if errs:
@@ -402,7 +404,7 @@ def remove_data(m):
         podman("volume", "rm", "--force", quadlet.volume_name(mid, name), timeout=300)
     shutil.rmtree(os.path.join(quadlet.MODULE_ETC, mid), ignore_errors=True)
     if m["type"] == "feed":
-        shutil.rmtree(os.path.join(testbed.FEEDS, mid), ignore_errors=True)
+        feeds.remove(mid)
 
 
 def env_values(m, cred, host_port, options):
@@ -570,9 +572,12 @@ def install_one(c, reg, op, m, options, frac):
              "options": options, "testbed": None, "route": None, "last_error": None,
              "accepted": m["license"]["restrictions"], "host_port": None, "created_db": False}
     reg["modules"][mid] = entry
-    if m["type"] == "feed" and not m.get("image"):
-        # Feed déclaratif (0.2) : sa base est posée sous /var/lib/scanoria/feeds/<id>.
-        os.makedirs(os.path.join(testbed.FEEDS, mid), mode=0o755, exist_ok=True)
+    if feeds.is_declarative(m):
+        # Feed déclaratif : sa base est téléchargée par le helper avant le banc
+        # d'essai des scanners qui en dépendent (E_FEED_UNAVAILABLE sinon).
+        op.step("download", frac(0.1), mid)
+        save_registry(reg)
+        feeds.refresh(m, options, timeout=c.left())
         entry.update(status="healthy", testbed=testbed.run(m))
         save_registry(reg)
         return
@@ -593,11 +598,23 @@ def install_one(c, reg, op, m, options, frac):
     else:
         op.step("health", frac(0.4), mid)
         scanner_health(m, c.left())
+        ensure_feeds(reg, op, m, c, frac)
     entry["status"] = "testing"
     op.step("testbed", frac(0.7), mid)
     entry["testbed"] = testbed.run(m, timeout=c.left())
     entry["status"] = "healthy"
     save_registry(reg)
+
+
+def ensure_feeds(reg, op, m, c, frac):
+    """Base vide d'un feed déjà installé (appliance antérieure à la 0.3.4) : téléchargée
+    avant le banc d'essai du scanner, qui sinon échouerait (code 127)."""
+    for fid in (m.get("requires") or {}).get("feeds") or []:
+        fe = reg["modules"].get(fid)
+        if fe is not None and feeds.is_declarative(fe["manifest"]) and not feeds.has_data(fid):
+            op.step("download", frac(0.5), fid)
+            feeds.refresh(fe["manifest"], fe.get("options"), timeout=c.left())
+    feeds.require_ready(m)
 
 
 def undo_install(reg, mid):
@@ -616,7 +633,7 @@ def undo_install(reg, mid):
     elif os.path.exists(os.path.join(quadlet.MODULE_ETC, mid, "env")):
         os.unlink(os.path.join(quadlet.MODULE_ETC, mid, "env"))
     if m["type"] == "feed":
-        shutil.rmtree(os.path.join(testbed.FEEDS, mid), ignore_errors=True)
+        feeds.remove(mid)
     del reg["modules"][mid]
     remove_image(reg, m.get("image"))
     apply_sysctl(reg)
@@ -911,7 +928,8 @@ def act_update_module(c):
             op.step("pull", 25)
             pull(new, c.left())
         if declarative:
-            pass
+            op.step("download", 30)
+            feeds.refresh(new, options, timeout=c.left())
         elif is_svc:
             op.step("units", 40)
             stop_service(mid)
@@ -985,3 +1003,38 @@ def act_refresh_catalog(c):
     except Fail:
         out["updates"] = []
     return out
+
+
+# --------------------------------------------------------------------------
+# refresh-feeds (timer quotidien et bouton « mettre à jour maintenant »)
+# --------------------------------------------------------------------------
+
+def act_refresh_feeds(c):
+    """Télécharge les bases des feeds installés (tous, ou ceux de params.ids).
+
+    Une base qui échoue garde la précédente ; l'échec est signalé (E_FEED_UNAVAILABLE)
+    après avoir tenté toutes les autres."""
+    reg = load_registry()
+    ids = c.params.get("ids")
+    installed = sorted(k for k, e in reg["modules"].items() if feeds.is_declarative(e["manifest"]))
+    if ids:
+        unknown = [i for i in ids if i not in installed]
+        if unknown:
+            raise Fail("E_NOT_FOUND", "not an installed feed: %s" % ", ".join(unknown))
+        todo = [i for i in installed if i in ids]
+    else:
+        todo = installed
+    results, failed = [], []
+    for fid in todo:
+        e = reg["modules"][fid]
+        try:
+            results.append(feeds.refresh(e["manifest"], e.get("options"), timeout=c.left()))
+        except Fail as f:
+            common.log("refresh-feeds: %s" % f.message)
+            failed.append(f)
+            results.append(feeds.public_status(fid))
+    publish(reg)
+    if failed:
+        raise Fail(failed[0].code if len(failed) == 1 else "E_FEED_UNAVAILABLE",
+                   "; ".join(f.message for f in failed)[:2000], {"feeds": results})
+    return {"feeds": results}

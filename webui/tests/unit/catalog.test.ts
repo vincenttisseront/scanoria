@@ -110,7 +110,8 @@ describe('lecture des fichiers publiés', () => {
     expect(state.available).toBe(true)
     expect(state.modules.map(m => m.id)).toEqual(['gitleaks', 'trivy-db', 'trivy', 'ancien'])
     expect(state.operations).toHaveLength(2)
-    expect(await readModulesState(join(tmp, 'absent.json'))).toEqual({ available: false, modules: [], operations: [] })
+    expect(state.feeds).toEqual([expect.objectContaining({ id: 'trivy-db', status: 'ok', size_mb: 1732.8 })])
+    expect(await readModulesState(join(tmp, 'absent.json'))).toEqual({ available: false, modules: [], operations: [], feeds: [] })
   })
 
   // Contrat 4 : le jeu d'essai suit les schémas des chantiers B et C dès qu'ils sont fusionnés
@@ -310,7 +311,7 @@ describe('plan d’installation', () => {
 })
 
 describe('vue du catalogue', () => {
-  const view = () => buildCatalogView({ ...ctx({ installed }), operations: [], stateAvailable: true } as CatalogContext)
+  const view = () => buildCatalogView({ ...ctx({ installed }), operations: [], feeds: [], stateAvailable: true } as CatalogContext)
 
   it('fusionne index et état : installé, mise à jour, compatibilité, orphelins', () => {
     const v = view()
@@ -339,7 +340,7 @@ describe('vue du catalogue', () => {
     expect(v.recommended.ids).toEqual(['osv-scanner', 'shellcheck'])
     expect(v.recommended.first_access).toBe(false)
     expect(v.recommended.plan?.items.map(i => i.id)).toEqual(['osv-scanner', 'shellcheck', 'osv-db'])
-    const fresh = buildCatalogView({ ...ctx(), operations: [], stateAvailable: false } as CatalogContext)
+    const fresh = buildCatalogView({ ...ctx(), operations: [], feeds: [], stateAvailable: false } as CatalogContext)
     expect(fresh.recommended.first_access).toBe(true)
     expect(fresh.recommended.ids).toEqual(['gitleaks', 'osv-scanner', 'trivy', 'shellcheck'])
   })
@@ -350,7 +351,7 @@ describe('vue du catalogue', () => {
       { from: 'semgrep', to: 'opengrep', kind: 'conflict' },
       { from: 'orphelin-dep', to: 'inexistant', kind: 'module' },
     ]))
-    const empty = buildCatalogView({ ...ctx({ index: null, installed }), operations: [], stateAvailable: true } as CatalogContext)
+    const empty = buildCatalogView({ ...ctx({ index: null, installed }), operations: [], feeds: [], stateAvailable: true } as CatalogContext)
     expect(empty.index.available).toBe(false)
     expect(empty.modules).toEqual([])
     expect(empty.orphans).toHaveLength(4)

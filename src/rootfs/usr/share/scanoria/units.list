@@ -18,3 +18,4 @@ scanoria-runner.service
 scanoria-worker.service
 scanoria-ai.service
 scanoria-ai-check.timer
+scanoria-feeds-refresh.timer

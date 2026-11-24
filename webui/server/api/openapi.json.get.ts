@@ -51,6 +51,7 @@ const OPS: Record<string, Record<string, Op>> = {
     put: { summary: 'Upload one release file (raw body): release.json, SHA256SUMS, SHA256SUMS.sig, scanoria-X.Y.Z.tar.zst', role: 'admin', status: 201 },
   },
   '/api/catalog': { get: { summary: 'Catalog modules, install state, compatibility, packs, dependency graph, recommended selection, operations', role: 'viewer' } },
+  '/api/catalog/feeds/refresh': { post: { summary: 'Request refresh-feeds (download the vulnerability databases of installed feeds now)', role: 'admin', body: 'refresh-feeds', status: 202 } },
   '/api/catalog/refresh': { post: { summary: 'Request refresh-catalog (download and verify the signed index)', role: 'admin', body: 'refresh-catalog', status: 202 } },
   '/api/catalog/plan': { post: { summary: 'Install plan without side effect: added dependencies, licenses to accept, resource checks', role: 'viewer', body: 'CatalogPlan' } },
   '/api/catalog/install': { post: { summary: 'Request install-modules for modules or a pack (409 E_PLAN when blocked)', role: 'admin', body: 'CatalogInstall', status: 202 } },
@@ -131,6 +132,7 @@ const OPS: Record<string, Record<string, Op>> = {
 const HELPER_BODIES = [
   'set-hostname', 'set-admin-networks', 'issue-certificate', 'import-certificate', 'check-update',
   'apply-update', 'rollback-update', 'set-update-policy', 'run-selftest', 'refresh-catalog', 'check-dns',
+  'refresh-feeds',
 ]
 
 const PLAN_PROPERTIES = {

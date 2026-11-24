@@ -81,6 +81,17 @@ export interface CatalogEntry extends ModuleSummary {
   blockers: PlanIssue[]
   auto_added: string[]
   dependents: string[]
+  feed?: FeedStatus | null
+}
+
+/** Base d'un module feed installé (0.3.4). */
+export interface FeedStatus {
+  id: string
+  updated_at: string | null
+  checked_at?: string | null
+  size_mb: number | null
+  status: 'ok' | 'stale' | 'failed' | 'missing'
+  error?: string | null
 }
 
 export interface ModuleOperation {

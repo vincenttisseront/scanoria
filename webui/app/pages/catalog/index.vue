@@ -407,6 +407,16 @@ const packResourcesOk = (p: CatalogPack) => !p.plan || p.plan.checks.every(c => 
               :label="t('catalog.list.updateAvailable', { version: row.original.update_available })"
             />
             <p
+              v-if="row.original.feed"
+              class="mt-1 text-xs"
+              :class="row.original.feed.status === 'ok' ? 'text-muted' : 'text-warning'"
+              data-feed-age
+            >
+              {{ row.original.feed.updated_at
+                ? t('catalog.feed.age', { date: fmt.date(row.original.feed.updated_at) })
+                : t('catalog.feed.none') }}
+            </p>
+            <p
               v-if="!row.original.installed && row.original.blockers.length"
               class="mt-1 max-w-xs text-xs text-warning"
             >

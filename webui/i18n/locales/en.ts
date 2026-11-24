@@ -130,6 +130,7 @@ export default {
     E_AI_UNRESOLVED: 'The AI server name does not resolve (or resolves to too many addresses).',
     E_AI_FORBIDDEN_ADDRESS: 'The AI server resolves to a forbidden address (loopback, link-local, multicast, reserved or the appliance itself).',
     E_AI_CA: 'The CA certificate provided for the AI server cannot be read or contains a private key.',
+    E_FEED_UNAVAILABLE: 'The vulnerability database cannot be downloaded from the appliance: check its Internet (or proxy) access, or wait for the offline import. The previous database stays active.',
   },
   request: {
     pending: 'Queued…',
@@ -568,6 +569,16 @@ export default {
         disable: 'Disable',
         update: 'Update',
       },
+    },
+    feed: {
+      title: 'Vulnerability database',
+      updated: 'Updated on {date} ({days} d ago), {size} MB.',
+      missing: 'No database downloaded: the scanners that depend on it cannot run.',
+      lastFailure: 'Last download failed, the previous database is still used: {error}',
+      help: 'Downloaded by the appliance at installation, then daily. Without Internet, importing a signed offline bundle comes in 0.6.',
+      refresh: 'Update now',
+      age: 'Database of {date}',
+      none: 'No database',
     },
     testbed: {
       case: '{what}: {found} found, at least {min} expected',

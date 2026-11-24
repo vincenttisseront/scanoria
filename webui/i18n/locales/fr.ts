@@ -130,6 +130,7 @@ export default {
     E_AI_UNRESOLVED: 'Le nom du serveur IA ne résout pas (ou vers trop d’adresses).',
     E_AI_FORBIDDEN_ADDRESS: 'Le serveur IA résout vers une adresse interdite (bouclage, lien local, multidiffusion, réservée ou adresse de l’appliance).',
     E_AI_CA: 'Le certificat d’AC fourni pour le serveur IA est illisible ou contient une clé privée.',
+    E_FEED_UNAVAILABLE: 'La base de vulnérabilités ne peut pas être téléchargée depuis l’appliance : vérifier son accès à Internet (ou au proxy), ou attendre l’import hors ligne. La base précédente reste active.',
   },
   request: {
     pending: 'En file d’attente…',
@@ -568,6 +569,16 @@ export default {
         disable: 'Désactivation',
         update: 'Mise à jour',
       },
+    },
+    feed: {
+      title: 'Base de vulnérabilités',
+      updated: 'Mise à jour le {date} (il y a {days} j), {size} Mo.',
+      missing: 'Aucune base téléchargée : les scanners qui en dépendent ne peuvent pas tourner.',
+      lastFailure: 'Dernier téléchargement en échec, la base précédente reste utilisée : {error}',
+      help: 'Téléchargée par l’appliance à l’installation, puis chaque jour. Sans Internet, l’import d’un lot hors ligne signé arrive en 0.6.',
+      refresh: 'Mettre à jour maintenant',
+      age: 'Base du {date}',
+      none: 'Base absente',
     },
     testbed: {
       case: '{what} : {found} trouvé(s), {min} attendu(s) au minimum',
