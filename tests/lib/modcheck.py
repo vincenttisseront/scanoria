@@ -135,6 +135,9 @@ def repo_errors(root):
         mfile = os.path.join(mdir, "module.yaml")
         if not os.path.isdir(mdir):
             continue
+        if os.path.islink(mfile) or os.path.islink(mdir):
+            errs.append(f"{mid}: lien symbolique interdit (module.yaml ou dossier)")
+            continue
         if not os.path.isfile(mfile):
             errs.append(f"{mid}: module.yaml absent")
             continue
@@ -186,7 +189,7 @@ def expect_report(manifest, sarif):
     results = sarif_results(sarif)
     report = []
     for exp in manifest["testbed"]["expect"]:
-        n = sum(1 for r in results if "rule" not in exp or r.get("ruleId") == exp["rule"])
+        n = sum(1 for r in results if r.get("ruleId") == exp["rule"])
         report.append((exp, n, n >= exp["min"]))
     return report
 
@@ -224,7 +227,7 @@ def main(argv):
             m = load_yaml(path)
             errs = manifest_errors(m, validators) if isinstance(m, dict) else ["pas un objet"]
             for e in errs:
-                print(f"{os.path.basename(path)}: {e}")
+                print(f"{os.path.basename(path)}: {e}")  # b10 ignore le préfixe
             bad |= bool(errs)
         return 1 if bad else 0
     if cmd == "repo":

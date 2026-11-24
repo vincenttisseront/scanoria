@@ -62,7 +62,8 @@ prepare_feed() { # id
 			# = utilisateur du runner en podman rootless, pour que les fichiers
 			# téléchargés lui appartiennent (lecture par 65534 ensuite, :ro).
 			podman run --rm --user=0:0 --env=HOME=/tmp --tmpfs=/tmp -v "$dir:/cache:rw" \
-				--entrypoint=trivy "$image" --cache-dir /cache image --download-db-only --no-progress ;;
+				--entrypoint=trivy "$image" --cache-dir /cache image --download-db-only --no-progress \
+				--db-repository "$(yq "$ROOT/modules/trivy-db/module.yaml" | jq -r .feed.source.ref)" ;;
 		osv-db)
 			mkdir -p "$dir/osv-scalibr/npm"
 			curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$dir/osv-scalibr/npm/all.zip" \
@@ -87,10 +88,15 @@ for id in "${ids[@]}"; do
 	chmod -R a+rX,go-w "$src"
 	mkdir -p "$out"
 	chmod 0777 "$out"
-	mapfile -d '' args < <(python3 "$MC" podman "$m" "$src" "$out" "$WORK/feeds")
+	python3 "$MC" podman "$m" "$src" "$out" "$WORK/feeds" > "$WORK/$id.args" \
+		|| { ko "$id : arguments podman non générés"; echo "::endgroup::"; continue; }
+	mapfile -d '' args < "$WORK/$id.args"
+	# Nom fixe : le conteneur est supprimé même si « timeout » tue le client.
+	args=("${args[0]}" "--name=b10-$id-$$" "${args[@]:1}")
 	echo "podman ${args[*]}"
 	rc=0
 	timeout "$(jq -r .scan.timeout_s "$WORK/$id.json")" podman "${args[@]}" > "$WORK/$id.log" 2>&1 || rc=$?
+	podman rm -f "b10-$id-$$" > /dev/null 2>&1 || true
 	tail -n 20 "$WORK/$id.log"
 	if jq -e --argjson rc "$rc" '(.scan.exit_codes_ok // [0]) | index($rc) != null' "$WORK/$id.json" > /dev/null; then
 		ok "$id : code de sortie $rc accepté"

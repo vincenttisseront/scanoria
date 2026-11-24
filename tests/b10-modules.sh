@@ -38,7 +38,7 @@ check() {
 refused() { # libellé fichier motif-attendu
 	if python3 "$MC" manifest "$2" > "$TMP/last.log" 2>&1; then
 		ko "$1 : accepté à tort"
-	elif grep -q -- "$3" "$TMP/last.log"; then
+	elif sed 's/^[^:]*: //' "$TMP/last.log" | grep -qF -- "$3"; then
 		ok "$1"
 	else
 		ko "$1 : refusé, mais sans le motif « $3 »"
@@ -137,6 +137,8 @@ mut("sortie-absente-commande", setp(["outputs", "sarif", "path"], "/out/autre.sa
 mut("reseau-cible-hors-dast", setp(["scan", "network"], "target"))
 mut("reseau-hote", setp(["scan", "network"], "host"))
 mut("banc-attente-vide", setp(["testbed", "expect"], []))
+mut("banc-attente-sans-regle", setp(["testbed", "expect"], [{"min": 1}]))
+mut("feed-https-sans-https", setp(["feed", "source"], {"kind": "https", "ref": "ftp://exemple.test/x.zip"}), feed)
 mut("banc-attente-zero", setp(["testbed", "expect"], [{"rule": "jwt", "min": 0}]))
 mut("banc-chemin-sortant", setp(["testbed", "path"], "../trivy/testbed"))
 mut("banc-chemin-absolu", setp(["testbed", "path"], "/etc"))
@@ -152,19 +154,19 @@ mut("feed-sans-bloc-feed", delp(["feed"]), feed)
 mut("feed-montage-hors-feeds", setp(["feed", "mount"], "/etc/trivy"), feed)
 EOF
 declare -A WHY=(
-	[image-etiquette]=image [image-etiquette-et-empreinte]=image [image-nom-court]=image
-	[image-empreinte-courte]=image [champ-inconnu]=post_install [champ-inconnu-scan]=privileged
+	[image-etiquette]=@sha256 [image-etiquette-et-empreinte]=@sha256 [image-nom-court]=@sha256
+	[image-empreinte-courte]=@sha256 [champ-inconnu]=post_install [champ-inconnu-scan]=privileged
 	[champ-inconnu-licence]=accepted [option-sans-defaut]=default [option-defaut-hors-type]="défaut non conforme"
-	[option-defaut-hors-bornes]="défaut non conforme" [option-objet-imbrique]=object [option-ref]='\$ref'
+	[option-defaut-hors-bornes]="défaut non conforme" [option-objet-imbrique]=object [option-ref]='$ref'
 	[option-nom-invalide]="nom d'option" [options-ouvertes]=False [i18n-option-inconnue]=fantome
 	[id-point-point]=gitleaks [id-majuscules]=GitLeaks [id-trop-long]=ggg [restriction-inconnue]=aucune
-	[licence-url-http]=http [type-inconnu]=plugin [categorie-inconnue]=magie [scanner-sans-banc]=testbed
+	[licence-url-http]=https [type-inconnu]=plugin [categorie-inconnue]=magie [scanner-sans-banc]=testbed
 	[scanner-sans-sortie]=outputs [sarif-mauvaise-version]=2.1.0 [sortie-hors-out]=passwd
-	[sortie-absente-commande]="absent de scan.command" [reseau-cible-hors-dast]=dast [reseau-hote]=host
-	[banc-attente-vide]=expect [banc-attente-zero]=minimum [banc-chemin-sortant]=trivy [banc-chemin-absolu]=/etc
-	[appliance-sans-operateur]=0.2.0 [requires-incomplet]=feeds [needs-feeds]=feeds [env-nom-invalide]=LD_PRELOAD
-	[commande-point-point]=".." [ressources-negatives]=minimum [scanner-avec-hostname]=null
-	[feed-avec-scan]=schéma [feed-sans-bloc-feed]=feed [feed-montage-hors-feeds]=/etc/trivy
+	[sortie-absente-commande]="absent de scan.command" [reseau-cible-hors-dast]=dast [reseau-hote]=none
+	[banc-attente-vide]=expect [banc-attente-sans-regle]=rule [feed-https-sans-https]=https [banc-attente-zero]=minimum [banc-chemin-sortant]=trivy [banc-chemin-absolu]=/etc
+	[appliance-sans-operateur]=0.2.0 [requires-incomplet]=feeds [needs-feeds]="Additional properties" [env-nom-invalide]=LD_PRELOAD
+	[commande-point-point]="chemin avec" [ressources-negatives]=minimum [scanner-avec-hostname]=null
+	[feed-avec-scan]=schéma [feed-sans-bloc-feed]="'feed' is a required" [feed-montage-hors-feeds]=/etc/trivy
 )
 n=0
 for f in "$TMP"/hostile-*.yaml; do
@@ -230,5 +232,14 @@ check "SonarQube Cloud : bancs d'essai exclus" grep -q '^sonar.exclusions=.*modu
 check "ci.yml : osv-scanner exclut les bancs d'essai seulement" \
 	grep -qF -- "--x-exclude 'r:/modules/[^/]+/testbed\$'" "$ROOT/.github/workflows/ci.yml"
 
+hors=$(cd "$ROOT" && git ls-files -z -- '*package-lock.json' | python3 -c '
+import json, sys
+for name in sys.stdin.read().split("\0"):
+    if name and not name.startswith("modules/"):
+        pkgs = json.load(open(name, encoding="utf-8")).get("packages", {})
+        if any(k.endswith("node_modules/minimist") and v.get("version") == "1.2.5" for k, v in pkgs.items()):
+            print(name)')
+[[ -z "$hors" ]] && ok "minimist 1.2.5 (exception dependency-review) absent hors des bancs d'essai" \
+	|| ko "minimist présent hors des bancs d'essai : $hors (l'exception allow-ghsas ne le couvre pas)"
 printf '\nb10 : %d réussis, %d échecs\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

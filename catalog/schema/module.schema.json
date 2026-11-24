@@ -587,6 +587,7 @@
             "type": "object",
             "additionalProperties": false,
             "required": [
+              "rule",
               "min"
             ],
             "properties": {
@@ -699,7 +700,33 @@
             "manual"
           ]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "properties": {
+                  "kind": {
+                    "const": "https"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source": {
+                "properties": {
+                  "ref": {
+                    "pattern": "^https://"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "health": {
       "type": "object",

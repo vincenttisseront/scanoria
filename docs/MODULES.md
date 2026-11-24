@@ -101,6 +101,11 @@ le reste en arguments. Le moteur lance le conteneur ainsi :
   (`feed.mount`) ;
 - variables d'environnement de `scan.env` (noms `^[A-Z][A-Z0-9_]*$`).
 
+Le sous-ensemble du schéma ne sait pas contraindre les **noms** de clés
+(`scan.env`, `needs.sysctl`, noms d'options) : ces règles sont vérifiées par
+`tests/lib/modcheck.py` à l'intégration, et doivent l'être aussi par le service
+root avant usage (principe 4).
+
 `scan.exit_codes_ok` liste les codes de sortie normaux (OSV-Scanner sort en 1
 quand il trouve des vulnérabilités). Les chemins de `outputs` doivent figurer
 dans la commande. Aucun appel réseau : les outils sont lancés en mode hors
@@ -133,9 +138,9 @@ testbed:
     - { rule: CVE-2021-44906, category: sca, min: 1 }
 ```
 
-Une attente avec `rule` compte les résultats SARIF dont `ruleId` vaut `rule` ;
-sans `rule`, tous les résultats. `category` est une étiquette pour le rapport.
-`min` vaut au moins 1.
+Une attente compte les résultats SARIF dont `ruleId` vaut `rule` (obligatoire :
+une attente sans règle passerait sur n'importe quel bruit). `category` est une
+étiquette pour le rapport. `min` vaut au moins 1.
 
 Règles du banc d'essai :
 
@@ -146,8 +151,10 @@ Règles du banc d'essai :
   de clé privée PEM ;
 - le banc est exclu des contrôles du dépôt Scanoria lui-même, **et de rien
   d'autre** : `.gitleaks.toml` (`^modules/[^/]+/testbed/`), osv-scanner
-  (`--x-exclude`), dependency-review (`allow-ghsas` de la dépendance figée),
-  SonarQube Cloud (`sonar.exclusions`).
+  (`--x-exclude`), SonarQube Cloud (`sonar.exclusions`). dependency-review ne
+  sait pas exclure un chemin : son `allow-ghsas` vaut pour tout le dépôt, et
+  `tests/b10-modules.sh` le borne en échouant si `minimist` 1.2.5 apparaît dans
+  un fichier de verrouillage hors des bancs d'essai.
 
 Bancs livrés :
 
