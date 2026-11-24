@@ -46,6 +46,10 @@ scan:
   command: ["python3", "-I", "/scanoria/reach_index.py", "/src", "/out/reach.sarif"]
   tool: reach-index
   companion: sca
+  # 0.6 (V6, contrat 23) : seuls les langages que l'index sait lire ; sans
+  # aucun de ces fichiers, le module n'est pas lancé (« not-applicable »).
+  applies_to:
+    detect: [python, javascript, go, java]
   timeout_s: 600
   network: none
   exit_codes_ok: [0]

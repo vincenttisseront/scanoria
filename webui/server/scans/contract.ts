@@ -65,10 +65,14 @@ export const scanJobSchema = z.strictObject({
     // 0.5 (B, contrat 16) : re-corrélation ; le runner écrit lui-même le SBOM à partir de ces purl.
     z.strictObject({ kind: z.literal('sbom'), scan_id: uuid, components: z.array(sbomPurl).min(1).max(SBOM_JOB_MAX_COMPONENTS) }),
   ]),
+  // 0.6 (V4, contrat 21) : le runner peut reprendre une sortie du cache de résultats.
+  cache: z.boolean().optional(),
   modules: z.array(z.strictObject({
     id: moduleId,
     version: z.string().min(1).max(64),
     options: z.record(z.string(), z.unknown()).optional(),
+    // 0.6 (V3, V5) : modules de la tâche à terminer avant celui-ci.
+    after: z.array(moduleId).max(64).refine(l => new Set(l).size === l.length).optional(),
   })).min(1).max(64).refine(list => new Set(list.map(m => JSON.stringify(m))).size === list.length),
 })
 export type ScanJob = z.infer<typeof scanJobSchema>
@@ -80,7 +84,8 @@ const runnerError = z.strictObject({
 })
 export type RunnerError = z.infer<typeof runnerError>
 
-export const RESULT_MODULE_STATUSES = ['ok', 'error', 'timeout', 'oom', 'invalid-output', 'missing', 'skipped'] as const
+export const RESULT_MODULE_STATUSES = ['ok', 'error', 'timeout', 'oom', 'invalid-output', 'missing', 'skipped', 'not-applicable'] as const
+const cacheKey = z.string().regex(/^[0-9a-f]{64}$/)
 
 export const scanResultSchema = z.strictObject({
   schema: z.literal(1),
@@ -107,6 +112,9 @@ export const scanResultSchema = z.strictObject({
     })).max(100).optional(),
     workdir: z.enum(['tmpfs', 'disk']).optional(),
     mirror: z.enum(['hit', 'fetched', 'created', 'ephemeral']).optional(),
+    // 0.6 (V4, V6) : empreinte du contenu de /src et détection par clés.
+    tree: cacheKey.optional(),
+    detection: z.record(z.string(), z.unknown()).optional(),
   }),
   modules: z.array(z.strictObject({
     id: moduleId,
@@ -131,6 +139,11 @@ export const scanResultSchema = z.strictObject({
       peak_memory_mb: z.number().int().min(0).optional(),
       cpu_ms: z.number().int().min(0).optional(),
     }).optional(),
+    // 0.6 : clé sous laquelle ranger la sortie (V4), sortie reprise du cache, entrée lue et repli SBOM (V3).
+    cache_key: cacheKey.optional(),
+    reused_from: cacheKey.optional(),
+    input: z.enum(['src', 'sbom']).optional(),
+    sbom_fallback: z.boolean().optional(),
   })).max(64),
 })
 export type ScanResult = z.infer<typeof scanResultSchema>

@@ -608,12 +608,71 @@
           "description": "Avec scan.network: service:<id> : si le service est désactivé ou indisponible, le module est « skipped » (complément facultatif, comme l'envoi des SBOM à Dependency-Track) au lieu d'être manquant (G13)."
         },
         "companion": {
-          "enum": ["quality", "sast", "secrets", "sca", "iac", "container", "sbom", "dast", "lint", "licenses", "vuln-management", "ci"],
+          "enum": [
+            "quality",
+            "sast",
+            "secrets",
+            "sca",
+            "iac",
+            "container",
+            "sbom",
+            "dast",
+            "lint",
+            "licenses",
+            "vuln-management",
+            "ci"
+          ],
           "description": "Module d'appoint (0.5) : planifié seulement quand un autre module du plan couvre cette catégorie (reach-index avec sca, pour I11) ; jamais compté dans la couverture (G15), et son échec ne rend pas le verdict non concluant (G13). Il ne produit aucun résultat d'analyse."
         },
         "cache": {
           "enum": ["sonar-plugins"],
           "description": "V10 (0.6) : cache persistant du module, propre au projet, monté sur /cache (variable SCANORIA_CACHE_DIR). Après chaque passage, le runner ne garde que ce que la politique autorise et dont il a vérifié l'empreinte (sonar-plugins : cache/<MD5 ou SHA-256>/<nom>.jar). Ignoré par les appliances antérieures à 0.6."
+        },
+        "applies_to": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "0.6 (V6, contrat 23) : fichiers qui concernent le module. Sans aucun fichier correspondant dans /src, le module n'est pas lancé : statut « not-applicable », noté dans la couverture (G15), jamais compté comme absent (G13). Sans applies_to, le module tourne toujours.",
+          "properties": {
+            "detect": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "containers",
+                  "terraform",
+                  "helm",
+                  "ansible",
+                  "ci",
+                  "shell",
+                  "python",
+                  "javascript",
+                  "go",
+                  "java",
+                  "lockfiles",
+                  "manifests"
+                ]
+              },
+              "description": "Clés de la détection F1, relevées par le runner sur les chemins (applicability.py)."
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9._*?/{},\\[\\]-]+$",
+                "not": {
+                  "pattern": "(^/|\\.\\.)"
+                }
+              },
+              "description": "Motifs de chemins relatifs à la racine (« ** » : tout sous-répertoire, « * » : un segment)."
+            }
+          }
         }
       }
     },

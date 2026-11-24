@@ -30,6 +30,9 @@ const scanSpecSchema = z.object({
    * couverture (G15) ni bloquant pour le verdict (G13).
    */
   companion: z.enum(CATEGORIES).optional(),
+  /** 0.5 (contrat 14) et 0.6 (V3) : le module lit le SBOM de l'analyse ; graphe du plan (order.ts). */
+  prefers_sbom: z.boolean().optional(),
+  requires_sbom: z.boolean().optional(),
 })
 export type ScanSpec = z.infer<typeof scanSpecSchema>
 
@@ -64,6 +67,10 @@ export interface PlannedModule {
   outputs: string[]
   /** Pourquoi le module est dans le plan (affiché dans la console) ; « companion » : module d'appoint. */
   reason: 'category' | 'included' | 'companion'
+  /** 0.6 (V3) : modules du plan à terminer avant celui-ci (order.ts). Absent d'un plan antérieur. */
+  after?: string[]
+  /** 0.6 (V5) : durée attendue (ms) qui a fixé la place du module dans le plan. */
+  expected_ms?: number
 }
 
 export interface CoverageGap {
@@ -286,6 +293,8 @@ const plannedModuleSchema = z.object({
   history: z.enum(['shallow', 'full']),
   outputs: z.array(z.string()),
   reason: z.enum(['category', 'included', 'companion']),
+  after: z.array(z.string().regex(MODULE_ID_RE)).max(64).optional(),
+  expected_ms: z.number().int().min(0).optional(),
 })
 
 export const scanPlanSchema = z.object({

@@ -21,6 +21,8 @@ export interface ScanSummary {
   attempt: number
   error: { code?: string, class?: string, message?: string, retry_at?: string } | null
   replay_of: string | null
+  /** J6 (0.6) : source d'une analyse de résultats externes. */
+  external_source?: { tool: string, version: string | null, format: string, uploaded_via: string } | null
   queued_at: string
   started_at: string | null
   finished_at: string | null
@@ -39,6 +41,10 @@ export interface ScanModuleRow {
   has_log: boolean
   started_at: string | null
   finished_at: string | null
+  /** 0.6 (V4) : sortie reprise du cache, et analyse qui l'avait produite (si elle existe encore). */
+  reused?: boolean
+  reused_from_scan?: string | null
+  reused_from_number?: number | null
 }
 
 export interface PlanModule {
@@ -51,6 +57,9 @@ export interface PlanModule {
   timeout_s: number
   history: 'shallow' | 'full'
   reason: 'category' | 'included'
+  /** 0.6 (V3, V5) : graphe et durée attendue. */
+  after?: string[]
+  expected_ms?: number
 }
 
 /** Trou de couverture : ceux du plan (profile-*) et ceux de l'ingestion (autres kind). */
@@ -93,6 +102,7 @@ export function scanStatusColor(status: string): 'neutral' | 'info' | 'success' 
   if (status === 'done' || status === 'ok') return 'success'
   if (status === 'error' || status === 'timeout' || status === 'oom' || status === 'invalid-output') return 'error'
   if (status === 'cancelled' || status === 'missing' || status === 'skipped') return 'warning'
+  if (status === 'not-applicable') return 'neutral'
   if (status === 'pending' || status === 'queued') return 'neutral'
   return 'info'
 }

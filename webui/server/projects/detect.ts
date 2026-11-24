@@ -26,6 +26,7 @@ export interface CiWorkflow {
 
 export type ModuleReason
   = | 'always' | 'languages' | 'lockfiles' | 'containers' | 'iac' | 'workflows' | 'shell' | 'python' | 'category'
+    | 'models'
 
 export interface SuggestedModule {
   id: string
@@ -53,6 +54,8 @@ export interface Detection {
   iac: { terraform: boolean, kubernetes: boolean, helm: boolean, ansible: boolean }
   ci: CiWorkflow[]
   shell_scripts: number
+  /** K8 (0.6) : fichiers de modèles d'apprentissage automatique (ModelScan) ; absent des détections antérieures. */
+  models?: string[]
   license: { spdx: string, source: string } | null
   categories: Category[]
   /** Profil du projet (analyses planifiées et manuelles) et profil des PR (G9, 0.7). */
@@ -178,6 +181,16 @@ function dir(path: string): string {
 }
 
 /** Détection brute (sans catalogue) : ce que contient le dépôt. */
+// K8 (0.6) : formats lus par ModelScan. .bin et .dat sont trop courants : seulement
+// sous un dossier de modèle ou avec un nom de poids connu.
+const MODEL_EXT_RE = /\.(pkl|pickle|joblib|dill|pt|pth|ckpt|npy|h5|keras)$/i
+const MODEL_DIR_RE = /(^|\/)(models?|weights|checkpoints?)\//i
+export function isModelFile(path: string): boolean {
+  const name = base(path)
+  if (MODEL_EXT_RE.test(name) || name === 'saved_model.pb' || name === 'keras_metadata.pb') return true
+  return /\.(bin|dat|data)$/i.test(name) && (MODEL_DIR_RE.test(path) || /^pytorch_model.*\.bin$/i.test(name))
+}
+
 export async function detectRepository(input: DetectInput): Promise<Omit<Detection, 'modules' | 'coverage_gaps'>> {
   const files = input.tree.entries.filter((e: TreeEntry) => e.type === 'file' && !IGNORED_DIR_RE.test(e.path))
   const paths = new Set(files.map(f => f.path))
@@ -230,6 +243,7 @@ export async function detectRepository(input: DetectInput): Promise<Omit<Detecti
     else if (base(f.path) === 'Jenkinsfile') ci.push({ kind: 'jenkins', path: f.path })
   }
   const ciPaths = new Set(ci.map(c => c.path))
+  const models = files.filter(f => isModelFile(f.path)).map(f => f.path).slice(0, 100)
 
   // Kubernetes : manifestes YAML avec apiVersion et kind, lus en nombre borné,
   // d'abord dans les répertoires usuels.
@@ -280,6 +294,7 @@ export async function detectRepository(input: DetectInput): Promise<Omit<Detecti
   if (terraform || kubernetes || helm || ansible || containers.length) categories.add('iac')
   if (shellScripts || containers.length || ci.length) categories.add('lint')
   if (ci.length) categories.add('ci')
+  if (models.length) categories.add('sast')
 
   return {
     version: DETECTION_VERSION,
@@ -296,6 +311,7 @@ export async function detectRepository(input: DetectInput): Promise<Omit<Detecti
     iac: { terraform, kubernetes, helm, ansible },
     ci,
     shell_scripts: shellScripts,
+    models,
     license,
     categories: [...categories].sort((a, b) => a.localeCompare(b)),
     profile: 'complet',
@@ -337,6 +353,7 @@ export function moduleRelevance(m: CatalogModuleLite, d: Raw): ModuleReason | nu
     case 'grype': return d.package_managers.length || d.containers.length ? 'lockfiles' : null
     case 'checkov':
     case 'kics': return d.categories.includes('iac') ? 'iac' : null
+    case 'modelscan': return d.models?.length ? 'models' : null
     case 'semgrep':
     case 'opengrep': return d.categories.includes('sast') ? 'languages' : null
     default: break

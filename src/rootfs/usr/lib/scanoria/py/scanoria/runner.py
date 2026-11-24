@@ -35,7 +35,8 @@ import urllib.parse
 
 import contextlib
 
-from . import catalogverify, common, feeds, fetch, gitmirror, modules, sbom, schema, svcnet, testbed, workspace
+from . import applicability, catalogverify, common, feeds, fetch, gitmirror, modules, resultcache, sbom, \
+    schedule, schema, svcnet, testbed, workspace
 from .common import Fail
 
 
@@ -552,6 +553,12 @@ def _copy_output(out_dir, declared, kind, version, dest):
         data = f.read(testbed.MAX_OUTPUT + 1)
     if len(data) > testbed.MAX_OUTPUT:
         raise Fail("E_TESTBED", "output %s too large" % declared)
+    _check_output(data, declared, kind, version)
+    write_result_file(dest, data)
+
+
+def _check_output(data, declared, kind, version):
+    """Contrat de sortie (G2) : JSON strict, SARIF 2.1.0 ou CycloneDX ; lève Fail sinon."""
     try:
         doc = common.loads_strict(data)
     except common.JsonError:
@@ -562,7 +569,6 @@ def _copy_output(out_dir, declared, kind, version, dest):
         testbed.cyclonedx_components(doc, version or "1.5")
     else:
         raise Fail("E_TESTBED", "unsupported output kind %s" % kind)
-    write_result_file(dest, data)
 
 
 # --------------------------------------------------------------------------
@@ -741,6 +747,10 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
     cache = scan_cache_dir(m, job)
     if cache:
         mounts.append((cache, "/cache", "rw"))
+    if reuse_cached(job, entry, spec, ws, mdir, sbom_dir, use_sbom):
+        finish("ok")
+        _drop_stats(entry)
+        return None
     name = "scanoria-scan-%s-%s" % (job["id"][:8], os.urandom(4).hex())
     try:
         args = [a for a in testbed.confined_args(m, mounts + feed_mounts(m, leases), name=name) if a != "--rm"]
@@ -814,10 +824,97 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
     except Fail as f:
         return finish("invalid-output", _err("E_INVALID_OUTPUT", "tool", f.message), rc)
     entry["outputs"] = outputs
+    if entry.get("cache_key"):
+        # V4 : attestation root des sorties validées ; seule base de confiance d'une reprise.
+        try:
+            resultcache.attest(entry["cache_key"], mid, {k: os.path.join(rdir, v) for k, v in outputs.items()})
+        except OSError:
+            entry.pop("cache_key", None)     # sans attestation, la console ne range rien
     if "cyclonedx" in outputs and not sbom.consumes(m):
         # Premier SBOM de l'analyse : offert aux modules suivants qui lisent l'entrée « sbom ».
         sbom.offer(ws, os.path.join(rdir, outputs["cyclonedx"]))
     return finish("ok", None, rc)
+
+
+# --------------------------------------------------------------------------
+# 0.6 : entrée lue (V3), résultats réutilisés (V4), outils selon le contenu (V6)
+# --------------------------------------------------------------------------
+
+def reuse_cached(job, entry, spec, ws, mdir, sbom_dir, use_sbom):
+    """Note l'entrée lue (V3) ; calcule la clé du module (V4) et reprend sa sortie
+    du cache si elle y est, revalidée. True si le module n'a pas à tourner."""
+    m, mid = spec["manifest"], spec["manifest"]["id"]
+    kind = job["source"]["kind"]
+    entry["input"] = "sbom" if use_sbom or kind == "sbom" else "src"
+    if sbom.prefers(m) and kind != "sbom" and not use_sbom:
+        entry["sbom_fallback"] = True     # SBOM absent ou invalide : le dépôt est lu (couverture, G15)
+    if kind == "sbom":
+        sbom_file = os.path.join(ws, "src", sbom.FILE)
+    else:
+        sbom_file = os.path.join(sbom_dir, sbom.FILE) if use_sbom else None
+    try:
+        key = resultcache.key_for(job, m, spec, entry["feeds"], spec.get("tree"), sbom_file,
+                                  sbom_dir is not None and not use_sbom)
+    except OSError:
+        key = None
+    if not key:
+        return False
+    outputs = resultcache.reuse(key, m, mdir, mid, _check_output, write_result_file)
+    if outputs is None:
+        entry["cache_key"] = key
+        return False
+    entry["outputs"], entry["reused_from"] = outputs, key
+    if "cyclonedx" in outputs and not sbom.consumes(m):
+        sbom.offer(ws, os.path.join(os.path.dirname(mdir), outputs["cyclonedx"]))
+    return True
+
+
+def _drop_stats(entry):
+    """Module réutilisé : aucune mesure (F14 et V5 ne comptent que les exécutions réelles)."""
+    entry.pop("stats", None)
+
+
+def inspect_source(job, ws, source, runnable):
+    """Empreinte et détection de /src (V4, V6) ; marque « not-applicable » les modules sans fichier concerné.
+
+    Retourne les modules qui restent à lancer."""
+    src = os.path.join(ws, "src")
+    try:
+        tree, detection, paths = applicability.inspect(src)
+    except OSError as e:
+        common.log("runner: cannot inspect the source of job %s: %r" % (job["id"], e))
+        return runnable
+    if tree:
+        source["tree"] = tree
+    source["detection"] = detection
+    if job["source"]["kind"] == "sbom":
+        for _, spec in runnable:
+            spec["tree"] = tree
+        return runnable
+    kept = []
+    for ent, spec in runnable:
+        reason = applicability.applies(spec["manifest"], detection, paths)
+        if reason:
+            ent.update(status="not-applicable", error=None)   # raison unique : no-matching-files
+            continue
+        spec["tree"] = tree
+        kept.append((ent, spec))
+    return kept
+
+
+def run_modules(job, runnable, ws, rdir, reg, secrets, ctx=None):
+    """Modules de la tâche, graphe et budget respectés (V3, V5) ; ctx : bases louées,
+    miroir et masques de l'analyse (0.6, chantier C)."""
+    def one(ent, spec):
+        try:
+            run_module(job, ent, spec, ws, rdir, reg, secrets, ctx)
+        except Exception as e:  # noqa: BLE001 — une erreur d'un module n'arrête pas les autres
+            common.log("runner: module %s failed: %r" % (ent["id"], e))
+            ent.update(status="error", error=_err("E_RUNNER_INTERNAL", "infra", "internal runner error"))
+    def not_started(ent, e):
+        common.log("runner: module %s not started: %r" % (ent["id"], e))
+        ent.update(status="error", error=_err("E_RUNNER_INTERNAL", "infra", "module could not be started"))
+    schedule.run_all(job["id"], runnable, schedule.dependencies(job, runnable), one, on_start_error=not_started)
 
 
 # --------------------------------------------------------------------------
@@ -903,7 +1000,8 @@ def execute(job):
                 leases[fid] = None
         try:
             if src["kind"] == "git":
-                session, source["commit"] = _fetch_source(job, ws, reg, runnable, history, secrets, source)
+                with schedule.BUDGET.hold(job["id"], fetch.FETCH_MEMORY_MB, 1):
+                    session, source["commit"] = _fetch_source(job, ws, reg, runnable, history, secrets, source)
                 files, size, skipped = fetch.bound_tree(os.path.join(ws, "src"))
                 if session.project_id and history != "full":
                     session.__exit__(None, None, None)    # le miroir n'est plus lu : verrou rendu
@@ -924,16 +1022,15 @@ def execute(job):
             return result
         source.update(files=files, bytes=size, skipped=skipped)
         # V9 : exclusions masquées pour les modules hors secrets et SAST seulement ;
-        # jamais écrites dans le résultat (seul leur décompte l'est).
+        # jamais écrites dans le résultat (seul leur décompte l'est). Les masques sont
+        # créés avant les modules, qui tournent en parallèle (V5).
         masks = source.pop("masks", None) or []
+        workspace.mask_mounts(ws, masks)
         ctx = {"leases": leases, "mirror": session.path if session is not None and history == "full" else None,
                "masks": masks}
-        for ent, spec in sbom.ordered(runnable):
-            try:
-                run_module(job, ent, spec, ws, rdir, reg, secrets, ctx)
-            except Exception as e:  # noqa: BLE001 — une erreur d'un module n'arrête pas les autres
-                common.log("runner: module %s failed: %r" % (ent["id"], e))
-                ent.update(status="error", error=_err("E_RUNNER_INTERNAL", "infra", "internal runner error"))
+        runnable = inspect_source(job, ws, source, runnable)
+        schedule.configure_from(reg)
+        run_modules(job, runnable, ws, rdir, reg, secrets, ctx)
     finally:
         if session is not None:
             session.__exit__(None, None, None)
@@ -1103,6 +1200,7 @@ class Runner:
             self.last_purge = now
             purge_results()
             purge_projects()
+            resultcache.prune_attest()
         self.refresh_capacity()
 
 

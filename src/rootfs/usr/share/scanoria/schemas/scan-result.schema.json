@@ -147,7 +147,7 @@
           }
         },
         "excluded": {
-          "description": "0.6 (V9, contrat 22) : exclusions communes retirées de /src avant l'analyse, notées dans la couverture (G15).",
+          "description": "0.6 (V9, contrat 22) : exclusions communes masquées pour les modules hors secrets et SAST (qui voient tout l'arbre), notées dans la couverture (G15).",
           "type": "array",
           "maxItems": 100,
           "items": {
@@ -167,6 +167,15 @@
         "mirror": {
           "description": "0.6 (V2) : miroir Git du projet ; hit (commit déjà présent, forge non contactée), fetched (nouveaux objets seulement), created (premier clone, superficiel sauf historique complet), ephemeral (projet inconnu : miroir jetable).",
           "enum": ["hit", "fetched", "created", "ephemeral"]
+        },
+        "tree": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "0.6 (V4, V6) : empreinte du contenu de /src (chemins, modes et SHA-256 des fichiers), telle que les modules la voient."
+        },
+        "detection": {
+          "type": "object",
+          "description": "0.6 (V6) : clés de détection relevées sur /src (nombre de fichiers par clé)."
         }
       }
     },
@@ -202,7 +211,8 @@
               "oom",
               "invalid-output",
               "missing",
-              "skipped"
+              "skipped",
+              "not-applicable"
             ]
           },
           "error": {
@@ -372,6 +382,27 @@
                 "minimum": 0
               }
             }
+          },
+          "cache_key": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "0.6 (V4) : clé du contrat 21 sous laquelle la console peut ranger la sortie d'un module « ok » ; absente si le module n'est pas réutilisable."
+          },
+          "reused_from": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "0.6 (V4) : sortie reprise du cache de résultats sous cette clé, revalidée (G2)."
+          },
+          "input": {
+            "enum": [
+              "src",
+              "sbom"
+            ],
+            "description": "0.6 (V3) : entrée réellement lue par le module."
+          },
+          "sbom_fallback": {
+            "type": "boolean",
+            "description": "0.6 (V3) : le module préfère le SBOM de l'analyse, absent ou invalide ; il a lu le dépôt."
           }
         }
       }

@@ -34,6 +34,8 @@ export const findingQuerySchema = z.strictObject({
   epss_min: z.coerce.number().min(0).max(1).optional(),
   kev: bool.optional(),
   grouped: bool.optional(),
+  // 0.6 (J6) : origine du résultat, module de l'appliance ou outil externe.
+  origin: z.enum(['module', 'external']).optional(),
 })
 
 const day = z.string().refine(isValidDay)

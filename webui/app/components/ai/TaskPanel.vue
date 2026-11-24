@@ -39,7 +39,9 @@ const props = withDefaults(defineProps<{
   compact?: boolean
   /** Faux : rien n'est affiché tant qu'aucune tâche n'existe (sortie seulement précalculée). */
   askable?: boolean
-}>(), { icon: 'i-lucide-sparkles', autoAsk: false, askLabel: undefined, pollMs: 3000, compact: false, askable: true })
+  /** Routes propres à une tâche (I16 : /api/ai/appliance/diagnosis), qui reçoivent subject_id et locale. */
+  apiPath?: string
+}>(), { icon: 'i-lucide-sparkles', autoAsk: false, askLabel: undefined, pollMs: 3000, compact: false, askable: true, apiPath: undefined })
 
 const emit = defineEmits<{ loaded: [task: AiTask | null] }>()
 const { t, te, locale } = useI18n()
@@ -72,7 +74,9 @@ function schedule() {
 
 async function load() {
   try {
-    data.value = await api<OutputResponse>('/api/ai/output', { query: { kind: props.kind, subject_id: props.subjectId, locale: locale.value } })
+    data.value = props.apiPath
+      ? await api<OutputResponse>(props.apiPath, { query: { subject_id: props.subjectId, locale: locale.value } })
+      : await api<OutputResponse>('/api/ai/output', { query: { kind: props.kind, subject_id: props.subjectId, locale: locale.value } })
   }
   catch {
     data.value = null
@@ -89,7 +93,8 @@ async function load() {
 async function ask() {
   requesting.value = true
   try {
-    await api('/api/ai/explain', { method: 'POST', body: { kind: props.kind, subject_id: props.subjectId, locale: locale.value } })
+    if (props.apiPath) await api(props.apiPath, { method: 'POST', body: { subject_id: props.subjectId, locale: locale.value } })
+    else await api('/api/ai/explain', { method: 'POST', body: { kind: props.kind, subject_id: props.subjectId, locale: locale.value } })
   }
   catch {
     // L'erreur éventuelle apparaîtra au rechargement de la sortie.

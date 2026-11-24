@@ -182,7 +182,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends \
-            jq zstd xorriso gnupg openssl python3-yaml python3-jsonschema
+            jq zstd xorriso gnupg openssl python3-yaml python3-jsonschema python3-numpy
           .github/scripts/install-tools.sh "$RUNNER_TEMP/tools" shellcheck
           echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
       - name: tests/b*.sh
@@ -485,10 +485,32 @@ jobs:
       - name: tests/b24-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b24-live.sh
 
+  modelscan-live:
+    # Module modelscan (chantier E de la 0.6, K8) : banc d'essai (F12) et
+    # analyse d'un dépôt piégé par le vrai runner avec le vrai podman, dans
+    # l'image épinglée, confiné comme sur l'appliance (tests/b29-live.sh).
+    name: modelscan-live (ModelScan par le runner, b29-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dépendances (podman, jq, zstd, python3-yaml, python3-jsonschema)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq zstd podman netavark nftables python3-yaml python3-jsonschema curl
+          sudo podman --version
+      # Machine jetable : le runner tourne en root avec le vrai podman (§ 6.4).
+      - name: tests/b29-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b29-live.sh
+
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, execution-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
