@@ -250,19 +250,25 @@ def shared_dir(path):
     rattrapage couvre une appliance installée avant leur ajout. Un lien
     symbolique est refusé."""
     try:
-        st = os.lstat(path)
-    except FileNotFoundError:
-        os.makedirs(os.path.dirname(path), mode=0o750, exist_ok=True)
         os.mkdir(path, 0o750)
-        st = os.lstat(path)
-    if not stat.S_ISDIR(st.st_mode):
+    except FileExistsError:
+        pass
+    # Descripteur ouvert sans suivre de lien : droits posés sur le répertoire
+    # lui-même, sans fenêtre entre la vérification et le changement.
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
         raise Fail("E_INTERNAL", "%s is not a directory" % path)
-    if stat.S_IMODE(st.st_mode) != 0o750:
-        os.chmod(path, 0o750)
-    if not TEST_ROOT:
-        gid = scanoria_ids()[1]
-        if st.st_uid != 0 or st.st_gid != gid:
-            os.chown(path, 0, gid)
+    try:
+        st = os.fstat(fd)
+        if stat.S_IMODE(st.st_mode) != 0o750:
+            os.fchmod(fd, 0o750)
+        if not TEST_ROOT:
+            gid = scanoria_ids()[1]
+            if st.st_uid != 0 or st.st_gid != gid:
+                os.fchown(fd, 0, gid)
+    finally:
+        os.close(fd)
 
 
 def atomic_write(path, data, mode=0o640, group_scanoria=True):

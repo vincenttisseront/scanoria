@@ -61,7 +61,8 @@ describe('lecture des fichiers publiés', () => {
 
   // Régression : l'index réel (catalog/build.py sur modules/) était écarté en entier
   // par la console (description { fr, en }) et le catalogue paraissait vide.
-  it.runIf(spawnSync('python3', ['-c', 'import yaml']).status === 0)('accepte sans rejet l’index construit depuis modules/', async () => {
+  // En CI, PyYAML absent = échec (jamais sauté en silence).
+  it.runIf(!!process.env.CI || spawnSync('python3', ['-c', 'import yaml']).status === 0)('accepte sans rejet l’index construit depuis modules/', async () => {
     const out = join(tmp, 'real')
     const r = spawnSync('python3', ['-I', join(REPO, 'catalog/build.py'), 'build', '--out', out], { cwd: REPO, encoding: 'utf8' })
     expect(r.status, r.stderr).toBe(0)
