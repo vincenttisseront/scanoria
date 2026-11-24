@@ -7,7 +7,7 @@
 // enchaînement ingestion → finalisation → verdict → IA (contrats 5, 6, 7), API.
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -288,9 +288,17 @@ describe.skipIf(!DATABASE_URL)('file d’analyses (PostgreSQL réel, faux runner
       const row = await scanRow(scanId)
       expect(row.status).toBe('dispatched')
       const jobPath = join(cfg.scansDir, 'jobs', 'incoming', `${row.job_id}.json`)
-      expect((await stat(jobPath)).mode & 0o777).toBe(0o600)
+      // Mode et contenu lus sur le même descripteur.
+      const fh = await open(jobPath, 'r')
+      let job: ScanJob
+      try {
+        expect((await fh.stat()).mode & 0o777).toBe(0o600)
+        job = JSON.parse(await fh.readFile('utf8')) as ScanJob
+      }
+      finally {
+        await fh.close()
+      }
       expect(await readdir(join(cfg.scansDir, 'jobs', 'tmp'))).toEqual([])
-      const job = JSON.parse(await readFile(jobPath, 'utf8')) as ScanJob
       expect(job.source).toEqual({ kind: 'git', url: expect.stringMatching(/^https:\/\/forge\.exemple\.test\//), ref: 'main', history: 'full', credential: null })
       expect(job.modules).toEqual([{ id: 'gitleaks', version: '8.30.1', options: { history: true } }, { id: 'trivy', version: '0.76.2', options: {} }])
       expect(row.plan.modules.map((m: { id: string }) => m.id)).toEqual(['gitleaks', 'trivy'])
@@ -321,8 +329,14 @@ describe.skipIf(!DATABASE_URL)('file d’analyses (PostgreSQL réel, faux runner
       ])
       expect(mods[0].log_path).toBe(`${scanId}/gitleaks.log`)
       const log = join(cfg.scanLogsDir, scanId, 'gitleaks.log')
-      expect(await readFile(log, 'utf8')).toBe('log gitleaks\n')
-      expect((await stat(log)).mode & 0o777).toBe(0o600)
+      const lh = await open(log, 'r')
+      try {
+        expect(await lh.readFile('utf8')).toBe('log gitleaks\n')
+        expect((await lh.stat()).mode & 0o777).toBe(0o600)
+      }
+      finally {
+        await lh.close()
+      }
       expect(seen.ingest.map(i => [i.scanId, i.moduleId, i.outputs])).toEqual([
         [scanId, 'gitleaks', { sarif: 'gitleaks/result.sarif' }], [scanId, 'trivy', { sarif: 'trivy/result.sarif' }],
       ])
