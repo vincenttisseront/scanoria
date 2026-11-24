@@ -77,6 +77,9 @@ mkdir -p "$TMP/tb-secret/testbed" "$TMP/tb-clean/testbed"
 FAKE="AKIA$(head -c 64 /dev/urandom | base32 | tr -dc 'A-Z2-7' | head -c 16)"
 printf 'aws_access_key_id = %s\n' "$FAKE" > "$TMP/tb-secret/testbed/config.ini"
 echo "aucun secret ici" > "$TMP/tb-clean/testbed/README"
+# gitleaks 8.30 refuse de démarrer (« Config File .gitleaks Not Found in /src »)
+# sans configuration dans la source : configuration minimale, règles par défaut.
+for k in secret clean; do printf '[extend]\nuseDefault = true\n' > "$TMP/tb-$k/testbed/.gitleaks.toml"; done
 for k in secret clean; do
 	tar -C "$TMP/tb-$k" --format=ustar --owner=0 --group=0 -cf - testbed | zstd -q -o "$REL/testbed-gitleaks-$k-8.30.1.tar.zst"
 done
