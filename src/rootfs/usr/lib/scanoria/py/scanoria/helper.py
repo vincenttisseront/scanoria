@@ -40,7 +40,7 @@ TIMEOUTS = {
     "check-dns": 180,
     "refresh-catalog": 300, "install-modules": 3300, "uninstall-module": 900,
     "set-module-state": 1200, "update-module": 3300,
-    "set-ai-endpoint": 120,
+    "set-ai-endpoint": 120, "refresh-feeds": 3300,
     "reset-service-admin": 360,
 }
 # Marge laissée entre l'échéance passée à scanoria-selfupdate et l'arrêt forcé
@@ -487,6 +487,7 @@ ACTIONS = {
     "set-module-state": modules.act_set_module_state,
     "update-module": modules.act_update_module,
     "set-ai-endpoint": aiendpoint.act_set_ai_endpoint,
+    "refresh-feeds": modules.act_refresh_feeds,
     "reset-service-admin": provision.act_reset_service_admin,
 }
 
@@ -554,7 +555,11 @@ def handle(name):
             rname, rid, rtype = invalid_name(), None, None
         write_result(rname, make_result(rid, rtype, "console", err[0], err[1], received, None))
         return
-    write_result(name, execute(obj, "console", received))
+    res = execute(obj, "console", received)
+    # État publié AVANT le résultat : la console relit l'état dès qu'elle voit le
+    # résultat final, et doit y trouver l'effet de l'action (pas l'état d'avant).
+    common.publish_state()
+    write_result(name, res)
 
 
 def recover_work():
@@ -610,8 +615,8 @@ def cmd_exec(origin, rtype, params_text):
                 res = make_result(rid, t, origin, err[0], err[1], received, None)
             else:
                 res = execute(req, origin, received)
-    write_result(name, res)
     common.publish_state()
+    write_result(name, res)
     sys.stdout.write(common.dumps(res))
     return 0 if res["status"] == "ok" else 1
 

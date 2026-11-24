@@ -41,6 +41,7 @@ export const REQUEST_TYPES = [
   'set-module-state',
   'update-module',
   'set-ai-endpoint',
+  'refresh-feeds',
   'reset-service-admin',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
@@ -55,6 +56,7 @@ export const RESULT_CODES = [
   'E_ROLLBACK_FAILED', 'E_TIMEOUT', 'E_INTERNAL',
   'E_RESOURCES', 'E_DEPENDENCY', 'E_CONFLICT', 'E_LICENSE', 'E_TESTBED',
   'E_AI_URL', 'E_AI_UNRESOLVED', 'E_AI_FORBIDDEN_ADDRESS', 'E_AI_CA',
+  'E_FEED_UNAVAILABLE',
   'E_SONAR_UNAVAILABLE', 'E_SONAR_ADMIN', 'E_SONAR_API',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
@@ -120,6 +122,10 @@ export const requestParamSchemas = {
   'run-selftest': z.strictObject({ quick: z.boolean().optional() }),
   'check-dns': z.strictObject({}),
   'refresh-catalog': z.strictObject({}),
+  'refresh-feeds': z.strictObject({
+    ids: z.array(z.string().regex(MODULE_ID_RE)).min(1).max(50)
+      .refine(a => new Set(a).size === a.length, 'duplicate ids').optional(),
+  }),
   'install-modules': z.strictObject({
     modules: z.array(z.strictObject({
       id: z.string().regex(MODULE_ID_RE),

@@ -205,7 +205,7 @@ def apply(fqdn, services, timeout=120):
         _restore(snap)
         common.run("systemctl", ["try-reload-or-restart", "nginx.service"], timeout=timeout)
         raise Fail("E_INTERNAL", "nginx reload failed; previous module sites restored")
-    os.makedirs(os.path.dirname(SITES_FILE), mode=0o750, exist_ok=True)
+    common.shared_dir(os.path.dirname(SITES_FILE))
     common.write_json(SITES_FILE, {"fqdn": fqdn, "applied_at": common.iso(common.now()),
                                    "services": services})
     # Vérification automatique (principe 8) : unités activées une fois (appliance

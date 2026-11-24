@@ -115,7 +115,7 @@ describe('liste des analyses', () => {
     route('GET', '/api/scans', () => apiFail(500, 'E_INTERNAL'))
     await mountIn(ScansPage)
     await settle()
-    expect(toastAdd).toHaveBeenCalled()
+    expect(document.body.textContent).toContain('Erreur interne de la console.')
   })
 })
 
@@ -142,9 +142,8 @@ describe('détail d’une analyse', () => {
     expect(text).toContain('Sortie tronquée')
     expect(text).toContain('jeton d’API (CI)')
     expect(text).toContain('"code": "secret"')
-    const link = document.body.querySelector(`a[href="/api/scans/${ID}/modules/gitleaks/log"]`)
-    expect(link).not.toBeNull()
-    // viewer : aucune action
+    // viewer : ni journal (réservé aux opérateurs, G20) ni action
+    expect(document.body.querySelector(`a[href="/api/scans/${ID}/modules/gitleaks/log"]`)).toBeNull()
     expect(buttons('Rejouer à l’identique')).toHaveLength(0)
     await setLocale('en')
     await settle()
@@ -158,6 +157,7 @@ describe('détail d’une analyse', () => {
     route('POST', `/api/scans/${ID}/replay`, () => ({ scan_id: NEW_ID, number: 8, merged: false }))
     await mountIn(ScanPage, { route: `/scans/${ID}` })
     await settle()
+    expect(document.body.querySelector(`a[href="/api/scans/${ID}/modules/gitleaks/log"]`)).not.toBeNull()
     await click(button('Rejouer à l’identique'))
     expect(bodyText()).toContain('même commit, mêmes modules')
     await click(button('Confirmer'))

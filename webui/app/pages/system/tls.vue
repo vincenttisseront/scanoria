@@ -14,7 +14,7 @@ useHead({ title: computed(() => t('tls.title')) })
 const session = useSession()
 const isAdmin = computed(() => session.can('admin'))
 const fmt = useFormat()
-const { data, state, refresh } = useApplianceState()
+const { data, state, failed, refresh } = useApplianceState()
 
 // --- Renouvellement ---
 const renewModal = ref(false)
@@ -57,7 +57,10 @@ async function doImport() {
 
 <template>
   <PageShell :title="t('tls.title')">
-    <StateAlert :data="data" />
+    <StateAlert
+      :data="data"
+      :failed="failed"
+    />
 
     <UCard v-if="state">
       <template #header>

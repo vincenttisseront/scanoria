@@ -178,6 +178,18 @@ fb="$ROOT/src/rootfs/usr/lib/systemd/system/scanoria-firstboot.service"
 refuse_cycle() { grep -E '^(After|Wants|Requires)=' "$fb" | grep -qE 'cloud-final|multi-user\.target|graphical\.target'; }
 if refuse_cycle; then ko "scanoria-firstboot.service : ordonnée après multi-user.target (cycle)"; else ok "scanoria-firstboot.service : sans cycle avec multi-user.target"; fi
 
+# Fichiers d'état lus par la console (utilisateur scanoria) sous /var/lib/scanoria :
+# chaque répertoire parent est déclaré dans tmpfiles.d avec le groupe scanoria.
+# Sinon le helper le crée en root:root et la console croit le fichier absent
+# (bogue « catalogue pas encore disponible » de la 0.2/0.3).
+tf="$RF/usr/lib/tmpfiles.d/scanoria.conf"
+unreadable=()
+grep -oE "'/var/lib/scanoria/[a-z0-9_-]+/[A-Za-z0-9._-]+\.json'" "$ROOT/webui/server/utils/config.ts" | tr -d "'" | while read -r f; do
+	d=$(dirname "$f")
+	grep -qE "^d[[:space:]]+${d//\//\\/}[[:space:]]+0?7[57]0[[:space:]]+[a-z]+[[:space:]]+scanoria[[:space:]]" "$tf" || unreadable+=("$d")
+done
+expect "répertoires d'état lus par la console déclarés dans tmpfiles.d (groupe scanoria)" "${unreadable[*]:-}" ""
+
 echo
 echo "b04 : $PASS réussi(s), $FAIL échec(s)"
 [[ $FAIL -eq 0 ]]

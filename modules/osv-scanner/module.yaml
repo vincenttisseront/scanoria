@@ -22,7 +22,10 @@ upstream:
   source: https://github.com/google/osv-scanner
 image: ghcr.io/google/osv-scanner@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde
 version: "2.7.1"
-resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 200 }
+# Mémoire : OSV-Scanner charge en mémoire la base de chaque écosystème présent
+# (npm seul : environ 600 Mo de pointe, mesuré le 2026-11-24 avec la 2.7.1) ;
+# à 512 Mo, le banc d'essai était tué (code 137) une fois la base téléchargée.
+resources: { min_ram_mb: 1536, min_cpu: 1, disk_mb: 200 }
 hostname: null
 requires: { modules: [git-fetch], feeds: [osv-db], appliance: ">=0.2.0" }
 conflicts: []

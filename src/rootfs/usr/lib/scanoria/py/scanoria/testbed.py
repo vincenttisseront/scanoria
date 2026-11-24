@@ -89,7 +89,11 @@ def confined_args(manifest, mounts=(), name=None):
             "--security-opt=no-new-privileges", "--user", "%d:%d" % (NOBODY, NOBODY),
             "--memory", "%dm" % mem, "--memory-swap", "%dm" % mem, "--cpus", str(cpu),
             "--pids-limit", "512", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777",
-            "--pull=never", "--log-driver=none"]
+            "--pull=never", "--log-driver=none",
+            # Utilisateur 65534 sans répertoire personnel dans la plupart des
+            # images : sans HOME, certains outils (OSV-Scanner) s'arrêtent en
+            # erreur générale (code 127) avant même d'analyser.
+            "--env", "HOME=/tmp", "--env", "TMPDIR=/tmp"]
     if name:
         args += ["--name", name]
     for host, target, mode in mounts:
@@ -112,8 +116,19 @@ def feed_mounts(manifest):
     return res
 
 
-def run_confined(manifest, command, mounts=(), timeout=DEFAULT_TIMEOUT, env=None, network=None):
-    """Lance command dans l'image du module ; retourne le code de sortie.
+def stderr_hint(raw, limit=400):
+    """Fin lisible de stderr pour un message d'erreur : une ligne, caractères
+    imprimables seulement. Les bancs d'essai ne contiennent que des données
+    factices, et la sortie est quand même bornée."""
+    text = (raw or b"").decode("utf-8", "replace")
+    text = re.sub(r"[^\x20-\x7e\u00a0-\u024f]+", " ", text)
+    text = re.sub(r" {2,}", " ", text).strip()
+    return text[-limit:]
+
+
+def run_confined(manifest, command, mounts=(), timeout=DEFAULT_TIMEOUT, env=None, with_stderr=False, network=None):
+    """Lance command dans l'image du module ; retourne le code de sortie
+    (ou (code, fin de stderr) avec with_stderr).
 
     network : arguments qui remplacent --network=none (scanner relié à un service, svcnet)."""
     import secrets
@@ -128,9 +143,12 @@ def run_confined(manifest, command, mounts=(), timeout=DEFAULT_TIMEOUT, env=None
         args += ["--env", "%s=%s" % (k, env[k])]
     args += ["--entrypoint", json.dumps([command[0]]), manifest["image"]] + list(command[1:])
     try:
-        r = common.run("podman", args, timeout=timeout + 60, stdout_limit=1 << 20)
+        r = common.run("podman", args, timeout=timeout + 60, stdout_limit=1 << 20,
+                       stderr_tail=4096 if with_stderr else 0)
     finally:
         common.run("podman", ["rm", "--force", "--ignore", "--time", "0", name], timeout=120)
+    if with_stderr:
+        return r.returncode, stderr_hint(r.stderr)
     return r.returncode
 
 
@@ -410,13 +428,15 @@ def run(manifest, timeout=None):
         if svc:
             try:
                 with svcnet.Attachment(svc, svcnet.TESTBED_KEY, budget_s=max(60, t - 60)) as att:
-                    rc = run_confined(manifest, cmd, mounts, timeout=t, env=scan.get("env"), network=att.args())
+                    rc, hint = run_confined(manifest, cmd, mounts, timeout=t, env=scan.get("env"),
+                                            with_stderr=True, network=att.args())
             except svcnet.Unavailable as u:
                 raise Fail("E_TESTBED", u.message)
         else:
-            rc = run_confined(manifest, cmd, mounts, timeout=t, env=scan.get("env"))
+            rc, hint = run_confined(manifest, cmd, mounts, timeout=t, env=scan.get("env"), with_stderr=True)
         if rc not in (scan.get("exit_codes_ok") or SCANNER_OK_RC):
-            raise Fail("E_TESTBED", "scanner exited with code %d on its testbed" % rc)
+            msg = "scanner %s exited with code %d on its testbed" % (manifest["id"], rc)
+            raise Fail("E_TESTBED", msg + (": " + hint if hint else ""))
         details = check_expect(collect(manifest, out), tb["expect"])
         bad = [d for d in details if not d["ok"]]
         if bad:

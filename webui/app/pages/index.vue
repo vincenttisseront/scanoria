@@ -11,7 +11,7 @@ useHead({ title: computed(() => t('dashboard.title')) })
 
 const session = useSession()
 const fmt = useFormat()
-const { data, state, loading, refresh } = useApplianceState()
+const { data, state, failed, loading, refresh } = useApplianceState()
 const selftest = useHelperRequest()
 const quick = ref(true)
 
@@ -56,7 +56,10 @@ async function runSelftest() {
       />
     </template>
 
-    <StateAlert :data="data" />
+    <StateAlert
+      :data="data"
+      :failed="failed"
+    />
 
     <div
       v-if="!data && loading"

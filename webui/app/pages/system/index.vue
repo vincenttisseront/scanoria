@@ -13,7 +13,7 @@ useHead({ title: computed(() => t('system.title')) })
 
 const session = useSession()
 const isAdmin = computed(() => session.can('admin'))
-const { data, state, refresh } = useApplianceState()
+const { data, state, failed, refresh } = useApplianceState()
 
 // --- Nom ---
 const fqdn = ref('')
@@ -62,7 +62,10 @@ async function applyNetworks() {
 
 <template>
   <PageShell :title="t('system.title')">
-    <StateAlert :data="data" />
+    <StateAlert
+      :data="data"
+      :failed="failed"
+    />
 
     <UCard>
       <template #header>

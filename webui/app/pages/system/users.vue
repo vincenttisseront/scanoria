@@ -35,13 +35,15 @@ interface UserRow {
 
 const users = ref<UserRow[]>([])
 const loading = ref(false)
+const loadError = ref('')
 async function load() {
   loading.value = true
   try {
     users.value = (await api<{ items: UserRow[] }>('/api/users')).items
+    loadError.value = ''
   }
   catch (err) {
-    toast.add({ title: errorMessage(err), color: 'error' })
+    loadError.value = errorMessage(err)
   }
   finally {
     loading.value = false
@@ -228,6 +230,13 @@ const columns = computed<TableColumn<UserRow>[]>(() => [
 
 <template>
   <PageShell :title="t('users.title')">
+    <UAlert
+      v-if="loadError"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-circle-x"
+      :title="loadError"
+    />
     <template #actions>
       <UButton
         icon="i-lucide-user-plus"

@@ -120,7 +120,7 @@ def write_status(status):
     errs = schema.load("schemas", "dns-status").errors(status)
     if errs:
         raise Fail("E_INTERNAL", "dns status does not match its schema: %s" % errs[:3])
-    os.makedirs(os.path.dirname(STATUS_FILE), mode=0o750, exist_ok=True)
+    common.shared_dir(os.path.dirname(STATUS_FILE))
     common.write_json(STATUS_FILE, status)
 
 

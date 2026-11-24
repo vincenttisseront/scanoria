@@ -40,14 +40,16 @@ function message(err: unknown): string {
   return code && te(`gates.errors.${code}`) ? t(`gates.errors.${code}`) : errorMessage(err)
 }
 
+const loadError = ref('')
 async function load() {
   loading.value = true
   try {
     gate.value = await api<GateDetail>(`/api/gates/${id.value}`)
     rules.value = { ...GateRules.parse(gate.value.rules) }
+    loadError.value = ''
   }
   catch (err) {
-    toast.add({ title: message(err), color: 'error' })
+    loadError.value = message(err)
   }
   finally {
     loading.value = false
@@ -145,6 +147,13 @@ async function remove() {
 
 <template>
   <PageShell :title="gate ? `${t('gates.title')} · ${gate.slug}` : t('gates.title')">
+    <UAlert
+      v-if="loadError"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-circle-x"
+      :title="loadError"
+    />
     <template #actions>
       <UButton
         v-if="canEdit && gate && !gate.builtin"

@@ -135,7 +135,7 @@ describe('mise en page principale', () => {
     setUser('viewer')
     const w = await mountSuspended(DefaultLayout, { slots: { default: () => h('main', 'page') } })
     expect(w.text()).toContain('Tableau de bord')
-    expect(w.text()).toContain('À propos et licence')
+    expect(w.text()).toContain('À propos')
     expect(w.text()).not.toContain('Utilisateurs')
     expect(w.text()).not.toContain('Journal d’audit')
     expect(w.text()).toContain('Alice')
@@ -150,6 +150,56 @@ describe('mise en page principale', () => {
     const ad = await mountSuspended(DefaultLayout)
     expect(ad.text()).toContain('Utilisateurs')
     expect(ad.text()).toContain('alice')
+  })
+
+  it('menu en sections : titres, ordre des entrées et applications des modules « service » sains', async () => {
+    setUser('admin')
+    const svc = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      name,
+      installed: { id, type: 'service', status: 'healthy', enabled: true, route: { hostname: id, url: `https://${id}.analyse.exemple.test/` }, ...extra },
+    })
+    route('GET', '/api/catalog', () => ({
+      modules: [
+        svc('sonarqube', 'SonarQube'),
+        svc('dtrack', 'Dependency-Track'),
+        svc('defectdojo', 'DefectDojo', { enabled: false }),
+        svc('broken', 'Cassé', { status: 'failed' }),
+        svc('ailleurs', 'Ailleurs', { route: { hostname: 'ailleurs', url: 'https://exemple.test/' } }),
+        svc('clair', 'En clair', { route: { hostname: 'clair', url: 'http://clair.analyse.exemple.test/' } }),
+        { id: 'trivy', name: 'Trivy', installed: { id: 'trivy', type: 'scanner', status: 'healthy', enabled: true } },
+      ],
+    }))
+    const w = await mountSuspended(DefaultLayout)
+    await settle()
+    const nav = w.findComponent({ name: 'UNavigationMenu' })
+    const lists = nav.props('items') as { label: string, type?: string, to?: string, target?: string }[][]
+    expect(lists.map(l => l.map(i => i.label))).toEqual([
+      ['Tableau de bord'],
+      ['Analyse', 'Projets', 'Analyses', 'Résultats', 'Quality gates', 'Santé'],
+      ['Modules', 'Catalogue', 'Dependency-Track', 'SonarQube'],
+      ['Administration', 'Système', 'Certificats TLS', 'Utilisateurs', 'IA', 'Journal d’audit', 'Mises à jour', 'À propos'],
+    ])
+    expect(lists.slice(1).every(l => l[0]!.type === 'label')).toBe(true)
+    const sonar = lists[2]!.find(i => i.label === 'SonarQube')!
+    expect(sonar).toMatchObject({ to: 'https://sonarqube.analyse.exemple.test/', target: '_blank' })
+    expect(nav.props('tooltip')).toBe(true)
+    expect(w.find('nav[aria-label="Menu principal"]').exists()).toBe(true)
+  })
+
+  it('entrée active selon la page, sous-pages comprises', async () => {
+    setUser('admin')
+    const active = async (path: string) => {
+      const w = await mountSuspended(DefaultLayout, { route: path })
+      const lists = w.findComponent({ name: 'UNavigationMenu' }).props('items') as { label: string, active?: boolean }[][]
+      return lists.flat().filter(i => i.active).map(i => i.label)
+    }
+    expect(await active('/')).toEqual(['Tableau de bord'])
+    expect(await active('/scans/42')).toEqual(['Analyses'])
+    expect(await active('/scans/health')).toEqual(['Santé'])
+    expect(await active('/system/severities')).toEqual(['Système'])
+    expect(await active('/system/tls')).toEqual(['Certificats TLS'])
+    expect(await active('/catalog/trivy')).toEqual(['Catalogue'])
   })
 
   it('applique la langue du compte puis enregistre un changement de langue', async () => {

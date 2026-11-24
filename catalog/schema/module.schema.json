@@ -746,6 +746,17 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 500
+            },
+            "mirrors": {
+              "description": "Sources de secours, essayées dans l'ordre si ref échoue (même kind), par exemple quand un registre limite le débit (0.3.4).",
+              "type": "array",
+              "maxItems": 4,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
             }
           }
         },

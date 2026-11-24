@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Vincent Tisseront
 #
-# Base OSV hors ligne pour OSV-Scanner (module feed). En 0.2, manifeste
-# seulement ; mise à jour et lots hors ligne en 0.6 (CLAUDE.md § 9).
+# Base OSV hors ligne pour OSV-Scanner (module feed). Depuis la 0.3.4, le
+# helper télécharge une archive par écosystème à l'installation puis chaque
+# jour (feeds.py) ; lots hors ligne signés en 0.6 (CLAUDE.md § 9). Un
+# écosystème absent de la liste ne fait pas échouer OSV-Scanner : ses paquets
+# sont seulement ignorés (« could not load db for <écosystème> » au journal).
 # Disposition attendue : /feeds/osv-db/osv-scalibr/<écosystème>/all.zip.
 # Licence relevée le 2026-11-24.
 id: osv-db

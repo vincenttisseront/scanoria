@@ -8,9 +8,8 @@ import { defineEventHandler } from 'h3'
 import { getPool } from '../../utils/db'
 import { requireRole } from '../../utils/http'
 import { aiStatus } from '../../ai/console'
-import { tokenStoreAvailable } from '../../ai/token'
 
 export default defineEventHandler(async (event) => {
   requireRole(event, 'operator')
-  return { ...(await aiStatus(getPool())), token_supported: tokenStoreAvailable() }
+  return { ...(await aiStatus(getPool())), token_supported: true }
 })

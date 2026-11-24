@@ -37,6 +37,7 @@ interface AiStatusResponse {
   latency_ms: number | null
   queue: { queued: number, running: number }
 }
+interface AgreementRow { kind: string, model: string | null, votes: number, up: number, rate: number | null, triaged: number | null, matched: number | null, triage_rate: number | null }
 interface CallRow { id: number, kind: string, model: string | null, bytes_sent: number, duration_ms: number | null, outcome: string, at: string, project: string | null }
 
 const URL_RE = /^https?:\/\/(\[[0-9a-f:.]{2,45}\]|[a-z0-9.-]{1,253})(:[0-9]{1,5})?\/?$/
@@ -54,28 +55,41 @@ const toast = useToast()
 
 const info = ref<AiStatusResponse | null>(null)
 const calls = ref<CallRow[]>([])
+const agreementRows = ref<AgreementRow[]>([])
 const loading = ref(false)
 
-async function refresh() {
-  loading.value = true
+async function refresh(quiet = false) {
+  if (!quiet) loading.value = true
   try {
-    const [s, c] = await Promise.all([
+    const [s, c, a] = await Promise.all([
       api<AiStatusResponse>('/api/ai/status'),
       api<{ calls: CallRow[] }>('/api/ai/calls'),
+      api<{ items: AgreementRow[] }>('/api/ai/agreement').catch(() => ({ items: [] as AgreementRow[] })),
     ])
     info.value = s
     calls.value = c.calls
-    if (!form.url && s.endpoint.url) form.url = s.endpoint.url
-    if (s.endpoint.insecure) form.insecure = true
+    agreementRows.value = a.items
+    // Le formulaire n'est prérempli qu'au chargement, jamais par le suivi périodique.
+    if (!quiet && !form.url && s.endpoint.url) form.url = s.endpoint.url
+    if (!quiet && s.endpoint.insecure) form.insecure = true
   }
   catch (err) {
-    toast.add({ title: errorMessage(err), color: 'error', icon: 'i-lucide-circle-x' })
+    if (!quiet) toast.add({ title: errorMessage(err), color: 'error', icon: 'i-lucide-circle-x' })
   }
   finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
-onMounted(refresh)
+// Santé du connecteur (disjoncteur, file, latence) et journal des appels suivis
+// en continu : sans cela, la page restait figée jusqu'à la prochaine action.
+let poll: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  void refresh()
+  poll = setInterval(() => void refresh(true), 15_000)
+})
+onBeforeUnmount(() => {
+  if (poll) clearInterval(poll)
+})
 
 // --- Connecteur ---
 const form = reactive({ url: '', insecure: false, token: '', removeToken: false, ca: '' })
@@ -482,6 +496,75 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
         </p>
       </UCard>
 
+      <UCard
+        v-if="info.enabled"
+        data-testid="ai-agreement"
+      >
+        <template #header>
+          <h2 class="font-semibold">
+            {{ t('ai.agreement.title') }}
+          </h2>
+          <p class="text-sm text-muted">
+            {{ t('ai.agreement.help') }}
+          </p>
+        </template>
+        <p
+          v-if="!agreementRows.length"
+          class="text-sm text-muted"
+        >
+          {{ t('ai.agreement.empty') }}
+        </p>
+        <div
+          v-else
+          class="overflow-x-auto"
+        >
+          <table class="w-full text-sm">
+            <thead class="text-left text-muted">
+              <tr>
+                <th class="py-1 pr-4">
+                  {{ t('ai.agreement.task') }}
+                </th>
+                <th class="py-1 pr-4">
+                  {{ t('ai.agreement.model') }}
+                </th>
+                <th class="py-1 pr-4">
+                  {{ t('ai.agreement.votes') }}
+                </th>
+                <th class="py-1 pr-4">
+                  {{ t('ai.agreement.rate') }}
+                </th>
+                <th class="py-1">
+                  {{ t('ai.agreement.triage') }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="r in agreementRows"
+                :key="`${r.kind}:${r.model ?? ''}`"
+                class="border-t border-default"
+              >
+                <td class="py-2 pr-4">
+                  {{ kindLabel(r.kind) }}
+                </td>
+                <td class="py-2 pr-4 font-mono">
+                  {{ r.model ?? '—' }}
+                </td>
+                <td class="py-2 pr-4">
+                  {{ r.votes }}
+                </td>
+                <td class="py-2 pr-4">
+                  {{ r.rate === null ? '—' : `${Math.round(r.rate * 100)} %` }}
+                </td>
+                <td class="py-2">
+                  {{ r.triage_rate === null ? '—' : t('ai.agreement.triageValue', { rate: Math.round(r.triage_rate * 100), matched: r.matched ?? 0, total: r.triaged ?? 0 }) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </UCard>
+
       <UCard v-if="info.enabled">
         <template #header>
           <h2 class="font-semibold">
@@ -617,6 +700,9 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
           <ul class="list-disc pl-5">
             <li>{{ t('ai.activation.sent1') }}</li>
             <li>{{ t('ai.activation.sent2') }}</li>
+            <li>{{ t('ai.activation.sent4') }}</li>
+            <li>{{ t('ai.activation.sent5') }}</li>
+            <li>{{ t('ai.activation.sent6') }}</li>
             <li>{{ t('ai.activation.sent3') }}</li>
           </ul>
         </div>

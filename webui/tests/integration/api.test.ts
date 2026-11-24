@@ -570,6 +570,11 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
     it('actualisation du catalogue et DNS', async () => {
       expect((await call('/api/catalog/refresh', { method: 'POST', client: admin, json: {} })).status).toBe(202)
       expect(code(await call('/api/catalog/refresh', { method: 'POST', client: admin, json: { force: true } }))).toBe('E_VALIDATION')
+      expect((await call('/api/catalog/feeds/refresh', { method: 'POST', client: admin, json: {} })).status).toBe(202)
+      expect((await call('/api/catalog/feeds/refresh', { method: 'POST', client: admin, json: { ids: ['trivy-db'] } })).status).toBe(202)
+      expect(code(await call('/api/catalog/feeds/refresh', { method: 'POST', client: admin, json: { ids: [] } }))).toBe('E_VALIDATION')
+      expect(code(await call('/api/catalog/feeds/refresh', { method: 'POST', client: viewer, json: {} }))).toBe('E_FORBIDDEN')
+      expect((await call('/api/catalog/modules/trivy-db', { client: viewer })).data.feed).toMatchObject({ id: 'trivy-db', status: 'ok' })
       expect(code(await call('/api/dns/check', { method: 'POST', client: viewer, json: {} }))).toBe('E_FORBIDDEN')
       expect(code(await call('/api/dns/check', { method: 'POST', client: viewer, json: { x: 1 } }))).toBe('E_FORBIDDEN')
       expect((await call('/api/dns/check', { method: 'POST', client: admin, json: {} })).status).toBe(202)

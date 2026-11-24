@@ -263,7 +263,7 @@ for want in '"--network", "scanoria-fetch"' '"--dns=none"' '"--add-host", "forge
 	grep -qF -- "$want" <<< "$F" && ok "clone confiné : $want" || ko "clone confiné : $want absent"
 done
 grep -qF -- '"--network=none"' <<< "$F" && ko "clone : --network=none non remplacé" || ok "clone : réseau dédié seulement"
-for want in '"--network=none"' '"--read-only"' '"--cap-drop=ALL"' '"--security-opt=no-new-privileges"' '"65534:65534"' ':/src:ro"' ':/out:rw"' '"--pids-limit"' '"--memory"'; do
+for want in '"--network=none"' '"--read-only"' '"--cap-drop=ALL"' '"--security-opt=no-new-privileges"' '"65534:65534"' ':/src:ro"' ':/out:rw"' '"--pids-limit"' '"--memory"' '"HOME=/tmp"' '"TMPDIR=/tmp"'; do
 	grep -qF -- "$want" <<< "$S" && ok "scanner confiné : $want" || ko "scanner confiné : $want absent"
 done
 grep -qF -- ':/git:ro' <<< "$S" && ko "scanner sans historique : /git monté à tort" || ok "scanner sans historique : /git non monté"
