@@ -107,12 +107,12 @@ const OPS: Record<string, Record<string, Op>> = {
     post: { summary: 'Queue a scan {ref, profile?} → 202 {scan_id, number, url}; API token of the project (trigger api) or operator session', role: 'operator', body: 'ProjectScanCreate', status: 202, token: true },
   },
   '/api/projects/{id}/results': {
-    post: { summary: 'Upload external results (J6): raw SARIF 2.1.0 or CycloneDX 1.5/1.6 body, 32 MiB max; query ref, commit, tool, version, category (default sast); creates an external scan, findings marked external, gate evaluated (not a release verdict) → 201 {scan_id, number, module, source, results, new, components, verdict}; 413 too large, 415 unknown format, 422 invalid document {issues}', role: 'operator', status: 201, token: true },
+    post: { summary: 'Upload external results (J6): raw SARIF 2.1.0 or CycloneDX 1.5/1.6 body, 32 MiB max; query ref, commit, tool, version, category (default sast); creates an external scan, findings marked external, gate evaluated (not a release verdict) → 201 {scan_id, number, module, source, results, new, components, verdict}; 413 too large, 415 unknown format, 422 invalid document {issues}; 429 E_EXTERNAL_BUSY (one upload per project at a time, Retry-After)', role: 'operator', status: 201, token: true },
   },
   '/api/scans/{id}/verdict': {
     get: { summary: 'Scan state, verdict and ordered reasons (VerdictDetails), optional ai_summary (I9); ?locale=fr|en', role: 'viewer', token: true },
   },
-  '/api/badges/{name}': { get: { summary: 'Latest verdict badge, /api/badges/<project slug>.svg (404 unless enabled for the project)', role: 'public' } },
+  '/api/badges/{name}': { get: { summary: 'Latest verdict badge (appliance scans only, never an external upload), /api/badges/<project slug>.svg (404 unless enabled for the project)', role: 'public' } },
   '/api/badges/projects/{id}': { put: { summary: 'Enable or disable the public badge of a project (disabled by default)', role: 'operator', body: 'BadgeUpdate' } },
   ...PROJECT_OPS,
   '/api/scans': {

@@ -294,6 +294,10 @@ describe.skipIf(!DATABASE_URL)('diagnostic IA de l\'appliance I16 (PostgreSQL r�
     expect(get.data).toMatchObject({ enabled: true, task: { status: 'done', model: expect.any(String), model_digest: expect.any(String) } })
     const fb = await call('/api/ai/feedback', { method: 'POST', client: admin, json: { task_id: get.data.task.id, vote: 1 } })
     expect(fb.status).toBeLessThan(300)
+    // Réservé aux administrateurs : un opérateur ne note pas une sortie qu'il ne peut pas lire.
+    const denied = await call('/api/ai/feedback', { method: 'POST', client: operator, json: { task_id: get.data.task.id, vote: -1 } })
+    expect(denied.status).toBe(404)
+    expect(Number((await db.pool.query<{ n: string }>('SELECT count(*) AS n FROM ai_feedback WHERE task_id = $1', [get.data.task.id])).rows[0]!.n)).toBe(1)
     // Aucune action faite : aucune demande déposée au service root.
     expect(Number((await db.pool.query<{ n: string }>(`SELECT count(*) AS n FROM helper_requests WHERE created_at > now() - interval '1 minute' AND type IN ('apply-update', 'rollback-update', 'install-modules', 'uninstall-module', 'issue-certificate')`)).rows[0]!.n))
       .toBe(2)

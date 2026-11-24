@@ -25,7 +25,7 @@ export const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 const OUTPUT_PATH_RE = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/
 const BATCH = 500
 /** Erreurs qui rendent la sortie d'un module inexploitable (rien ne peut passer « corrigé »). */
-const UNREADABLE = new Set<string>(['output-unreadable', 'output-too-large', 'output-path', 'invalid-json', 'invalid-document'])
+const UNREADABLE = new Set<string>(['output-unreadable', 'output-too-large', 'output-path', 'invalid-json', 'invalid-document', 'tool-error'])
 
 export interface IngestInput {
   scanId: string
@@ -36,6 +36,8 @@ export interface IngestInput {
   outputs: { sarif?: string | null, cyclonedx?: string | null }
   /** J6 (0.6) : catégories d'un outil externe, qui n'a pas de manifeste. */
   categories?: string[]
+  /** J6 (0.6) : document produit hors de l'appliance (masquage agressif, ParseContext.external). */
+  external?: boolean
 }
 
 export interface IngestError {
@@ -210,7 +212,7 @@ export async function ingestModuleOutputs(db: Db, input: IngestInput): Promise<I
   const errors: IngestError[] = []
   const scan = await loadScan(db, input.scanId)
   const hints = await readModuleHints(input.moduleId, await moduleVersion(db, input.scanId, input.moduleId))
-  const ctx = { moduleId: input.moduleId, moduleCategories: (input.categories ?? hints.categories).filter(c => (CATEGORIES as readonly string[]).includes(c)) }
+  const ctx = { moduleId: input.moduleId, moduleCategories: (input.categories ?? hints.categories).filter(c => (CATEGORIES as readonly string[]).includes(c)), external: input.external }
 
   const parsed: ParsedFinding[] = []
   for (const kind of ['sarif', 'cyclonedx'] as const) {
@@ -272,11 +274,14 @@ export async function finalizeScanFindings(db: Db, scanId: string, opts: { compl
     // outil externe, et une analyse de l'appliance jamais à une analyse externe ;
     // sinon un téléversement rendrait « nouveaux » tous les résultats suivants.
     const prev = await q.query<{ id: string }>(
-      `SELECT s.id FROM scans s, (SELECT queued_at, trigger, external_source->>'tool' AS ext_tool FROM scans WHERE id = $3) cur
+      `SELECT s.id FROM scans s, (SELECT queued_at, trigger FROM scans WHERE id = $3) cur
         WHERE s.project_id = $1 AND s.ref = $2 AND s.id <> $3 AND s.status = 'done'
           AND s.queued_at <= cur.queued_at
           AND (s.trigger = 'external') = (cur.trigger = 'external')
-          AND (cur.trigger <> 'external' OR s.external_source->>'tool' = cur.ext_tool)
+          -- Même outil externe : comparé par module (ext-<nom normalisé>), jamais par le nom brut.
+          AND (cur.trigger <> 'external' OR EXISTS (
+                SELECT 1 FROM scan_modules a JOIN scan_modules b ON b.module_id = a.module_id
+                 WHERE a.scan_id = s.id AND b.scan_id = $3))
         ORDER BY s.finished_at DESC NULLS LAST, s.queued_at DESC LIMIT 1`,
       [scan.project_id, scan.ref, scan.id],
     )

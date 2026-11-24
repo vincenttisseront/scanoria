@@ -107,11 +107,14 @@ def convert(report, modelscan_version="unknown"):
     errors = report.get("errors") if isinstance(report.get("errors"), list) else []
     results, rules, seen = [], {}, set()
     truncated = False
+    dropped = 0
     for issue in issues:
         if not isinstance(issue, dict):
             continue
         path, member = split_source(issue.get("source"))
         if path is None:
+            # Constat hors des sources : jamais publié tel quel, jamais perdu en silence.
+            dropped += 1
             continue
         rule_id, family = scanner_rule(issue.get("scanner"))
         severity, score, cwe = FAMILIES[family]
@@ -163,13 +166,22 @@ def convert(report, modelscan_version="unknown"):
             continue
         path, member = split_source(err.get("source")) if err.get("source") else (None, None)
         note = {
-            "level": "warning",
+            "level": "error",
             "message": {"text": clean(err.get("category"), 40) + ": " + clean(err.get("description"))},
             "descriptor": {"id": "modelscan/" + (clean(err.get("category"), 40).lower() or "error")},
         }
         if path:
             note["locations"] = [{"physicalLocation": {"artifactLocation": {"uri": path}}}]
         notifications.append(note)
+    if dropped:
+        notifications.append({
+            "level": "error",
+            "message": {"text": "PATH: %d issue(s) outside the scanned sources were dropped" % dropped},
+            "descriptor": {"id": "modelscan/path"},
+        })
+    # G13 : un fichier non lu (erreur de ModelScan) ou un constat écarté rend l'analyse
+    # non concluante ; « aucun résultat » ne doit jamais masquer un échec.
+    successful = not notifications
     summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
     scanned = summary.get("scanned") if isinstance(summary.get("scanned"), dict) else {}
     return {
@@ -182,7 +194,7 @@ def convert(report, modelscan_version="unknown"):
                 "informationUri": "https://github.com/protectai/modelscan",
                 "rules": [rules[k] for k in sorted(rules)],
             }},
-            "invocations": [{"executionSuccessful": True, "toolExecutionNotifications": notifications}],
+            "invocations": [{"executionSuccessful": successful, "toolExecutionNotifications": notifications}],
             "results": results,
             "properties": {
                 "scanoria": {"truncated": truncated},

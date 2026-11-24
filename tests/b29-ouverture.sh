@@ -100,8 +100,10 @@ expect "injection : gardée dans le texte, jamais comme règle" \
 	"$(R '[.runs[0].results[] | select(.ruleId | test("IGNORE"))] | length')" 0
 expect "scanner inconnu : règle générique, critical" \
 	"$(R '.runs[0].results[] | select(.locations[0].physicalLocation.artifactLocation.uri == "z/ctrl.pkl") | .ruleId + "/" + .properties.severity')" modelscan/unsafe-op/critical
-expect "erreurs en notifications, jamais en résultats" \
-	"$(R '.runs[0].invocations[0].toolExecutionNotifications | length')/$(R '[.runs[0].results[] | select(.ruleId | test("dependency|nested"))] | length')" 2/0
+expect "erreurs et constat « .. » écarté en notifications, jamais en résultats" \
+	"$(R '.runs[0].invocations[0].toolExecutionNotifications | length')/$(R '[.runs[0].results[] | select(.ruleId | test("dependency|nested"))] | length')" 3/0
+expect "fichier non lu : exécution non réussie (G13)" "$(R '.runs[0].invocations[0].executionSuccessful')" false
+expect "notifications de niveau error" "$(R '[.runs[0].invocations[0].toolExecutionNotifications[].level] | unique | join(",")')" error
 expect "CWE-502 sur le code exécuté au chargement" \
 	"$(R '.runs[0].tool.driver.rules[] | select(.id == "modelscan/pickle-unsafe-op") | .properties.tags | index("external/cwe/cwe-502") != null')" true
 expect "empreintes uniques et stables" "$(R '[.runs[0].results[].partialFingerprints["modelscan/v1"]] | unique | length')" 5
@@ -111,6 +113,7 @@ echo '[1, 2]' > "$TMP/bad.json"
 call convert "$TMP/bad.json" > /dev/null 2>&1 && ko "rapport invalide accepté" || ok "rapport invalide refusé"
 echo '{"issues": "x", "errors": 3}' > "$TMP/odd.json"
 expect "champs de types inattendus : aucun résultat" "$(call convert "$TMP/odd.json" | jq '.runs[0].results | length')" 0
+expect "rapport sans erreur : exécution réussie" "$(call convert "$TMP/odd.json" | jq '.runs[0].invocations[0].executionSuccessful')" true
 
 # --- 4. Banc d'essai, analyse réelle ------------------------------------------------------------
 if python3 -I -c 'import numpy' 2> /dev/null; then

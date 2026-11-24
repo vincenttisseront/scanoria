@@ -4,13 +4,13 @@
     {
       "invocations": [
         {
-          "executionSuccessful": true,
+          "executionSuccessful": false,
           "toolExecutionNotifications": [
             {
               "descriptor": {
                 "id": "modelscan/dependency"
               },
-              "level": "warning",
+              "level": "error",
               "locations": [
                 {
                   "physicalLocation": {
@@ -28,7 +28,7 @@
               "descriptor": {
                 "id": "modelscan/nested_zip"
               },
-              "level": "warning",
+              "level": "error",
               "locations": [
                 {
                   "physicalLocation": {
@@ -40,6 +40,15 @@
               ],
               "message": {
                 "text": "NESTED_ZIP: ModelScan does not support nested zip files."
+              }
+            },
+            {
+              "descriptor": {
+                "id": "modelscan/path"
+              },
+              "level": "error",
+              "message": {
+                "text": "PATH: 1 issue(s) outside the scanned sources were dropped"
               }
             }
           ]

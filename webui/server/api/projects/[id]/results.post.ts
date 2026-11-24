@@ -10,7 +10,7 @@
 // → 201 {scan_id, number, url, module, source, results, new, components, verdict}
 // → 413 trop gros, 415 format inconnu, 422 document invalide {issues}.
 
-import { createError, defineEventHandler, getHeader, getRouterParam, setResponseStatus } from 'h3'
+import { createError, defineEventHandler, getHeader, getRouterParam, setResponseHeader, setResponseStatus } from 'h3'
 import { z } from 'zod'
 import { CATEGORIES } from '#shared/analysis'
 import { getPool } from '../../../utils/db'
@@ -18,7 +18,7 @@ import { apiError, clientAddress, queryValidated } from '../../../utils/http'
 import { writeAudit } from '../../../utils/audit'
 import { getProjectRef } from '../../../gates/gates'
 import { ciCaller, gateError, uuidParam } from '../../../gates/http'
-import { ExternalError, ingestExternal, parseJson, readBoundedBody } from '../../../external/ingest'
+import { acquireExternalSlot, ExternalError, ingestExternal, parseJson, readBoundedBody } from '../../../external/ingest'
 
 const query = z.strictObject({
   ref: z.string().min(1).max(255).optional(),
@@ -41,6 +41,12 @@ export default defineEventHandler(async (event) => {
   if (!project) throw apiError(404, 'E_NOT_FOUND')
   if (project.archived) throw gateError(409, 'E_PROJECT_ARCHIVED')
   const declared = Number.parseInt(getHeader(event, 'content-length') ?? '', 10)
+  // Un téléversement à la fois par projet, borné en tout : rien n'est lu avant d'avoir la place.
+  const release = acquireExternalSlot(projectId)
+  if (!release) {
+    setResponseHeader(event, 'Retry-After', 10)
+    throw externalError(new ExternalError('E_EXTERNAL_BUSY', 429))
+  }
   try {
     const buf = await readBoundedBody(event.node.req, Number.isFinite(declared) ? declared : null)
     const out = await ingestExternal(pool, {
@@ -81,5 +87,8 @@ export default defineEventHandler(async (event) => {
       throw externalError(err)
     }
     throw err
+  }
+  finally {
+    release()
   }
 })

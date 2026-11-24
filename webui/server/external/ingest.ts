@@ -43,8 +43,28 @@ const CDX_VERSIONS = ['1.5', '1.6']
 export type ExternalErrorCode
   = | 'E_EXTERNAL_TOO_LARGE' | 'E_EXTERNAL_JSON' | 'E_EXTERNAL_FORMAT' | 'E_EXTERNAL_INVALID'
     | 'E_EXTERNAL_TOO_MANY' | 'E_EXTERNAL_TOOL' | 'E_EXTERNAL_REF' | 'E_EXTERNAL_UPLOAD'
+    | 'E_EXTERNAL_INGEST' | 'E_EXTERNAL_BUSY'
 
 export interface DocumentIssue { path: string, code: string, detail?: string }
+
+/** Téléversements ingérés en même temps : un par projet, MAX_EXTERNAL_INFLIGHT en tout (mémoire, pool). */
+export const MAX_EXTERNAL_INFLIGHT = 2
+const inFlight = new Set<string>()
+
+/**
+ * Réserve la place d'un téléversement pour ce projet ; null si le projet en a
+ * déjà un en cours ou si la console en ingère déjà MAX_EXTERNAL_INFLIGHT.
+ * La fonction rendue libère la place (à appeler dans un finally).
+ */
+export function acquireExternalSlot(projectId: string): (() => void) | null {
+  if (inFlight.has(projectId) || inFlight.size >= MAX_EXTERNAL_INFLIGHT) return null
+  inFlight.add(projectId)
+  let released = false
+  return () => {
+    if (!released) inFlight.delete(projectId)
+    released = true
+  }
+}
 
 export class ExternalError extends Error {
   constructor(readonly code: ExternalErrorCode, readonly status: number, readonly issues: DocumentIssue[] = []) {
@@ -209,7 +229,7 @@ export async function ingestExternal(db: pg.Pool, input: ExternalInput): Promise
   const moduleId = externalModuleId(source.tool)
   if (!moduleId) throw new ExternalError('E_EXTERNAL_TOOL', 400, [{ path: '/tool', code: 'invalid', detail: source.tool.slice(0, 80) }])
   const categories = source.format === 'cyclonedx' ? ['sca', 'sbom'] : [input.category ?? 'sast']
-  const ctx = { moduleId, moduleCategories: categories.filter(c => (CATEGORIES as readonly string[]).includes(c)) }
+  const ctx = { moduleId, moduleCategories: categories.filter(c => (CATEGORIES as readonly string[]).includes(c)), external: true }
   // G2 : validation complète avant toute écriture.
   const parsed = source.format === 'sarif' ? parseSarif(input.doc, ctx) : parseCycloneDx(input.doc, ctx)
   if (parsed.issues.some(i => i.code === 'truncated')) throw new ExternalError('E_EXTERNAL_TOO_MANY', 413, parsed.issues.filter(i => i.code === 'truncated').map(issueOf))
@@ -235,7 +255,9 @@ export async function ingestExternal(db: pg.Pool, input: ExternalInput): Promise
   try {
     const file = source.format === 'sarif' ? 'result.sarif' : 'result.cdx.json'
     await writeFile(join(dir, file), JSON.stringify(input.doc), { mode: 0o600 })
-    const out = await ingestModuleOutputs(db, { scanId, moduleId, resultDir: dir, outputs: source.format === 'sarif' ? { sarif: file } : { cyclonedx: file }, categories: ctx.moduleCategories })
+    const out = await ingestModuleOutputs(db, { scanId, moduleId, resultDir: dir, outputs: source.format === 'sarif' ? { sarif: file } : { cyclonedx: file }, categories: ctx.moduleCategories, external: true })
+    // Validé plus haut : une erreur ici n'est jamais consignée « réussie ».
+    if (out.errors.some(e => (e as { code?: string }).code !== 'truncated')) throw new Error('external output rejected at ingestion')
     const { count, newCount } = out
     await db.query(
       `UPDATE findings f SET origin = 'external'
@@ -248,9 +270,11 @@ export async function ingestExternal(db: pg.Pool, input: ExternalInput): Promise
         WHERE scan_id = $1 AND module_id = $2`, [scanId, moduleId, count])
     await finalizeScanFindings(db, scanId, { complete: true })
     const details = VerdictDetails.parse(await evaluateGate(db, scanId))
-    await db.query(
+    const done = await db.query(
       `UPDATE scans SET status = 'done', verdict = $2, verdict_details = $3, finished_at = now()
         WHERE id = $1 AND status = 'ingesting'`, [scanId, details.verdict, JSON.stringify(details)])
+    // Analyse close entre-temps (annulée, ou reprise par un autre processus) : aucun verdict publié.
+    if (done.rowCount !== 1) throw new ExternalError('E_EXTERNAL_INGEST', 409)
     return { scanId, number, moduleId, source: ext, count, newCount, components, verdict: details.verdict }
   }
   catch (err) {

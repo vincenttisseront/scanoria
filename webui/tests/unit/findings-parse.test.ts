@@ -356,3 +356,18 @@ describe('G19 : empreintes inchangées par le masquage élargi de la 0.4', () =>
     expect(out.findings[4]!.snippet).not.toContain('@ss')
   })
 })
+
+describe('exécution déclarée en échec (G13)', () => {
+  const ctx = { moduleId: 'modelscan', moduleCategories: ['sast'] }
+  const doc = (ok: boolean | undefined) => ({
+    version: '2.1.0',
+    runs: [{ tool: { driver: { name: 'm' } }, invocations: [{ executionSuccessful: ok }], results: [] }],
+  })
+  it('executionSuccessful false : problème « tool-error », jamais « aucun résultat » silencieux', () => {
+    expect(parseSarif(doc(false), ctx).issues).toEqual([{ code: 'tool-error', detail: '1' }])
+  })
+  it('exécution réussie ou non déclarée : aucun problème', () => {
+    expect(parseSarif(doc(true), ctx).issues).toEqual([])
+    expect(parseSarif(doc(undefined), ctx).issues).toEqual([])
+  })
+})

@@ -17,7 +17,7 @@ import { UUID_RE } from './task-kit'
 import { DEFAULT_KEY, EMBEDDING_KEY } from './models'
 import { failedModules, proposeTimeout, type TimeoutProposal } from './tasks/diagnose'
 import { ruleKey } from './tasks/translate'
-import { myFeedback } from './feedback'
+import { ADMIN_ONLY_KINDS, myFeedback } from './feedback'
 import { loadTimeoutOverrides, TimeoutOverrides } from './overrides'
 
 export { loadTimeoutOverrides } from './overrides'
@@ -52,7 +52,6 @@ export const ModelsBody = z.strictObject({
 const subjectFits = (b: { kind: string, subject_id: string }) => (TASKS[b.kind]?.subjectPattern ?? UUID_RE).test(b.subject_id)
 const SUBJECT_ISSUE = { message: 'subject_id does not match the task', path: ['subject_id'] }
 /** I16 (0.6) : le diagnostic de l'appliance a ses propres routes, réservées aux administrateurs (/api/ai/appliance/…). */
-const ADMIN_ONLY_KINDS: readonly string[] = ['diagnose-appliance']
 const notAdminOnly = (b: { kind: string }) => !ADMIN_ONLY_KINDS.includes(b.kind)
 const ADMIN_ONLY_ISSUE = { message: 'use /api/ai/appliance/diagnosis', path: ['kind'] }
 

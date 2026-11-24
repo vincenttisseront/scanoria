@@ -24,8 +24,9 @@ const recorded = JSON.parse(readFileSync(`${MODULE}tests/recorded.sarif`, 'utf8'
 describe('modelscan : SARIF enregistré', () => {
   const out = parseSarif(recorded, { moduleId: 'modelscan', moduleCategories: manifest.categories })
 
-  it('chaque résultat est lu, sans défaut, en catégorie sast', () => {
-    expect(out.issues).toEqual([])
+  it('chaque résultat est lu en catégorie sast ; fichiers non lus : exécution non concluante (G13)', () => {
+    // L'enregistrement contient des erreurs de ModelScan (dépendance, zip imbriqué) et un constat « .. » écarté.
+    expect(out.issues).toEqual([{ code: 'tool-error', detail: '1' }])
     expect(out.findings.length).toBe(5)
     expect(new Set(out.findings.map(f => f.category))).toEqual(new Set(['sast']))
     expect(out.findings.every(f => f.cwe.length === 1)).toBe(true)

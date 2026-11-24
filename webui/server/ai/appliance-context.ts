@@ -54,6 +54,11 @@ export interface ApplianceNames {
   fqdn?: string | null
   /** Autres noms connus : noms alternatifs du certificat, serveur Ollama, forge… */
   extra?: (string | null | undefined)[]
+  /**
+   * Nom de l'appliance inconnu (état publié absent) : tout nom d'hôte complet est
+   * neutralisé, faute de savoir lesquels sont ceux du réseau de l'entreprise.
+   */
+  strict?: boolean
 }
 
 const HOST_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/
@@ -76,6 +81,8 @@ const IPV6_RE = /(?<![\w:])(?:(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}|(?:[0-9a-f]{1
 const EMAIL_RE = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}/g
 /** Suffixes de noms internes courants, neutralisés même sans être déclarés. */
 const INTERNAL_HOST_RE = /\b(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+(?:local|lan|internal|intra|intranet|corp|home|localdomain)\b/gi
+/** Mode strict : tout nom d'au moins trois étiquettes, la dernière alphabétique (fichiers « a.json » épargnés). */
+const ANY_HOST_RE = /(?<![\w.-])(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.){2,}[a-z]{2,24}(?![\w-])/gi
 /** Adresses conservées : bouclage et non spécifiées, sans valeur d'identification. */
 const KEPT_ADDRESSES = new Set(['127.0.0.1', '0.0.0.0', '::1', '::'])
 
@@ -90,9 +97,11 @@ export class Neutralizer {
   private readonly addrs = new Map<string, string>()
   private readonly fqdn: string | null
   private readonly names: string[]
+  private readonly strict: boolean
 
   constructor(names: ApplianceNames = {}) {
     this.fqdn = cleanName(names.fqdn)
+    this.strict = !!names.strict && !this.fqdn
     const domain = this.fqdn ? domainOf(this.fqdn) : null
     const extra = (names.extra ?? []).map(cleanName).filter((n): n is string => !!n && n !== this.fqdn)
     // Plus longs d'abord : le nom de l'appliance avant son domaine.
@@ -130,6 +139,7 @@ export class Neutralizer {
       out = out.replace(new RegExp(`(?<![a-z0-9-])(?:[a-z0-9-]{1,63}\\.)*${escapeRe(n)}(?![a-z0-9-])`, 'gi'), m => this.host(m))
     }
     out = out.replace(INTERNAL_HOST_RE, m => this.host(m))
+    if (this.strict) out = out.replace(ANY_HOST_RE, m => this.host(m))
     out = out.replace(IPV4_RE, m => this.addr(m))
     out = out.replace(IPV6_RE, (m) => {
       // Une heure (10:00:00) n'a que trois groupes et n'est pas retenue ; un groupe sans chiffre

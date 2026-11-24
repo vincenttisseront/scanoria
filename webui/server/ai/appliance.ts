@@ -11,7 +11,8 @@
 import type { Queryable } from '../utils/db'
 import { getConfig } from '../utils/config'
 import { readPublishedState } from '../utils/appliance'
-import { readModulesState } from '../utils/catalog'
+import { readDnsStatus, readModulesState } from '../utils/catalog'
+import { fqdnSchema } from '#shared/schemas'
 import { APPLIANCE_SUBJECT_RE, boundApplianceContext, jsonLines, type ApplianceContext, type ApplianceNames } from './appliance-context'
 import { AI_PRIORITY, enqueueAiTask } from './enqueue'
 import { aiPaths, loadEndpoint } from './config'
@@ -55,7 +56,13 @@ export async function applianceNames(state: Obj | null): Promise<ApplianceNames>
   catch {
     aiHost = null
   }
-  return { fqdn: str(appliance.fqdn, 253), extra: [...sans.slice(0, 20), aiHost] }
+  // Nom de l'appliance : état publié, sinon dernier contrôle DNS ; inconnu, tout nom est neutralisé.
+  let fqdn = str(appliance.fqdn, 253)
+  if (!fqdn) {
+    const dns = await readDnsStatus(getConfig().dnsStatusFile).catch(() => null)
+    fqdn = fqdnSchema.safeParse(dns?.fqdn).success ? dns!.fqdn as string : null
+  }
+  return { fqdn, extra: [...sans.slice(0, 20), aiHost], strict: !fqdn }
 }
 
 interface RequestRow { id: string, type: string, status: string, code: string | null, message: string | null, output: unknown, params: unknown, created_at: Date, finished_at: Date | null }

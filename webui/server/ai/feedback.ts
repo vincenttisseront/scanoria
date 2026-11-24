@@ -25,12 +25,20 @@ export const FeedbackBody = z.strictObject({
 })
 export type FeedbackBody = z.infer<typeof FeedbackBody>
 
-/** Enregistre (ou remplace) le retour d'une personne sur une sortie IA terminée ; false si la sortie n'existe pas. */
-export async function saveFeedback(db: Queryable, body: FeedbackBody, userId: number): Promise<boolean> {
+/** Tâches dont la sortie n'est lue (et notée) que par un administrateur (I16). */
+export const ADMIN_ONLY_KINDS: readonly string[] = ['diagnose-appliance']
+
+/**
+ * Enregistre (ou remplace) le retour d'une personne sur une sortie IA terminée ;
+ * false si la sortie n'existe pas, ou si elle est réservée aux administrateurs
+ * et que la personne ne l'est pas (même réponse : rien n'est révélé).
+ */
+export async function saveFeedback(db: Queryable, body: FeedbackBody, userId: number, opts: { admin?: boolean } = {}): Promise<boolean> {
   const t = await db.query<{ id: string }>(
     `SELECT t.id FROM ai_tasks t LEFT JOIN projects p ON p.id = t.project_id
-      WHERE t.id = $1 AND t.status = 'done' AND t.kind NOT IN ('probe', 'testbed') AND (t.project_id IS NULL OR NOT p.ai_opt_out)`,
-    [body.task_id],
+      WHERE t.id = $1 AND t.status = 'done' AND t.kind NOT IN ('probe', 'testbed') AND (t.project_id IS NULL OR NOT p.ai_opt_out)
+        AND ($2::boolean OR NOT (t.kind = ANY($3::text[])))`,
+    [body.task_id, !!opts.admin, ADMIN_ONLY_KINDS],
   )
   if (!t.rows[0]) return false
   // Une correction peut contenir un extrait collé : elle est masquée avant stockage.

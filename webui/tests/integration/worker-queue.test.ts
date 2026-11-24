@@ -601,6 +601,27 @@ describe.skipIf(!DATABASE_URL)('file d’analyses (PostgreSQL réel, faux runner
       expect(row.plan.modules.map((m: { id: string }) => m.id)).toEqual(['gitleaks'])
     })
 
+    it('reprise : un téléversement externe (J6) en cours n\'est jamais conclu ; abandonné depuis une heure, clos en erreur', async () => {
+      const p = await newProject()
+      const ext = async (age: string) => (await db.pool.query<{ id: string }>(
+        `INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id, status, started_at, external_source)
+         SELECT $1, COALESCE(max(number), 0) + 1, 'external', 40, 'main', p.profile_id, p.gate_id, 'ingesting', now() - $2::interval,
+                '{"tool":"Acme","version":null,"format":"sarif","uploaded_via":"api-token"}'
+           FROM projects p LEFT JOIN scans s ON s.project_id = p.id WHERE p.id = $1 GROUP BY p.profile_id, p.gate_id
+         RETURNING id`, [p, age])).rows[0]!.id
+      const busy = await ext('10 minutes')
+      const lost = await ext('2 hours')
+      await db.pool.query(
+        `INSERT INTO scan_modules (scan_id, module_id, module_version, status, attempts, started_at)
+         VALUES ($1, 'ext-acme', 'external', 'running', 1, now()), ($2, 'ext-acme', 'external', 'running', 1, now())`, [busy, lost])
+      expect(await worker().recoverOrphans()).toBe(1)
+      expect(await scanRow(busy)).toMatchObject({ status: 'ingesting', verdict: null })
+      expect(await scanRow(lost)).toMatchObject({ status: 'error', verdict: null, error: { code: 'E_EXTERNAL_INGEST' } })
+      const mods = (await db.pool.query<{ scan_id: string, status: string }>(
+        'SELECT scan_id, status FROM scan_modules WHERE scan_id = ANY($1::uuid[]) ORDER BY status', [[busy, lost]])).rows
+      expect(mods).toEqual([{ scan_id: lost, status: 'error' }, { scan_id: busy, status: 'running' }])
+    })
+
     it('reprise : analyse « ingesting » sans tâche conclue ; tâche orpheline retirée de incoming', async () => {
       const p = await newProject()
       const { scanId } = await enqueueScan(db.pool, { projectId: p, ref: 'main', trigger: 'manual' })

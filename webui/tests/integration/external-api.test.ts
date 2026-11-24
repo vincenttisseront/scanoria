@@ -26,7 +26,9 @@ import { startConsole, stopConsole, waitReady } from '../../server/utils/runtime
 import { createUser } from '../../server/utils/users'
 import { badTokenLimiter, tokenLimiter } from '../../server/middleware/api-token'
 import { finalizeScanFindings } from '../../server/findings/ingest'
-import { EXTERNAL_MAX_BYTES } from '../../server/external/ingest'
+import { acquireExternalSlot, EXTERNAL_MAX_BYTES } from '../../server/external/ingest'
+import { latestVerdict } from '../../server/gates/badge'
+import { getProject } from '../../server/projects/service'
 
 const API_DIR = fileURLToPath(new URL('../../server/api', import.meta.url))
 const CLIENT = fileURLToPath(new URL('../../../src/rootfs/usr/share/scanoria/client/scanoria-scan', import.meta.url))
@@ -365,6 +367,62 @@ describe.skipIf(!DATABASE_URL)('résultats externes J6 (PostgreSQL réel)', () =
     expect(JSON.stringify(detail.data)).toContain('"external_source"')
     const replay = await call(`/api/scans/${scan}/replay`, { method: 'POST', client: operator })
     expect(replay.status).toBeGreaterThanOrEqual(400)
+  })
+
+  it('secret générique sans étiquette « secrets » : traité comme un secret, valeur jamais stockée (§ 6.3)', async () => {
+    const project = await newProject('ext-secret')
+    const t = await call(`/api/projects/${project}/tokens`, { method: 'POST', client: operator, json: { name: 'ci' } })
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    const value = Array.from({ length: 32 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('')
+    const leaky = {
+      ruleId: 'generic-password',
+      message: { text: `mot de passe en clair : ${value}` },
+      locations: [{ physicalLocation: { artifactLocation: { uri: 'conf/app.ini' }, region: { startLine: 2, snippet: { text: `password = ${value}` } } } }],
+    }
+    const other = { ...result('quality-rule', 'src/q.js'), message: { text: `identifiant ${value}` } }
+    const res = await upload(project, sarif([leaky, other], { name: 'Home Detector' }), { bearer: t.data.value })
+    expect(res.status, JSON.stringify(res.data)).toBe(201)
+    const rows = (await db.pool.query<Json>('SELECT rule_id, category, title, message, snippet, secret_type FROM findings WHERE project_id = $1 ORDER BY rule_id', [project])).rows
+    expect(rows.map(r => [r.rule_id, r.category])).toEqual([['generic-password', 'secrets'], ['quality-rule', 'sast']])
+    expect(JSON.stringify(rows)).not.toContain(value)
+    expect(rows[0]!.secret_type).toBeTruthy()
+  })
+
+  it('même outil, casse différente : même ligne de base (module ext-…, pas le nom brut)', async () => {
+    const project = await newProject('ext-casse')
+    const t = await call(`/api/projects/${project}/tokens`, { method: 'POST', client: operator, json: { name: 'ci' } })
+    const doc = (name: string) => sarif([result('C1', 'c.js', { 'security-severity': '3.0' })], { name })
+    expect((await upload(project, doc('Case Tool'), { bearer: t.data.value })).data.new).toBe(1)
+    const second = await upload(project, doc('case tool'), { bearer: t.data.value })
+    expect(second.data).toMatchObject({ module: 'ext-case-tool', new: 0 })
+  })
+
+  it('badge et « dernière analyse » : jamais un téléversement externe', async () => {
+    const project = await newProject('ext-badge')
+    const t = await call(`/api/projects/${project}/tokens`, { method: 'POST', client: operator, json: { name: 'ci' } })
+    expect((await upload(project, sarif([], { name: 'Empty Tool' }), { bearer: t.data.value, query: 'ref=main' })).data.verdict).toBe('passed')
+    expect(await latestVerdict(db.pool, project, 'main')).toBeNull()
+    expect((await getProject(db.pool, project))?.last_scan ?? null).toBeNull()
+  })
+
+  it('un téléversement à la fois par projet : 429 E_EXTERNAL_BUSY, rien n\'est créé', async () => {
+    const release = acquireExternalSlot(projectB)
+    expect(release).toBeTypeOf('function')
+    try {
+      const before = await scanCount(projectB)
+      const t = await call(`/api/projects/${projectB}/tokens`, { method: 'POST', client: operator, json: { name: 'ci' } })
+      const res = await upload(projectB, sarif([]), { bearer: t.data.value })
+      expect(res.status).toBe(429)
+      expect(code(res)).toBe('E_EXTERNAL_BUSY')
+      expect(await scanCount(projectB)).toBe(before)
+      expect(acquireExternalSlot(projectB)).toBeNull()
+    }
+    finally {
+      release!()
+    }
+    const again = acquireExternalSlot(projectB)
+    expect(again).toBeTypeOf('function')
+    again!()
   })
 
   it('client scanoria-scan upload : verdict et code de sortie', async () => {

@@ -46,6 +46,13 @@ describe('neutralisation des noms et adresses', () => {
     expect(out).not.toMatch(/192\.0\.2|198\.51|2001:db8/)
   })
 
+  it('nom de l\'appliance inconnu : tout nom complet neutralisé, fichiers épargnés', () => {
+    const out = new Neutralizer({ strict: true }).text('fetch mirror.exemple.test/a from git.acme.exemple.test, read module.yaml and state.json')
+    expect(out).toBe('fetch [host-1]/a from [host-2], read module.yaml and state.json')
+    // Nom connu : le mode strict ne s'applique pas.
+    expect(new Neutralizer({ fqdn: 'analyse.exemple.test', strict: true }).text('cdn.vendor.example')).toBe('cdn.vendor.example')
+  })
+
   it('adresses de messagerie et noms internes courants', () => {
     const out = new Neutralizer().text('mail admin@exemple.test, host db01.corp and nas.lan')
     expect(out).toBe('mail [email], host [host-1] and [host-2]')

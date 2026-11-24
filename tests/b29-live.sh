@@ -164,6 +164,7 @@ if [[ -s "$SARIF" ]]; then
 	jq -c '[.runs[0].results[] | [.ruleId, .locations[0].physicalLocation.artifactLocation.uri, .properties.severity]]' "$SARIF"
 	jq -c '.runs[0].invocations[0].toolExecutionNotifications | map(.message.text)' "$SARIF"
 	expect "aucun résultat hors des sources" "$(jq -r '[.runs[0].results[].locations[0].physicalLocation.artifactLocation.uri | select(startswith("/") or test("\\.\\."))] | length' "$SARIF")" 0
+	expect "banc d'essai lu sans erreur : exécution réussie" "$(jq -r '.runs[0].invocations[0].executionSuccessful' "$SARIF")" true
 	expect "aucune erreur de dépendance (TensorFlow et h5py présents)" \
 		"$(jq -r '[.runs[0].invocations[0].toolExecutionNotifications[] | select(.descriptor.id == "modelscan/dependency")] | length' "$SARIF")" 0
 else
