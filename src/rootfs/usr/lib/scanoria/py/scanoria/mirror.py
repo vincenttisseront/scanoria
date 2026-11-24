@@ -112,6 +112,11 @@ def configured():
     return bool(load_conf().get("enabled"))
 
 
+def mirror_gid():
+    import pwd
+    return pwd.getpwnam(USER).pw_gid
+
+
 def mirror_uid():
     if common.TEST_ROOT:
         v = os.environ.get("SCANORIA_TEST_MIRROR_UID", "")
@@ -234,8 +239,11 @@ def write_check(conf, man, error):
 
 
 def _stage_dir():
-    os.makedirs(STAGE, mode=0o711, exist_ok=True)
-    os.chmod(STAGE, 0o711)
+    # Traversable par le seul client du miroir (groupe scanoria-mirror).
+    os.makedirs(STAGE, mode=0o710, exist_ok=True)
+    os.chmod(STAGE, 0o710)
+    if not common.TEST_ROOT:
+        os.chown(STAGE, 0, mirror_gid())
     d = os.path.join(STAGE, secrets.token_hex(8))
     os.mkdir(d, 0o700)
     if not common.TEST_ROOT:
@@ -401,23 +409,19 @@ def client_status():
 
 def _public_tree(root):
     for base, dirs, files in os.walk(root):
-        os.chmod(base, 0o755)
-        if not common.TEST_ROOT:
-            os.chown(base, 0, 0)
+        common.web_readable(base, directory=True)
         for n in files:
             p = os.path.join(base, n)
             if os.path.islink(p) or not os.path.isfile(p):
                 os.unlink(p)
                 continue
-            os.chmod(p, 0o644)
-            if not common.TEST_ROOT:
-                os.chown(p, 0, 0)
+            common.web_readable(p)
 
 
 def publish(work):
     """Le répertoire de travail d'un export devient le contenu servi (déplacé, sans copie)."""
-    os.makedirs(PUBLIC, mode=0o755, exist_ok=True)
-    os.chmod(PUBLIC, 0o755)
+    os.makedirs(PUBLIC, mode=0o750, exist_ok=True)
+    common.web_readable(PUBLIC, directory=True)
     for n in os.listdir(work):
         if n not in ("manifest.json", "manifest.json.sig", "catalog", "testbeds", "feeds", "images"):
             p = os.path.join(work, n)

@@ -649,7 +649,12 @@ const runningLabel = computed(() => {
           </p>
         </template>
         <div class="flex flex-wrap items-center gap-3">
+          <label
+            for="offline-import-file"
+            class="sr-only"
+          >{{ t('offline.import.file') }}</label>
           <input
+            id="offline-import-file"
             type="file"
             accept=".tar,application/x-tar"
             class="text-sm"

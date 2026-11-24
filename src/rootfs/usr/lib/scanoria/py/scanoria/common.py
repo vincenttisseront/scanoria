@@ -255,6 +255,23 @@ def scanoria_ids():
     return (pw.pw_uid, pw.pw_gid)
 
 
+def web_gid():
+    """Groupe de nginx (www-data) : les fichiers servis lui sont réservés (0640/0750)."""
+    if TEST_ROOT:
+        return os.getgid()
+    import grp
+    return grp.getgrnam("www-data").gr_gid
+
+
+def web_readable(path, directory=False):
+    """root:www-data, 0750 pour un répertoire, 0640 pour un fichier ; jamais un lien."""
+    if os.path.islink(path):
+        raise Fail("E_INTERNAL", "refusing a symbolic link: %s" % path)
+    os.chmod(path, 0o750 if directory else 0o640)
+    if not TEST_ROOT:
+        os.chown(path, 0, web_gid())
+
+
 def shared_dir(path):
     """Crée ou rétablit un répertoire d'état lu par la console : root:scanoria 0750.
 

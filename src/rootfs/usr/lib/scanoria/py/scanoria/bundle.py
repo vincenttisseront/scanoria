@@ -184,6 +184,15 @@ def pick_instance(top, arch=None):
 # Disposition OCI d'une image (contrôle complet, partagé par l'import et le miroir)
 # --------------------------------------------------------------------------
 
+def safe_join(base, rel):
+    """Chemin de rel sous base, refusé s'il en sort (« .. », chemin absolu)."""
+    root = os.path.abspath(base)
+    path = os.path.abspath(os.path.join(root, rel))
+    if not path.startswith(root + os.sep):
+        raise Fail("E_BUNDLE_ARCHIVE", "path escapes its directory: %r" % str(rel)[:80])
+    return path
+
+
 def _hash_copy(src, dst_path, limit):
     """Copie le flux src dans dst_path (création exclusive, 0600) ; retourne (sha256, taille)."""
     h, n = hashlib.sha256(), 0
@@ -224,12 +233,12 @@ def extract_layout(tar_path, dest):
                 if name in ("oci-layout", "index.json"):
                     if mem.size > MAX_INDEX_JSON:
                         raise Fail("E_BUNDLE_IMAGE", "%s too large" % name)
-                    _hash_copy(src, os.path.join(dest, name), MAX_INDEX_JSON)
+                    _hash_copy(src, safe_join(dest, name), MAX_INDEX_JSON)
                     continue
                 parts = name.split("/")
                 if len(parts) != 3 or parts[:2] != ["blobs", "sha256"] or not HEX_RE.match(parts[2]):
                     raise Fail("E_BUNDLE_IMAGE", "unexpected entry in an image archive: %r" % name[:80])
-                digest, size = _hash_copy(src, os.path.join(dest, name), MAX_FILE)
+                digest, size = _hash_copy(src, safe_join(dest, name), MAX_FILE)
                 if digest != parts[2]:
                     raise Fail("E_BUNDLE_CHECKSUM", "image blob %s… does not match its digest" % parts[2][:12])
                 blobs[digest] = size
@@ -298,18 +307,19 @@ def check_layout(dest, blobs, digest):
 def load_layout(dest, image, timeout):
     """Charge la disposition vérifiée dans le stockage de podman sous <dépôt>@<empreinte>."""
     repo, digest = image_ref(image)
-    # skopeo écrit les couches avec le masque du processus : celui du helper
-    # (027) rendrait les fichiers de l'image illisibles pour l'utilisateur
-    # confiné 65534 (« Permission denied » à l'exécution, mesuré en CI).
-    old = os.umask(0o022)
-    try:
-        r = common.run("skopeo", ["copy", "--quiet", "--preserve-digests", "oci:" + dest,
-                                  "containers-storage:%s@%s" % (repo, digest)], timeout=timeout, stderr_tail=400)
-    finally:
-        os.umask(old)
-    if r.returncode != 0:
+    # podman pull et non « skopeo copy … containers-storage: » : skopeo écrit les
+    # couches avec le masque du helper (027) et l'utilisateur confiné 65534 ne
+    # peut plus exécuter l'image (« Permission denied », mesuré en CI) ; podman
+    # pose les droits de l'image. L'empreinte de l'index est gardée ; l'étiquette
+    # locale (offline-<empreinte>) ne sert qu'à rattacher l'image à son dépôt.
+    r = common.run("podman", ["pull", "--quiet", "oci:" + dest], timeout=timeout, stderr_tail=400)
+    image_id = r.text.strip().splitlines()[-1] if r.returncode == 0 and r.text.strip() else ""
+    if not HEX_RE.match(image_id):
         raise Fail("E_BUNDLE_IMAGE", "image %s could not be loaded (%s)" % (
-            repo, (r.stderr or b"").decode("utf-8", "replace").strip()[-200:] or "skopeo %d" % r.returncode))
+            repo, (r.stderr or b"").decode("utf-8", "replace").strip()[-200:] or "podman %d" % r.returncode))
+    tag = "%s:offline-%s" % (repo, DIGEST_RE.match(digest).group(1)[:16])
+    if common.run("podman", ["tag", image_id, tag], timeout=60).returncode != 0:
+        raise Fail("E_BUNDLE_IMAGE", "image %s could not be named after loading" % repo)
     if common.run("podman", ["image", "exists", "%s@%s" % (repo, digest)], timeout=60).returncode != 0:
         raise Fail("E_BUNDLE_IMAGE", "image %s is not found by its digest once loaded" % repo)
 
@@ -471,7 +481,7 @@ def extract_feed(tar_path, dest, limit):
                 if not parts or mem.name.startswith("/") or ".." in parts \
                         or any(not re.match(r"[A-Za-z0-9._+:-]{1,200}\Z", x) for x in parts):
                     raise Fail("E_BUNDLE_FEED", "unexpected path in a database archive: %r" % mem.name[:80])
-                target = os.path.join(dest, *parts)
+                target = safe_join(dest, os.path.join(*parts))
                 if mem.isdir():
                     os.makedirs(target, mode=0o700, exist_ok=True)
                     continue
@@ -799,7 +809,7 @@ def stage_tar(f, work, size):
                 if mem.size != want_size:
                     raise Fail("E_BUNDLE_ARCHIVE", "member %r does not have its declared size" % name[:80])
                 seen.add(name)
-                target = os.path.join(work, name)
+                target = safe_join(work, name)
                 os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
                 sha, _ = _hash_copy(tf.extractfile(mem), target, want_size)
                 if sha != want_sha:

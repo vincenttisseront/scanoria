@@ -2046,6 +2046,7 @@ export default {
       uploading: 'Téléversement du lot : {pct} %',
       uploadFailed: 'Le téléversement a échoué (HTTP {status}).',
       last: 'Dernier import le {date} : lot du {created}, bases {feeds}, images {images}.',
+      file: 'Fichier du lot (.tar)',
       partial: 'Ce dernier import s’est interrompu : seules les bases et images listées ont été appliquées, l’index du catalogue n’a pas changé. Importez de nouveau le lot.',
       confirmTitle: 'Importer ce lot ?',
       confirmBody: '{name} ({size}) sera téléversé puis vérifié. Un lot dont une vérification échoue est refusé en entier.',

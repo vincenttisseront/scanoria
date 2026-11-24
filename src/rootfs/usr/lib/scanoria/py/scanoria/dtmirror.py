@@ -126,12 +126,22 @@ def apply_egress(reg):
 def _publish_file(src_open, rel):
     """Écrit ROOT/rel de façon atomique (0644) depuis un flux."""
     dst = os.path.join(ROOT, rel)
-    os.makedirs(os.path.dirname(dst), mode=0o755, exist_ok=True)
+    _web_dirs(os.path.dirname(dst))
     tmp = "%s.%s.tmp" % (dst, secrets.token_hex(4))
     with src_open() as src, open(tmp, "wb") as out:
         shutil.copyfileobj(src, out, 1 << 20)
-    os.chmod(tmp, 0o644)
+    common.web_readable(tmp)
     os.replace(tmp, dst)
+
+
+def _web_dirs(path):
+    """Répertoires de ROOT jusqu'à path, lisibles par nginx seulement (root:www-data 0750)."""
+    os.makedirs(path, mode=0o750, exist_ok=True)
+    while True:
+        common.web_readable(path, directory=True)
+        if os.path.abspath(path) == os.path.abspath(ROOT):
+            break
+        path = os.path.dirname(path)
 
 
 def sync_osv():
@@ -171,14 +181,14 @@ def sync_epss():
     model = det.get("model_version") if isinstance(det.get("model_version"), str) else "unknown"
     day = det.get("score_date") if isinstance(det.get("score_date"), str) else (st.get("updated_at") or "")[:10]
     dst = os.path.join(ROOT, "epss", "epss_scores-current.csv.gz")
-    os.makedirs(os.path.dirname(dst), mode=0o755, exist_ok=True)
+    _web_dirs(os.path.dirname(dst))
     tmp = dst + ".%s.tmp" % secrets.token_hex(4)
     with gzip.open(exp, "rb") as src, gzip.GzipFile(tmp, "wb", mtime=0) as out:
         out.write(("#model_version:%s,score_date:%sT00:00:00+0000\ncve,epss,percentile\n" % (model, day)).encode())
         for line in src:
             row = json.loads(line)
             out.write(("%s,%.5f,%.5f\n" % (row["vuln_id"], row["epss"], row["epss_percentile"])).encode("ascii"))
-    os.chmod(tmp, 0o644)
+    common.web_readable(tmp)
     os.replace(tmp, dst)
     return {"id": "epss", "available": True, "ecosystems": [], "updated_at": st.get("updated_at"), "reason": None}
 
@@ -191,8 +201,7 @@ def sync_all():
             shutil.rmtree(ROOT, ignore_errors=True)
         return None
     try:
-        os.makedirs(ROOT, mode=0o755, exist_ok=True)
-        os.chmod(ROOT, 0o755)
+        _web_dirs(ROOT)
         sources = [sync_osv(), sync_epss()]
     except (OSError, ValueError, KeyError, TypeError) as e:
         common.log("Dependency-Track feed mirror not updated: %r" % e)

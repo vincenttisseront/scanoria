@@ -60,10 +60,6 @@ cat > "$STUBS/skopeo" <<-EOF
 		dst=\${@: -1}
 		case "\$dst" in
 		dir:*) mkdir -p "\${dst#dir:}" && cp "$IMG"/* "\${dst#dir:}/" ;;
-		containers-storage:*)
-			[[ -f "\${src#oci:}/index.json" ]] || exit 1
-			echo "\${dst#containers-storage:}" >> "\$SCANORIA_TEST_ROOT/loaded-images"
-			umask > "\$SCANORIA_TEST_ROOT/load-umask" ;;
 		*) exit 1 ;;
 		esac ;;
 	*) exit 1 ;;
@@ -73,6 +69,21 @@ cat > "$STUBS/podman" <<-EOF
 	#!/bin/bash
 	jq -cn '["podman"] + \$ARGS.positional' --args -- "\$@" >> "$CALLS"
 	if [[ "\$1 \$2" == "image exists" ]]; then grep -qxF -- "\$3" "\$SCANORIA_TEST_ROOT/loaded-images" 2> /dev/null; exit; fi
+	# pull oci:DIR : empreinte de l'index retenue, identifiant factice affiché
+	if [[ "\$1" == pull ]]; then
+		lay=\${@: -1}
+		[[ -f "\${lay#oci:}/index.json" ]] || exit 1
+		jq -r '.manifests[0].digest' "\${lay#oci:}/index.json" > "\$SCANORIA_TEST_ROOT/pulled-digest"
+		printf '%064d\n' 7
+		exit 0
+	fi
+	# tag ID REPO:offline-… : l'image devient joignable par REPO@empreinte
+	if [[ "\$1" == tag ]]; then
+		printf '%064d' 7 | grep -qxF -- "\$2" || exit 1
+		echo "\${3%%:offline-*}@\$(cat "\$SCANORIA_TEST_ROOT/pulled-digest")" >> "\$SCANORIA_TEST_ROOT/loaded-images"
+		echo "\$3" > "\$SCANORIA_TEST_ROOT/load-tag"
+		exit 0
+	fi
 	exit 0
 EOF
 # curl : seule la base OSV factice est servie (export d'une base jamais téléchargée).
@@ -258,7 +269,7 @@ hx "$B" import-bundle '{"upload_id": "'"$(upload "$B" "$GOOD")"'"}'
 expect "import : OK" "$(code)" OK
 expect "import : index du catalogue installé" "$(out .catalog.installed)/$(jq -r .version "$B/var/lib/scanoria/catalog/catalog-index.json")" true/12
 expect "import : banc d'essai" "$(sha256sum "$B/var/lib/scanoria/catalog/testbeds/$TB" | cut -d' ' -f1)" "$TB_SHA"
-expect "import : couches écrites lisibles par l'utilisateur confiné (umask 022)" "$(cat "$B/load-umask")" 0022
+expect "import : image nommée par son empreinte (podman pull + tag)" "$(cat "$B/load-tag")" "registry.exemple.test/scanoria/gitleaks:offline-${DIGEST:7:16}"
 expect "import : image chargée par son empreinte" "$(cat "$B/loaded-images")" "registry.exemple.test/scanoria/gitleaks@$DIGEST"
 expect "import : base appliquée, date d'origine gardée (G16)" "$(out '.feeds[0].applied')/$(jq -r .updated_at "$B/var/lib/scanoria/feeds/.store/osv-db/status.json")" "true/$FEED_AT"
 expect "import : base lisible par OSV-Scanner" "$([[ -f "$B/var/lib/scanoria/feeds/osv-db/osv-scalibr/npm/all.zip" ]] && echo oui)" oui
