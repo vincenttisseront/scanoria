@@ -7,12 +7,12 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Ajv2020 from 'ajv/dist/2020.js'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   compareVersions, findModule, latestModules, readCatalogIndex, readDnsStatus, readModulesState, satisfiesAppliance,
   type CatalogIndex, type DnsStatus, type InstalledModule,
@@ -84,6 +84,25 @@ describe('lecture des fichiers publiés', () => {
     const minimal = await readCatalogIndex(await write('min.json', JSON.stringify({ schema: 1, version: 1, generated_at: 'hier', modules: 'x' })))
     expect(minimal).toEqual({ version: 1, generated_at: null, modules: [], packs: [], rejected: 0 })
     expect(await readCatalogIndex(await write('big.json', ' '.repeat(8 * 1024 * 1024 + 1)))).toBeNull()
+  })
+
+  // Répertoire du helper illisible pour la console : signalé au journal (une fois), lu comme absent.
+  it.runIf(process.getuid?.() !== 0)('journalise une fois un index illisible (droits)', async () => {
+    const dir = join(tmp, 'locked')
+    await mkdir(dir)
+    await writeFile(join(dir, 'catalog-index.json'), '{}')
+    await chmod(dir, 0o000)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(await readCatalogIndex(join(dir, 'catalog-index.json'))).toBeNull()
+      expect(await readCatalogIndex(join(dir, 'catalog-index.json'))).toBeNull()
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]![0])).toContain('EACCES')
+    }
+    finally {
+      warn.mockRestore()
+      await chmod(dir, 0o700)
+    }
   })
 
   it('lit l’état des modules en écartant les entrées invalides', async () => {
