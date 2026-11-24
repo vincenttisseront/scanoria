@@ -68,3 +68,23 @@ CREATE TABLE ai_embeddings (
 -- Contrat 15 : nouvelles règles du quality gate (F8, H3, H5), ajoutées aux
 -- gates existants avec leurs défauts, sans écraser une valeur déjà posée.
 UPDATE gates SET rules = '{"license_denied_blocks": true, "kev_blocks": true, "epss_block_from": 0.1, "quarantine_days": 7}'::jsonb || rules, updated_at = now();
+
+-- F3 : re-corrélation sans réanalyse. Une analyse « recorrelate » ne clone
+-- rien : elle repasse les modules SCA sur le SBOM déjà relevé par sbom_source.
+ALTER TABLE scans DROP CONSTRAINT scans_trigger_check;
+ALTER TABLE scans ADD CONSTRAINT scans_trigger_check CHECK (trigger IN (
+    'manual', 'schedule', 'commit', 'webhook', 'api', 'release', 'replay', 'recorrelate'));
+ALTER TABLE scans ADD COLUMN sbom_source uuid REFERENCES scans (id) ON DELETE SET NULL;
+ALTER TABLE scans ADD CONSTRAINT scans_recorrelate_source CHECK ((trigger = 'recorrelate') = (sbom_source IS NOT NULL));
+
+-- H5 : dates de publication des versions, cherchées par le helper (root)
+-- auprès des registres publics, par lot.
+ALTER TABLE helper_requests DROP CONSTRAINT helper_requests_type_check;
+ALTER TABLE helper_requests ADD CONSTRAINT helper_requests_type_check CHECK (type IN (
+    'set-hostname', 'set-admin-networks', 'issue-certificate',
+    'import-certificate', 'check-update', 'apply-update',
+    'rollback-update', 'set-update-policy', 'run-selftest',
+    'refresh-catalog', 'install-modules', 'uninstall-module',
+    'set-module-state', 'update-module', 'check-dns',
+    'set-ai-endpoint', 'backup-module', 'restore-module',
+    'reset-service-admin', 'refresh-feeds', 'package-dates'));
