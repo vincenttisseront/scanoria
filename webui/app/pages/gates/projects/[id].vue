@@ -48,14 +48,16 @@ function message(err: unknown): string {
   return code && te(`gates.errors.${code}`) ? t(`gates.errors.${code}`) : errorMessage(err)
 }
 
+const loadError = ref('')
 async function load() {
   loading.value = true
   try {
     info.value = await api<CiInfo>(`/api/gates/projects/${id.value}`)
     if (isOperator.value) tokens.value = (await api<{ items: TokenRow[] }>(`/api/projects/${id.value}/tokens`)).items
+    loadError.value = ''
   }
   catch (err) {
-    toast.add({ title: message(err), color: 'error' })
+    loadError.value = message(err)
   }
   finally {
     loading.value = false
@@ -199,6 +201,13 @@ const example = computed(() => {
 
 <template>
   <PageShell :title="info ? `${t('gates.ci.title')} · ${info.project.name}` : t('gates.ci.title')">
+    <UAlert
+      v-if="loadError"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-circle-x"
+      :title="loadError"
+    />
     <p class="text-sm text-muted">
       {{ t('gates.ci.intro') }}
     </p>

@@ -104,7 +104,7 @@ def load_registry():
 
 
 def save_registry(reg):
-    os.makedirs(MODULES_DIR, mode=0o750, exist_ok=True)
+    common.shared_dir(MODULES_DIR)
     common.write_json(REGISTRY, reg, 0o600, group_scanoria=False)
     publish(reg)
 
@@ -125,6 +125,7 @@ def publish(reg):
     if errs:
         common.log("modules state does not match its schema: %s" % errs[:3])
         raise Fail("E_INTERNAL", "invalid modules state")
+    common.shared_dir(MODULES_DIR)
     common.write_json(STATE, st, 0o640)
 
 
@@ -970,6 +971,9 @@ def act_refresh_catalog(c):
     out = catalogverify.refresh()
     try:
         reg = load_registry()
+        # État des modules publié dès la première actualisation : la console sait
+        # alors qu'aucun module n'est installé, au lieu d'attendre une installation.
+        publish(reg)
         mods = catalogverify.installed_index().get("modules") or []
         ups = []
         for mid, e in sorted(reg["modules"].items()):

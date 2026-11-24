@@ -52,6 +52,7 @@ async function loadProjects() {
     toast.add({ title: errorMessage(err), color: 'error' })
   }
 }
+const loadError = ref('')
 async function load() {
   if (!projectId.value) {
     items.value = []
@@ -62,9 +63,10 @@ async function load() {
     const query: Record<string, unknown> = { project_id: projectId.value }
     if (showAll.value) query.all = 'true'
     items.value = (await api<{ items: ExceptionRow[] }>('/api/exceptions', { query })).items
+    loadError.value = ''
   }
   catch (err) {
-    toast.add({ title: errorMessage(err), color: 'error' })
+    loadError.value = errorMessage(err)
   }
   finally {
     loading.value = false
@@ -169,6 +171,13 @@ async function revoke() {
 
 <template>
   <PageShell :title="t('findings.exceptions.title')">
+    <UAlert
+      v-if="loadError"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-circle-x"
+      :title="loadError"
+    />
     <template #actions>
       <UButton
         to="/findings"

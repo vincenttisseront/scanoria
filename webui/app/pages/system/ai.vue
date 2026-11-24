@@ -56,8 +56,8 @@ const info = ref<AiStatusResponse | null>(null)
 const calls = ref<CallRow[]>([])
 const loading = ref(false)
 
-async function refresh() {
-  loading.value = true
+async function refresh(quiet = false) {
+  if (!quiet) loading.value = true
   try {
     const [s, c] = await Promise.all([
       api<AiStatusResponse>('/api/ai/status'),
@@ -65,17 +65,27 @@ async function refresh() {
     ])
     info.value = s
     calls.value = c.calls
-    if (!form.url && s.endpoint.url) form.url = s.endpoint.url
-    if (s.endpoint.insecure) form.insecure = true
+    // Le formulaire n'est prérempli qu'au chargement, jamais par le suivi périodique.
+    if (!quiet && !form.url && s.endpoint.url) form.url = s.endpoint.url
+    if (!quiet && s.endpoint.insecure) form.insecure = true
   }
   catch (err) {
-    toast.add({ title: errorMessage(err), color: 'error', icon: 'i-lucide-circle-x' })
+    if (!quiet) toast.add({ title: errorMessage(err), color: 'error', icon: 'i-lucide-circle-x' })
   }
   finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
-onMounted(refresh)
+// Santé du connecteur (disjoncteur, file, latence) et journal des appels suivis
+// en continu : sans cela, la page restait figée jusqu'à la prochaine action.
+let poll: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  void refresh()
+  poll = setInterval(() => void refresh(true), 15_000)
+})
+onBeforeUnmount(() => {
+  if (poll) clearInterval(poll)
+})
 
 // --- Connecteur ---
 const form = reactive({ url: '', insecure: false, token: '', removeToken: false, ca: '' })

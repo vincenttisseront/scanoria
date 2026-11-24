@@ -142,7 +142,11 @@
       },
       "testbed_archive": "testbed-osv-scanner-2.2.0.tar.zst",
       "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "image": "ghcr.io/exemple/osv-scanner@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "image": "ghcr.io/exemple/osv-scanner@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "description": {
+        "fr": "Vulnérabilités des dépendances.",
+        "en": "Dependency vulnerabilities."
+      }
     },
     {
       "id": "osv-db",

@@ -16,7 +16,6 @@ const { t, te } = useI18n()
 useHead({ title: computed(() => t('audit.title')) })
 
 const { api, errorMessage } = useApi()
-const toast = useToast()
 const fmt = useFormat()
 
 interface AuditRow {
@@ -41,6 +40,7 @@ const items = ref<AuditRow[]>([])
 const total = ref(0)
 const loading = ref(false)
 
+const loadError = ref('')
 async function load() {
   loading.value = true
   try {
@@ -53,9 +53,10 @@ async function load() {
     const res = await api<{ items: AuditRow[], total: number }>('/api/audit', { query })
     items.value = res.items
     total.value = res.total
+    loadError.value = ''
   }
   catch (err) {
-    toast.add({ title: errorMessage(err), color: 'error' })
+    loadError.value = errorMessage(err)
   }
   finally {
     loading.value = false
@@ -71,6 +72,7 @@ watch(filters, () => {
     else void load()
   }, 300)
 })
+onBeforeUnmount(() => clearTimeout(debounce))
 
 const outcomeItems = computed(() => [
   { label: t('audit.allOutcomes'), value: 'all' },
@@ -111,6 +113,13 @@ const detailJson = computed(() => JSON.stringify(selected.value?.details ?? {}, 
 
 <template>
   <PageShell :title="t('audit.title')">
+    <UAlert
+      v-if="loadError"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-circle-x"
+      :title="loadError"
+    />
     <template #actions>
       <UButton
         icon="i-lucide-refresh-cw"

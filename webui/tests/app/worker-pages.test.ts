@@ -115,7 +115,7 @@ describe('liste des analyses', () => {
     route('GET', '/api/scans', () => apiFail(500, 'E_INTERNAL'))
     await mountIn(ScansPage)
     await settle()
-    expect(toastAdd).toHaveBeenCalled()
+    expect(document.body.textContent).toContain('Erreur interne de la console.')
   })
 })
 

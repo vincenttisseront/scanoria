@@ -70,7 +70,12 @@ cat > "$STUBS/curl" <<-EOF
 	cat "$TMP/health.json"
 EOF
 printf '#!/bin/bash\necho v22.11.0\n' > "$STUBS/node"
-printf '#!/bin/bash\nexit 0\n' > "$STUBS/scanoria-selftest"
+# Le bouchon note son passage dans le journal des commandes (ordre vérifié plus bas).
+cat > "$STUBS/scanoria-selftest" <<EOF
+#!/bin/bash
+echo '["scanoria-selftest"]' >> "$T/test-commands.log"
+exit 0
+EOF
 printf '#!/bin/bash\nexit 0\n' > "$STUBS/scanoria-state"
 chmod 0755 "$STUBS"/*
 
@@ -230,6 +235,10 @@ grep -qF '["systemctl","enable","--now","scanoria-runner.service"]' "$T/test-com
 	&& grep -qF '["systemctl","enable","--now","scanoria-state.timer"]' "$T/test-commands.log" \
 	&& ok "unités de units.list activées, services redémarrés" || ko "activation des unités"
 grep -qF '"try-restart","scanoria-state.timer"' "$T/test-commands.log" && ko "timer redémarré" || ok "timer non redémarré"
+# Unités activées AVANT le contrôle de santé (selftest exige worker et runner).
+en=$(grep -nF '["systemctl","enable","--now","scanoria-runner.service"]' "$T/test-commands.log" | tail -n 1 | cut -d: -f1 || true)
+st=$(grep -nF '["scanoria-selftest"]' "$T/test-commands.log" | tail -n 1 | cut -d: -f1 || true)
+[[ -n "$en" && -n "$st" && "$en" -lt "$st" ]] && ok "unités activées avant le selftest de santé" || ko "unités activées après le selftest ($en / $st)"
 grep -qE 'evil|"nginx.service"' "$T/test-commands.log" && ko "unité hors liste activée" || ok "noms d'unités invalides ignorés"
 
 R3="$TMP/rel-0.1.5"; mkrel 0.1.5 "$R3"
