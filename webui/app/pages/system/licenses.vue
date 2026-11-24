@@ -36,7 +36,10 @@ const isAdmin = computed(() => session.can('admin'))
 
 const data = ref<PolicyResponse | null>(null)
 const projects = ref<{ id: string, name: string }[]>([])
-const projectId = ref<string>('')
+/** Valeur « politique globale » du sélecteur (un élément de liste ne peut pas valoir « »). */
+const GLOBAL = 'global'
+const selected = ref<string>(GLOBAL)
+const projectId = computed(() => (selected.value === GLOBAL ? '' : selected.value))
 const loading = ref(false)
 
 async function load() {
@@ -70,7 +73,7 @@ watch(projectId, (id) => {
 })
 
 const decisionItems = computed(() => (['allowed', 'review', 'denied'] as const).map(d => ({ label: t(`licenses.decision.${d}`), value: d })))
-const projectItems = computed(() => [{ label: t('licenses.globalOnly'), value: '' }, ...projects.value.map(p => ({ label: p.name, value: p.id }))])
+const projectItems = computed(() => [{ label: t('licenses.globalOnly'), value: GLOBAL }, ...projects.value.map(p => ({ label: p.name, value: p.id }))])
 const color = (d: Decision) => ({ allowed: 'success', review: 'warning', denied: 'error' } as const)[d]
 
 // --- ajout d'une décision ---
@@ -196,7 +199,7 @@ async function evaluate() {
               {{ t('licenses.policyTitle') }}
             </h2>
             <USelect
-              v-model="projectId"
+              v-model="selected"
               :items="projectItems"
               class="w-64"
               data-testid="licenses-project"

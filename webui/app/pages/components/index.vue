@@ -34,15 +34,17 @@ const fmt = useFormat()
 const route = useRoute()
 const router = useRouter()
 
+/** Valeur « tous » du sélecteur (un élément de liste ne peut pas valoir « »). */
+const ANY = 'any'
 const ECOSYSTEMS = ['npm', 'pypi', 'maven', 'golang', 'cargo', 'gem', 'nuget', 'composer', 'deb', 'rpm', 'apk']
 const form = reactive({
   query: typeof route.query.q === 'string' ? route.query.q : '',
-  ecosystem: typeof route.query.ecosystem === 'string' ? route.query.ecosystem : '',
+  ecosystem: typeof route.query.ecosystem === 'string' ? route.query.ecosystem : ANY,
   version_from: typeof route.query.from === 'string' ? route.query.from : '',
   version_to: typeof route.query.to === 'string' ? route.query.to : '',
   vuln: typeof route.query.vuln === 'string' ? route.query.vuln : '',
 })
-const ecosystemItems = computed(() => [{ label: t('components.anyEcosystem'), value: '' }, ...ECOSYSTEMS.map(e => ({ label: e, value: e }))])
+const ecosystemItems = computed(() => [{ label: t('components.anyEcosystem'), value: ANY }, ...ECOSYSTEMS.map(e => ({ label: e, value: e }))])
 
 const loading = ref(false)
 const loadingMore = ref(false)
@@ -55,7 +57,7 @@ const params = computed(() => {
   const q = form.query.trim()
   if (q.startsWith('pkg:')) p.purl = q
   else if (q) p.name = q
-  if (form.ecosystem) p.ecosystem = form.ecosystem
+  if (form.ecosystem && form.ecosystem !== ANY) p.ecosystem = form.ecosystem
   if (form.version_from.trim()) p.version_from = form.version_from.trim()
   if (form.version_to.trim()) p.version_to = form.version_to.trim()
   if (form.vuln.trim()) p.vuln = form.vuln.trim().toUpperCase()
@@ -74,7 +76,7 @@ async function search() {
     const query = { ...params.value }
     result.value = await api<SearchResult>('/api/components', { query })
     searched.value = query
-    void router.replace({ query: { q: form.query || undefined, ecosystem: form.ecosystem || undefined, from: form.version_from || undefined, to: form.version_to || undefined, vuln: form.vuln || undefined } })
+    void router.replace({ query: { q: form.query || undefined, ecosystem: form.ecosystem !== ANY ? form.ecosystem : undefined, from: form.version_from || undefined, to: form.version_to || undefined, vuln: form.vuln || undefined } })
   }
   catch (err) {
     error.value = errorMessage(err)
