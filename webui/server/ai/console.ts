@@ -11,8 +11,8 @@ import type { Queryable } from '../utils/db'
 import { AI_URL_RE, CERT_PEM_RE } from '#shared/schemas'
 import { aiPaths, loadAiSettings, loadCheckStatus, loadEndpoint, ModelOverrides, type AiPaths } from './config'
 import { AI_PRIORITY, connectorEnabled, enqueueAiTask } from './enqueue'
-import { TASK_KINDS, TASKS } from './tasks'
-import { SUITES } from './testbed'
+import { COMPLETION_KINDS, TASK_KINDS, TASKS } from './tasks'
+import { EMBED_SUITE, SUITES } from './testbed'
 import { UUID_RE } from './task-kit'
 import { failedModules, proposeTimeout, type TimeoutProposal } from './tasks/diagnose'
 import { ruleKey } from './tasks/translate'
@@ -36,8 +36,9 @@ export const ConnectorBody = z.strictObject({
   .refine(b => !b.url.startsWith('http:') || b.allow_insecure === true, { message: 'http requires allow_insecure', path: ['allow_insecure'] })
 export type ConnectorBody = z.infer<typeof ConnectorBody>
 
+/** Choix forcé par tâche de rédaction ; le modèle d'embedding (I7) est choisi automatiquement. */
 export const ModelsBody = z.strictObject({
-  models: z.partialRecord(z.enum(TASK_KINDS as [string, ...string[]]), z.string().min(1).max(200).nullable()),
+  models: z.partialRecord(z.enum(COMPLETION_KINDS as [string, ...string[]]), z.string().min(1).max(200).nullable()),
 })
 
 /** Identifiant de sujet conforme à la tâche (uuid, ou clé outil:version:règle pour I17). */
@@ -45,13 +46,13 @@ const subjectFits = (b: { kind: string, subject_id: string }) => (TASKS[b.kind]?
 const SUBJECT_ISSUE = { message: 'subject_id does not match the task', path: ['subject_id'] }
 
 export const ExplainBody = z.strictObject({
-  kind: z.enum(TASK_KINDS as [string, ...string[]]),
+  kind: z.enum(COMPLETION_KINDS as [string, ...string[]]),
   subject_id: z.string().min(1).max(400),
   locale: z.enum(['fr', 'en']).optional(),
 }).refine(subjectFits, SUBJECT_ISSUE)
 
 export const OutputQuery = z.strictObject({
-  kind: z.enum(TASK_KINDS as [string, ...string[]]),
+  kind: z.enum(COMPLETION_KINDS as [string, ...string[]]),
   subject_id: z.string().min(1).max(400),
   locale: z.enum(['fr', 'en']).optional(),
 }).refine(subjectFits, SUBJECT_ISSUE)
@@ -212,17 +213,24 @@ export async function aiStatus(db: Queryable, paths: AiPaths = aiPaths()) {
   const circuitOpen = calls[0]?.outcome === 'circuit-open' || (failuresInRow === -1 ? calls.length >= 3 : failuresInRow >= 3)
   const selection = (lastGood?.output?.selection ?? null) as { tasks: Record<string, unknown>, embedding: unknown } | null
   const tasks = TASK_KINDS.map((kind) => {
-    const choice = (selection?.tasks?.[kind] ?? null) as { model: string, digest: string, reason: string } | null
+    const embedding = !!TASKS[kind]!.embed
+    const choice = ((embedding ? selection?.embedding : selection?.tasks?.[kind]) ?? null) as { model: string, digest: string, reason: string } | null
     const tb = testbed.find(r => r.subject_id === kind)
     const tbCurrent = tb && choice && tb.model_digest === choice.digest ? tb : null
     return {
       kind,
+      /** I7 : modèle d'embedding, choisi automatiquement (aucun choix forcé). */
+      embedding,
       model: choice,
-      override: settings.models[kind] ?? null,
+      override: embedding ? null : (settings.models[kind] ?? null),
       testbed: tbCurrent
-        ? { score: tbCurrent.output.score, threshold: tbCurrent.output.threshold, passed: tbCurrent.output.passed, cases: tbCurrent.output.cases, at: tbCurrent.finished_at.toISOString() }
+        ? {
+            score: tbCurrent.output.score, threshold: tbCurrent.output.threshold, passed: tbCurrent.output.passed, cases: tbCurrent.output.cases, at: tbCurrent.finished_at.toISOString(),
+            // I7 : seuil de similarité fixé par le banc d'essai.
+            ...(embedding ? { similarity_threshold: tbCurrent.output.similarity_threshold ?? null } : {}),
+          }
         : null,
-      threshold: SUITES[kind]?.threshold ?? null,
+      threshold: (embedding ? EMBED_SUITE.threshold : SUITES[kind]?.threshold) ?? null,
       state: !endpoint.enabled ? 'off' : !choice ? 'no-model' : !tbCurrent ? 'testing' : tbCurrent.output.passed ? 'active' : 'disabled',
     }
   })

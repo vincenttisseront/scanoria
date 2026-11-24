@@ -1,0 +1,14 @@
+{
+  "kind": "embed-finding",
+  "threshold": 0.75,
+  "pairs": [
+    { "id": "sqli-two-tools", "a": "semgrep python.sqli (sast)\nSQL query built with string formatting\nCWE-89\napp/views.py\nq = \"SELECT * FROM users WHERE id = %s\" % user_id", "b": "bandit B608 (sast)\nPossible SQL injection vector through string-based query construction\nCWE-89\napp/models.py\ncursor.execute(\"SELECT name FROM users WHERE id = \" + uid)", "similar": true },
+    { "id": "xss-two-files", "a": "semgrep javascript.xss.innerhtml (sast)\nUser data written to innerHTML\nCWE-79\nweb/profile.js\nel.innerHTML = params.name", "b": "semgrep javascript.xss.innerhtml (sast)\nUser data written to innerHTML\nCWE-79\nweb/comments.js\nnode.innerHTML = comment.body", "similar": true },
+    { "id": "vuln-same-package", "a": "osv-scanner CVE-2021-44906 (sca)\nPrototype pollution in minimist\nCVE-2021-44906 GHSA-xvch-5gv4-984h\nnpm minimist\npackage-lock.json", "b": "trivy CVE-2021-44906 (sca)\nminimist: prototype pollution\nCVE-2021-44906\nnpm minimist\nfrontend/package-lock.json", "similar": true },
+    { "id": "iac-public-bucket", "a": "checkov CKV_AWS_20 (iac)\nS3 bucket has an ACL defined which allows public READ access\nterraform/storage.tf\nacl = \"public-read\"", "b": "kics s3-bucket-public-read (iac)\nS3 bucket allows public read through its ACL\ninfra/buckets.tf\nacl = \"public-read\"", "similar": true },
+    { "id": "sqli-vs-xss", "a": "semgrep python.sqli (sast)\nSQL query built with string formatting\nCWE-89\napp/views.py", "b": "semgrep javascript.xss.innerhtml (sast)\nUser data written to innerHTML\nCWE-79\nweb/profile.js", "similar": false },
+    { "id": "vuln-vs-lint", "a": "osv-scanner CVE-2021-44906 (sca)\nPrototype pollution in minimist\nnpm minimist", "b": "shellcheck SC2086 (lint)\nDouble quote to prevent globbing and word splitting\nscripts/deploy.sh", "similar": false },
+    { "id": "iac-vs-secret", "a": "checkov CKV_AWS_20 (iac)\nS3 bucket has an ACL defined which allows public READ access\nterraform/storage.tf", "b": "gitleaks generic-api-key (secrets)\nGeneric API key detected\nconfig/settings.py", "similar": false },
+    { "id": "docker-vs-sqli", "a": "hadolint DL3007 (lint)\nUsing latest is prone to errors if the image will ever update\nDockerfile\nFROM node:latest", "b": "bandit B608 (sast)\nPossible SQL injection vector through string-based query construction\napp/models.py", "similar": false }
+  ]
+}

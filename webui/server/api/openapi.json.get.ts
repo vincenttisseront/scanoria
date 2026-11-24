@@ -77,6 +77,8 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/ai/agreement': { get: { summary: 'AI/human agreement over 90 days per task and model (I24)', role: 'operator' } },
   '/api/ai/diagnosis/proposal': { get: { summary: 'Safe setting proposed for a failed scan (I15), recomputed from facts, never taken from the AI output', role: 'operator' } },
   '/api/ai/diagnosis/apply': { post: { summary: 'Apply the proposed module timeout (409 E_AI_STALE if it changed); audited', role: 'operator', body: 'AiDiagnosisApply' } },
+  '/api/ai/similar': { get: { summary: 'Similar findings of the same project (I7, embeddings), with the state of the feature; a suggestion only, never part of the quality gate', role: 'viewer' } },
+  '/api/ai/license-key': { get: { summary: 'Key (licence|project licence) of the AI explanation of a component licence (I18); null for opted-out projects', role: 'viewer' } },
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
   '/api/gates': {

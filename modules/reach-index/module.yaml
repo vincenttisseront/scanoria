@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module reach-index (0.5, I11) : index des imports et des appels du dépôt,
+# relevé SANS RIEN EXÉCUTER (ast Python, analyse lexicale pour JavaScript /
+# TypeScript, Go et Java), pour l'atteignabilité assistée des vulnérabilités
+# de dépendances. Outil de l'appliance (scan-tools/reach-index, bibliothèque
+# standard), monté en lecture seule sur /scanoria et lancé par le python3 de
+# l'image officielle python (PSF-2.0, Debian) : image 3.13-slim relevée en
+# amont le 2026-11-24 (Python 3.13.18, index OCI multi-architecture).
+#
+# Module d'appoint (scan.companion: sca) : planifié seulement quand un module
+# SCA est dans le plan, jamais compté dans la couverture, et son échec ne rend
+# pas le verdict non concluant. Sa sortie SARIF ne contient que des résultats
+# « informational » : la console ne les ingère pas comme résultats d'analyse.
+id: reach-index
+name: Index d'atteignabilité
+description:
+  fr: Relève, sans rien exécuter, où le code importe et appelle ses dépendances, pour l'avis d'atteignabilité proposé par l'IA.
+  en: Finds, without running anything, where the code imports and calls its dependencies, for the AI reachability opinion.
+type: scanner
+categories: [sca]
+license:
+  spdx: AGPL-3.0-or-later
+  url: https://spdx.org/licenses/AGPL-3.0-or-later.html
+  restrictions: none
+  verified_at: "2026-11-24"
+# Outil livré avec l'appliance (src/rootfs/usr/lib/scanoria/scan-tools/reach-index, AGPL-3.0-or-later) ;
+# l'amont ci-dessous est celui de l'image qui l'exécute.
+upstream:
+  homepage: https://www.python.org/
+  source: https://github.com/docker-library/python
+image: docker.io/library/python@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
+version: "1.0.0"
+resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 200 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.5.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/reach_index.py", "/src", "/out/reach.sarif"]
+  tool: reach-index
+  companion: sca
+  timeout_s: 600
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/reach.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # Imports : minimist et lodash (JavaScript), yaml (Python), snakeyaml (Java), un module Go.
+    - { rule: reach-index/import, min: 5 }
+    # Appels : minimist (cli.js), yaml.load (app.py), new Yaml() (App.java), parse.Do (main.go).
+    - { rule: reach-index/call, min: 4 }
+health: { command: ["python3", "--version"] }
+upgrade: { policy: on-demand }

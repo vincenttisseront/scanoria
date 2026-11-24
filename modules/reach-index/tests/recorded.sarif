@@ -1,0 +1,359 @@
+{
+ "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+ "version": "2.1.0",
+ "runs": [
+  {
+   "tool": {
+    "driver": {
+     "name": "reach-index",
+     "version": "1.0.0",
+     "rules": [
+      {
+       "id": "reach-index/import",
+       "shortDescription": {
+        "text": "Module imported by the code"
+       },
+       "defaultConfiguration": {
+        "level": "none"
+       }
+      },
+      {
+       "id": "reach-index/call",
+       "shortDescription": {
+        "text": "Call through an imported module"
+       },
+       "defaultConfiguration": {
+        "level": "none"
+       }
+      }
+     ]
+    }
+   },
+   "properties": {
+    "scanoria/reach-index": {
+     "version": 1,
+     "languages": [
+      "go",
+      "java",
+      "javascript",
+      "python"
+     ],
+     "files": 5,
+     "truncated": false,
+     "errors": 0,
+     "skipped": 0
+    }
+   },
+   "results": [
+    {
+     "ruleId": "reach-index/import",
+     "kind": "informational",
+     "level": "none",
+     "message": {
+      "text": "import yaml"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "app.py"
+        },
+        "region": {
+         "startLine": 2,
+         "snippet": {
+          "text": "import yaml"
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "language": "python",
+      "module": "yaml",
+      "symbol": "yaml"
+     }
+    },
+    {
+     "ruleId": "reach-index/call",
+     "kind": "informational",
+     "level": "none",
+     "message": {
+      "text": "call yaml.load"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "app.py"
+        },
+        "region": {
+         "startLine": 6,
+         "snippet": {
+          "text": "return yaml.load(data)"
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "language": "python",
+      "module": "yaml",
+      "symbol": "yaml.load"
+     }
+    },
+    {
+     "ruleId": "reach-index/import",
+     "kind": "informational",
+     "level": "none",
+     "message": {
+      "text": "import fmt"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "cmd/main.go"
+        },
+        "region": {
+         "startLine": 5,
+         "snippet": {
+          "text": "\"fmt\""
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "language": "go",
+      "module": "fmt",
+      "symbol": ""
+     }
+    },
+    {
+     "ruleId": "reach-index/import",
+     "kind": "informational",
+     "level": "none",
+     "message": {
+      "text": "import exemple.test/lib/parse"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "cmd/main.go"
+        },
+        "region": {
+         "startLine": 7,
+         "snippet": {
+          "text": "\"exemple.test/lib/parse\""
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "language": "go",
+      "module": "exemple.test/lib/parse",
+      "symbol": ""
+     }
+    },
+    {
+     "ruleId": "reach-index/call",
+     "kind": "informational",
+     "level": "none",
+     "message": {
+      "text": "call fmt.Println"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "cmd/main.go"
+        },
+        "region": {
+         "startLine": 11,
+         "snippet": {
+          "text": "fmt.Println(parse.Do(\"x\"))"
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "language": "go",
+      "module": "fmt",
+      "symbol": "fmt.Println"
+     }
+    },
+    {
+     "ruleId": "reach-index/call",
+     "kind": "informational",
+     "level": "none",
+     "message": {
+      "text": "call exemple.test/lib/parse.Do"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "cmd/main.go"
+        },
+        "region": {
+         "startLine": 11,
+         "snippet": {
+          "text": "fmt.Println(parse.Do(\"x\"))"
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "language": "go",
+      "module": "exemple.test/lib/parse",
+      "symbol": "exemple.test/lib/parse.Do"
+     }
+    },
+    {
+     "ruleId": "reach-index/import",
+     "kind": "informational",
+     "level": "none",
+     "message": {
+      "text": "import Yaml"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "java/App.java"
+        },
+        "region": {
+         "startLine": 2,
+         "snippet": {
+          "text": "import org.yaml.snakeyaml.Yaml;"
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "language": "java",
+      "module": "org.yaml.snakeyaml.Yaml",
+      "symbol": "Yaml"
+     }
+    },
+    {
+     "ruleId": "reach-index/call",
+     "kind": "informational",
+     "level": "none",
+     "message": {
+      "text": "call org.yaml.snakeyaml.Yaml"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "java/App.java"
+        },
+        "region": {
+         "startLine": 6,
+         "snippet": {
+          "text": "return new Yaml().load(data);"
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "language": "java",
+      "module": "org.yaml.snakeyaml.Yaml",
+      "symbol": "org.yaml.snakeyaml.Yaml"
+     }
+    },
+    {
+     "ruleId": "reach-index/import",
+     "kind": "informational",
+     "level": "none",
+     "message": {
+      "text": "import parseArgs"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "src/cli.js"
+        },
+        "region": {
+         "startLine": 2,
+         "snippet": {
+          "text": "const parseArgs = require('minimist')"
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "language": "javascript",
+      "module": "minimist",
+      "symbol": "parseArgs"
+     }
+    },
+    {
+     "ruleId": "reach-index/call",
+     "kind": "informational",
+     "level": "none",
+     "message": {
+      "text": "call minimist"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "src/cli.js"
+        },
+        "region": {
+         "startLine": 5,
+         "snippet": {
+          "text": "const argv = parseArgs(process.argv.slice(2))"
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "language": "javascript",
+      "module": "minimist",
+      "symbol": "minimist"
+     }
+    },
+    {
+     "ruleId": "reach-index/import",
+     "kind": "informational",
+     "level": "none",
+     "message": {
+      "text": "import _"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "src/report.js"
+        },
+        "region": {
+         "startLine": 2,
+         "snippet": {
+          "text": "import _ from 'lodash'"
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "language": "javascript",
+      "module": "lodash",
+      "symbol": "_"
+     }
+    }
+   ]
+  }
+ ]
+}
