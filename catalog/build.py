@@ -33,6 +33,7 @@ import datetime
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import stat
@@ -146,7 +147,7 @@ def _check_json_value(v, where, depth=0):
         for x in v:
             _check_json_value(x, where, depth + 1)
     elif isinstance(v, float):
-        if v != v or v in (float("inf"), float("-inf")):
+        if not math.isfinite(v):
             raise BuildError("%s : nombre non fini" % where)
     elif v is not None and not isinstance(v, (str, int, bool)):
         raise BuildError("%s : valeur de type %s non représentable en JSON" % (where, type(v).__name__))
