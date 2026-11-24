@@ -60,6 +60,7 @@ async function runSelftest() {
       :data="data"
       :failed="failed"
     />
+    <SbomExposureBanner />
 
     <div
       v-if="!data && loading"
