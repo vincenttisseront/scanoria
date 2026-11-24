@@ -19,7 +19,10 @@ import { enqueueAiTask } from '../../server/ai/enqueue'
 const root = (rel: string) => fileURLToPath(new URL(`../../../${rel}`, import.meta.url))
 const SQL = readFileSync(root('webui/server/db/migrations/003_analyses.sql'), 'utf8')
 const SQL_009 = readFileSync(root('webui/server/db/migrations/009_sbom.sql'), 'utf8')
-const GATE_RULES_05 = JSON.parse(/'(\{[^']*"quarantine_days"[^']*\})'::jsonb/.exec(SQL_009)![1]!)
+const GATE_RULES_05 = {
+  ...JSON.parse(/'(\{[^']*"quarantine_days"[^']*\})'::jsonb/.exec(SQL_009)![1]!),
+  ...JSON.parse(/'(\{[^']*"feed_max_age_days"[^']*\})'::jsonb/.exec(readFileSync(root('webui/server/db/migrations/012_offline.sql'), 'utf8'))![1]!),
+}
 const schema = (name: string) => JSON.parse(readFileSync(root(`src/rootfs/usr/share/scanoria/schemas/${name}.schema.json`), 'utf8'))
 const quoted = (values: readonly string[]) => values.map(v => `'${v}'`).join(', ')
 
@@ -33,9 +36,9 @@ describe('contrats des analyses', () => {
     expect(SQL.replace(/\s+/g, ' ').replace(/\( /g, '(')).toContain(`IN (${quoted(values)})`)
   })
 
-  it('sujets des tâches IA identiques à la dernière contrainte (010_ai_license.sql)', () => {
-    const sql010 = readFileSync(root('webui/server/db/migrations/010_ai_license.sql'), 'utf8').replace(/\s+/g, ' ')
-    expect(sql010).toContain(`subject_type IN (${quoted(AI_SUBJECT_TYPES)})`)
+  it('sujets des tâches IA identiques à la dernière contrainte (012_offline.sql)', () => {
+    const sql012 = readFileSync(root('webui/server/db/migrations/012_offline.sql'), 'utf8').replace(/\s+/g, ' ')
+    expect(sql012).toContain(`subject_type IN (${quoted(AI_SUBJECT_TYPES)})`)
   })
 
   it('catégories identiques au schéma des modules', () => {
