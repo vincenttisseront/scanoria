@@ -74,7 +74,7 @@ GL_IMAGE=$(jq -r .image "$TMP/gitleaks.json")
 # pause pendant laquelle le test remplace la base), et l'écrit dans le SARIF.
 jq '.id = "lecteur-base" | .categories = ["sca"] | .requires.modules = [] | .requires.feeds = ["demo-db"]
 	| .scan = {inputs: ["repo"], network: "none", timeout_s: 120, exit_codes_ok: [0], env: {},
-	           command: ["/bin/sh", "-c", "a=$(cat /feeds/demo-db/version); sleep 12; b=$(cat /feeds/demo-db/version); printf \"{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[{\\\"tool\\\":{\\\"driver\\\":{\\\"name\\\":\\\"lb\\\"}},\\\"results\\\":[{\\\"ruleId\\\":\\\"v-%s-%s\\\",\\\"message\\\":{\\\"text\\\":\\\"x\\\"}}]}]}\" \"$a\" \"$b\" > /out/result.sarif", "lecteur", "/src"]}' \
+	           command: ["/bin/sh", "-c", "a=$(cat /feeds/demo-db/version); sleep 12; b=$(cat /feeds/demo-db/version); n=$(ls -A /src/node_modules | wc -l); printf \"{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[{\\\"tool\\\":{\\\"driver\\\":{\\\"name\\\":\\\"lb\\\"}},\\\"results\\\":[{\\\"ruleId\\\":\\\"v-%s-%s-%s\\\",\\\"message\\\":{\\\"text\\\":\\\"x\\\"}}]}]}\" \"$a\" \"$b\" \"$n\" > /out/result.sarif", "lecteur", "/src"]}' \
 	"$TMP/git-fetch.json" > "$TMP/lecteur-base.json"
 python3 - "$T/var/lib/scanoria/modules/installed.json" "$TMP" <<'EOF'
 import json, sys
@@ -210,7 +210,8 @@ EOF
 wait "$RPID" || true
 R=$(res "$id")
 SARIF="$SCANS/results/$id/$(jq -r '.modules[0].outputs.sarif' <<< "$R")"
-expect "base remplacée en cours d'analyse : l'analyse garde sa version" "$(jq -r '.runs[0].results[0].ruleId' "$SARIF" 2> /dev/null)" v-un-un
+expect "base remplacée en cours d'analyse : l'analyse garde sa version" "$(jq -r '.runs[0].results[0].ruleId' "$SARIF" 2> /dev/null)" v-un-un-0
+# Le lecteur (catégorie sca) voit node_modules masqué ; gitleaks (secrets) le voit.
 expect "base : date de la version épinglée enregistrée" "$(jq -r '.modules[0].feeds[0].updated_at' <<< "$R")" 2026-11-24T01:00:00Z
 expect "base : version montée enregistrée (G11)" "$(jq -r '.modules[0].feeds[0].revision' <<< "$R")" 20261124T010000Z-00000001
 expect "base : bail rendu en fin d'analyse" "$(find "$T/var/lib/scanoria/feeds/.store/demo-db/.leases" -type f 2> /dev/null | wc -l)" 0
@@ -218,7 +219,7 @@ id=$(uuid)
 drop "$id" "$(job "$id" "[$LB]" "$C2")"
 run_runner
 SARIF="$SCANS/results/$id/$(jq -r '.modules[0].outputs.sarif' "$SCANS/results/$id/result.json")"
-expect "analyse suivante : nouvelle version" "$(jq -r '.runs[0].results[0].ruleId' "$SARIF" 2> /dev/null)" v-trois-trois
+expect "analyse suivante : nouvelle version" "$(jq -r '.runs[0].results[0].ruleId' "$SARIF" 2> /dev/null)" v-trois-trois-0
 
 # --- 3. V1 : image supprimée, erreur infra, puis reprise après prefetch-images ----------------
 podman rmi -f "$GL_IMAGE" > /dev/null

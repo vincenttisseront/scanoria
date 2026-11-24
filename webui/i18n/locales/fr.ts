@@ -1079,7 +1079,7 @@ export default {
       title: 'Couverture',
       source: '{files} fichier(s) analysé(s), {skipped} ignoré(s).',
       none: 'Aucun trou de couverture.',
-      excludedTitle: 'Exclusions communes, non analysées',
+      excludedTitle: 'Exclusions communes, non analysées (sauf par les modules de secrets et SAST, qui voient tout l’arbre)',
       excluded: '{pattern} : {count} fichier(s)',
       workdir: {
         tmpfs: 'Sources extraites en mémoire.',

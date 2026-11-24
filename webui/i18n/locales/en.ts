@@ -1079,7 +1079,7 @@ export default {
       title: 'Coverage',
       source: '{files} file(s) scanned, {skipped} skipped.',
       none: 'No coverage gap.',
-      excludedTitle: 'Common exclusions, not analysed',
+      excludedTitle: 'Common exclusions, not analysed (except by secrets and SAST modules, which see the whole tree)',
       excluded: '{pattern}: {count} file(s)',
       workdir: {
         tmpfs: 'Sources extracted in memory.',

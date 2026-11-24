@@ -728,6 +728,8 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
     use_sbom = sbom_dir is not None and sbom.prefers(m) and spec.get("sbom_command") is not None
     # Grype sur le SBOM : il remplace le dépôt sur /src, comme en re-corrélation (contrat 16).
     mounts = [(sbom_dir if use_sbom else os.path.join(ws, "src"), "/src", "ro"), (out, "/out", "rw")]
+    if not use_sbom and (ctx or {}).get("masks") and not workspace.sees_full_tree(m):
+        mounts += workspace.mask_mounts(ws, ctx["masks"])
     if sbom_dir is not None and not use_sbom:
         mounts.append((sbom_dir, sbom.MOUNT, "ro"))
     if spec["history"] and os.path.isdir(os.path.join(ws, "git")):
@@ -852,7 +854,8 @@ def _fetch_source(job, ws, reg, runnable, history, secrets, source):
         source["mirror"] = info.get("mirror") or "ephemeral"
         if session.project_id:
             gitmirror.note_tree(session.project_id, 0, fetch.tree_usage(src))
-        source["excluded"] = workspace.exclude_common(src)
+        masks, source["excluded"] = workspace.common_exclusions(src)
+        source["masks"] = masks
         return session, commit
     except BaseException:
         session.__exit__(None, None, None)
@@ -909,18 +912,22 @@ def execute(job):
                 files, size, skipped = write_sbom(src["components"], ws)
             else:
                 files, size, skipped = fetch.extract_upload(src["upload_id"], ws)
-                source["excluded"] = workspace.exclude_common(os.path.join(ws, "src"))
-                files, size, _ = fetch.bound_tree(os.path.join(ws, "src"))
+                source["masks"], source["excluded"] = workspace.common_exclusions(os.path.join(ws, "src"))
         except (fetch.SourceError, gitmirror.MirrorError) as e:
             if isinstance(e, gitmirror.MirrorError):
                 e = fetch.SourceError(e.code, "infra", e.message)
+            source.pop("masks", None)
             for ent, _ in runnable:
                 ent.update(status="skipped", error=None)
             result.update(status="error", error=e.as_error())
             _copy_fetch_log(ws, rdir)
             return result
         source.update(files=files, bytes=size, skipped=skipped)
-        ctx = {"leases": leases, "mirror": session.path if session is not None and history == "full" else None}
+        # V9 : exclusions masquées pour les modules hors secrets et SAST seulement ;
+        # jamais écrites dans le résultat (seul leur décompte l'est).
+        masks = source.pop("masks", None) or []
+        ctx = {"leases": leases, "mirror": session.path if session is not None and history == "full" else None,
+               "masks": masks}
         for ent, spec in sbom.ordered(runnable):
             try:
                 run_module(job, ent, spec, ws, rdir, reg, secrets, ctx)

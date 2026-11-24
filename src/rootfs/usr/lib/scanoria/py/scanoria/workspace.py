@@ -20,6 +20,7 @@ archives (jar, whl…) et modèles ne sont jamais exclus : des scanners les lise
 """
 
 import os
+import re
 import shutil
 import stat
 
@@ -117,30 +118,65 @@ def _is_vendor_deps(path):
     return False
 
 
-def exclude_common(root):
-    """Retire de root les exclusions communes ; [{pattern, count}] trié par motif."""
-    counts = {}
+# Catégories dont les modules voient toujours l'arbre entier (décision de
+# l'intégrateur, 0.6) : une exclusion décidée par le contenu du dépôt ne doit
+# jamais cacher de code ni de secret à ces analyses (G13).
+FULL_TREE_CATEGORIES = frozenset(("secrets", "sast"))
+# Masques posés par analyse (montages imbriqués) ; au-delà, le reste est analysé.
+MAX_MASKS = 200
+SAFE_REL_RE = re.compile(r"[A-Za-z0-9._@+-]+(/[A-Za-z0-9._@+-]+)*\Z")
 
-    def add(pattern, n):
-        if n:
-            counts[pattern] = counts.get(pattern, 0) + n
+
+def common_exclusions(root):
+    """Exclusions communes de root, sans rien retirer : (masques, [{pattern, count}]).
+
+    masques : [(chemin relatif, "dir"|"file")] à masquer pour les modules hors
+    FULL_TREE_CATEGORIES ; le décompte ne porte que sur ce qui est masqué."""
+    counts = {}
+    masks = []
+
+    def add(rel, kind, pattern, n):
+        if len(masks) >= MAX_MASKS or not SAFE_REL_RE.match(rel) or any(c.startswith("-") for c in rel.split("/")):
+            return False
+        masks.append((rel, kind))
+        counts[pattern] = counts.get(pattern, 0) + n
+        return True
     for d, dirs, names in os.walk(root, topdown=True, followlinks=False):
-        for n in sorted(dirs):
+        dirs.sort()
+        for n in list(dirs):
             p = os.path.join(d, n)
             if os.path.islink(p):
                 continue
             if n in DEP_DIRS or (n == "vendor" and _is_vendor_deps(p)):
-                add("**/%s/**" % n, _count_files(p))
-                shutil.rmtree(p, ignore_errors=True)
-                dirs.remove(n)
-        for n in names:
+                if add(os.path.relpath(p, root), "dir", "**/%s/**" % n, _count_files(p)):
+                    dirs.remove(n)
+        for n in sorted(names):
             ext = n.rsplit(".", 1)[1].lower() if "." in n[1:] else ""
             if ext in MEDIA_EXT:
                 p = os.path.join(d, n)
                 try:
                     if stat.S_ISREG(os.lstat(p).st_mode):
-                        os.unlink(p)
-                        add("**/*." + ext, 1)
+                        add(os.path.relpath(p, root), "file", "**/*." + ext, 1)
                 except OSError:
                     pass
-    return [{"pattern": k, "count": counts[k]} for k in sorted(counts)][:100]
+    return masks, [{"pattern": k, "count": counts[k]} for k in sorted(counts)][:100]
+
+
+def sees_full_tree(manifest):
+    cats = manifest.get("categories") if isinstance(manifest, dict) else None
+    return not isinstance(cats, list) or bool(FULL_TREE_CATEGORIES & set(cats))
+
+
+def mask_mounts(ws, masks):
+    """Montages en lecture seule qui masquent les exclusions sous /src (vide pour un
+    répertoire, fichier vide pour un fichier), créés une fois par analyse."""
+    if not masks:
+        return []
+    empty_dir = os.path.join(ws, "mask-dir")
+    empty_file = os.path.join(ws, "mask-file")
+    if not os.path.isdir(empty_dir):
+        os.mkdir(empty_dir, 0o555)
+    if not os.path.isfile(empty_file):
+        fd = os.open(empty_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o444)
+        os.close(fd)
+    return [(empty_dir if kind == "dir" else empty_file, "/src/" + rel, "ro") for rel, kind in masks]

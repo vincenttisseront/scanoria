@@ -285,13 +285,29 @@ mk("propre/vendor/notre-code.py")
 mk("img/logo.png"); mk("img/photo.JPG"); mk("fonts/a.woff2")
 mk("lib/app.jar"); mk("bin/outil"); mk("modele.pkl"); mk("src/main.py")
 os.symlink("/etc", os.path.join(root, "lien-node_modules"))
-ex = {e["pattern"]: e["count"] for e in workspace.exclude_common(root)}
+mk("ok-mais-:virgule,/node_modules/x.js")
+masks, exl = workspace.common_exclusions(root)
+ex = {e["pattern"]: e["count"] for e in exl}
 check("exclusion : node_modules comptés (6 fichiers)", ex.get("**/node_modules/**") == 6)
 check("exclusion : vendor de Go et de Composer (3 fichiers)", ex.get("**/vendor/**") == 3)
-check("exclusion : vendor de code propre gardé", os.path.isfile(root + "/propre/vendor/notre-code.py"))
+check("exclusion : vendor de code propre gardé", "propre/vendor" not in dict(masks))
+check("exclusion : rien n'est retiré de l'arbre (secrets et SAST voient tout)",
+      all(os.path.isfile(root + "/" + p) for p in ("web/node_modules/pkg0/index.js", "go/vendor/x/y.go", "img/logo.png")))
+check("exclusion : masques triés, répertoires et fichiers", ("node_modules", "dir") in masks and ("img/logo.png", "file") in masks
+      and ("web/node_modules", "dir") in masks)
+check("exclusion : chemin avec « : » ou « , » jamais masqué", not any(":" in r or "," in r for r, _ in masks))
+check("exclusion : rien d'un chemin non masqué n'est compté", ex.get("**/node_modules/**") == 6)
+check("exclusion : secrets et SAST voient tout l'arbre", workspace.sees_full_tree({"categories": ["sca", "secrets"]})
+      and workspace.sees_full_tree({"categories": ["quality", "sast"]}) and not workspace.sees_full_tree({"categories": ["sca"]})
+      and workspace.sees_full_tree({}))
+mounts = workspace.mask_mounts(sys.argv[2], masks)
+check("exclusion : masques en lecture seule sous /src", all(t.startswith("/src/") and mo == "ro" for _, t, mo in mounts)
+      and os.listdir(sys.argv[2] + "/mask-dir") == [] and os.path.getsize(sys.argv[2] + "/mask-file") == 0)
+workspace.MAX_MASKS = 2
+check("exclusion : nombre de masques borné", len(workspace.common_exclusions(root)[0]) == 2)
+workspace.MAX_MASKS = 200
 check("exclusion : images et polices", ex.get("**/*.png") == 1 and ex.get("**/*.jpg") == 1 and ex.get("**/*.woff2") == 1)
-check("exclusion : jar, exécutable, modèle et code gardés", all(os.path.isfile(root + "/" + p) for p in
-      ("lib/app.jar", "bin/outil", "modele.pkl", "src/main.py")))
+check("exclusion : jar, exécutable, modèle et code jamais masqués", not {r for r, _ in masks} & {"lib/app.jar", "bin/outil", "modele.pkl", "src/main.py"})
 check("exclusion : lien symbolique jamais suivi", os.path.islink(root + "/lien-node_modules") and os.path.isdir("/etc"))
 EOF
 
@@ -506,7 +522,7 @@ def m(mid, image, extra=None, cats=("secrets",), feeds_=()):
     return {"manifest": man, "status": "healthy", "enabled": True, "options": {}}
 common.write_json(modules.REGISTRY, {"modules": {
     "git-fetch": m("git-fetch", gimg, cats=("system",)),
-    "base": m("base", img, feeds_=("trivy-db",)),
+    "base": m("base", img, cats=("sca",), feeds_=("trivy-db",)),
     "histo": m("histo", img, {"history": "full", "history_command": ["faux", "git", "/src"]}),
     "sonarish": m("sonarish", img, {"cache": "sonar-plugins"}),
 }, "operations": []})
@@ -554,6 +570,11 @@ grep -F -- "/src:ro" <<< "$scan" | grep -q . && ! grep -F '/src:rw' <<< "$scan" 
 grep -F -- 'feeds/.store/trivy-db/20261124T010000Z-0000000a:/feeds/trivy-db:ro' <<< "$scan" | grep -q . && ok "montage : base épinglée en lecture seule (V7)" || ko "montage : base non épinglée"
 grep -F -- '.git:/mirror:ro' <<< "$scan" | grep -q . && ok "montage : miroir en lecture seule pour l'historique" || ko "montage : miroir absent ou écrivable"
 expect "montage : miroir seulement pour le module à historique" "$(grep -cF ':/mirror:ro' <<< "$scan")" 1
+sca=$(grep -v '"git"' <<< "$scan")
+histo=$(grep '"git"' <<< "$scan")
+grep -qF -- 'mask-dir:/src/node_modules:ro' <<< "$sca" && grep -qF -- 'mask-file:/src/img/logo.png:ro' <<< "$sca" &&
+	ok "V9 : exclusions masquées pour un module SCA" || ko "V9 : exclusions non masquées pour un module SCA"
+! grep -qF -- 'mask-' <<< "$histo" && ok "V9 : module secrets, arbre entier" || ko "V9 : module secrets privé d'une partie de l'arbre"
 grep '"--name", "scanoria-fetch-' <<< "$runs" | grep -qF -- "$PROJ.git:/mirror:rw" && ok "récupération : miroir du projet monté" || ko "récupération : miroir du projet absent"
 grep '"--name", "scanoria-fetch-' <<< "$runs" | grep -q -- '"--memory", "2048m"' && ok "récupération : mémoire augmentée du tmpfs" || ko "récupération : mémoire du tmpfs non comptée"
 expect "bail : rendu en fin d'analyse" "$(find "$T/var/lib/scanoria/feeds/.store/trivy-db/.leases" -type f 2> /dev/null | wc -l | tr -d ' ')" 0
