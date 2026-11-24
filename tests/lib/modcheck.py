@@ -221,6 +221,10 @@ def podman_args(manifest, src, out, feeds):
     ]
     for feed in manifest["requires"]["feeds"]:
         args.append(f"--volume={os.path.join(feeds, feed)}:/feeds/{feed}:ro")
+    # Outil de l'appliance (scan.tool) monté en lecture seule sur /scanoria, comme svcnet.tool_mount.
+    if scan.get("tool"):
+        tools = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src", "rootfs", "usr", "lib", "scanoria", "scan-tools")
+        args.append(f"--volume={os.path.realpath(os.path.join(tools, scan['tool']))}:/scanoria:ro")
     for k, v in sorted((scan.get("env") or {}).items()):
         args.append(f"--env={k}={v}")
     cmd = render_defaults(manifest, scan["command"])

@@ -18,6 +18,7 @@ import type { Queryable } from '../utils/db'
 import type { AiSubjectType, VerdictDetails } from '#shared/analysis'
 import { GateRules } from '#shared/analysis'
 import { enqueueAiTask } from '../ai/enqueue'
+import { enqueueAfterVerdict } from '../ai/hooks'
 import { finalizeScanFindings, ingestModuleOutputs } from '../findings/ingest'
 import { evaluateGate } from '../gates/evaluate'
 import type { enqueueScan } from './enqueue'
@@ -47,6 +48,8 @@ export interface Integrations {
   enqueueAiTask: (db: Queryable, req: AiTaskRequest) => Promise<string | null>
   /** A : planification ; reçoit enqueueScan (contrat 4) et ne lève jamais. */
   runProjectSchedules: (db: pg.Pool, now: Date, enqueue: typeof enqueueScan) => Promise<unknown>
+  /** 0.5, chantier D : I11 (index reach-index) et I18 (licences du SBOM) après le verdict ; ne lève jamais. */
+  enqueueAfterVerdict?: (db: Queryable, args: { scanId: string, projectId: string, scansDir: string }) => Promise<unknown>
 }
 
 /** Bouchon du contrat 6 : verdict non concluant, sans raison inventée. */
@@ -74,6 +77,7 @@ export const defaultIntegrations: Integrations = {
   finalizeScanFindings: (db, scanId, opts) => finalizeScanFindings(db, scanId, opts),
   evaluateGate: (db, scanId) => evaluateGate(db, scanId),
   enqueueAiTask,
+  enqueueAfterVerdict,
   runProjectSchedules: (db, now, enqueue) => runProjectSchedules(db, now, enqueue).catch((err: unknown) => {
     console.error('[schedule]', (err as Error)?.message)
     return undefined
