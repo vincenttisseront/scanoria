@@ -10,7 +10,52 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.3.2 — non publiée
+## 0.3.3 — non publiée
+
+Correctif de l'installation des scanners, et premières fonctions de la 0.4
+déjà terminées.
+
+### Corrigé
+- **Banc d'essai des scanners** : le conteneur tournait sans répertoire
+  personnel. OSV-Scanner s'arrêtait alors en erreur (code 127) et son
+  installation revenait en arrière. Les conteneurs reçoivent désormais
+  `HOME` et `TMPDIR` sur leur `/tmp` jetable. Le banc d'essai de la CI
+  reprend exactement les réglages de l'appliance, ce qui aurait révélé
+  l'écart.
+
+### Ajouté
+- **Consommation réelle par module** (F14) : mémoire, CPU, durées et nombre
+  d'analyses des scanners. Les modules inutilisés depuis 30 jours sont
+  signalés avec une suggestion de retrait, jamais automatique, et jamais
+  pour un module requis par un autre.
+- **Santé des analyses** (G20) : taux d'échec par outil et par classe,
+  délais dépassés, mémoire épuisée, durées sur 7 et 30 jours, et analyses en
+  échec récentes. Le journal complet d'un module est téléchargeable par les
+  opérateurs, masqué et borné.
+- **IA par un Ollama externe** :
+  - pré-tri suggéré avec une justification citée, sans effet sur le statut
+    (I3) ;
+  - résumé de chaque analyse (I5) ;
+  - type probable des secrets génériques, d'après le contexte seul (I14) ;
+  - diagnostic des analyses en échec, avec le délai d'un module allongeable
+    en un clic (I15) ;
+  - traduction des règles des outils (I17) ;
+  - avis 👍/👎, corrections et taux d'accord entre l'IA et les personnes
+    (I24).
+  Le jeton porteur du connecteur est pris en charge, chiffré par une clé
+  dédiée. Le masquage des secrets est unifié et élargi, sans changer
+  l'empreinte des résultats existants.
+- Migrations `006` et `007`.
+
+### Limites connues
+- Les relevés des modules permanents s'afficheront avec le moteur des
+  services de la 0.4. D'ici là : « aucun relevé ».
+- IA : la mémoire d'un module reste un conseil, et un délai allongé
+  s'applique à tous les projets. Le typage des secrets ne voit que le
+  contexte et la longueur. La traduction d'une règle est partagée entre les
+  projets, car elle ne contient aucune donnée de projet.
+
+## 0.3.2 — 2026-11-24
 
 Correctifs constatés sur une appliance de test.
 
