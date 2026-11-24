@@ -8,7 +8,7 @@
 // cloisonnées et sorties lues, console identique sans connecteur.
 
 import { randomBytes } from 'node:crypto'
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -22,7 +22,7 @@ import { createSession, csrfTokenFor, SESSION_COOKIE } from '../../server/utils/
 import { getAuthSettings } from '../../server/utils/settings'
 import { createUser } from '../../server/utils/users'
 import { clearConnectorCache } from '../../server/ai/enqueue'
-import { setTokenStore } from '../../server/ai/token'
+import { readToken, setTokenStore } from '../../server/ai/token'
 import type { AiEndpoint } from '../../server/ai/config'
 
 const ROUTES: [string, string, string][] = [
@@ -181,7 +181,7 @@ describe.skipIf(!DATABASE_URL)('API du connecteur IA (h3, PostgreSQL réel)', ()
   it('sans connecteur : état inactif, aucune explication demandable, aucune sortie', async () => {
     const st = await call('/api/ai/status', { client: operator })
     expect(st.status).toBe(200)
-    expect(st.data).toMatchObject({ enabled: false, token_stored: false, token_supported: false, circuit: { state: 'closed' }, queue: { queued: 0, running: 0 } })
+    expect(st.data).toMatchObject({ enabled: false, token_stored: false, token_supported: true, circuit: { state: 'closed' }, queue: { queued: 0, running: 0 } })
     expect((st.data.tasks as { state: string }[]).every(t => t.state === 'off')).toBe(true)
 
     const ex = await call('/api/ai/explain', { method: 'POST', client: viewer, json: { kind: 'explain-finding', subject_id: findingId } })
@@ -210,10 +210,6 @@ describe.skipIf(!DATABASE_URL)('API du connecteur IA (h3, PostgreSQL réel)', ()
     expect(httpToken.status).toBe(400)
     const path = await call('/api/ai/connector', { method: 'POST', client: admin, json: { url: 'https://ollama.exemple.test:11434/api', confirmed: true } })
     expect(path.status).toBe(400)
-    // Jeton demandé alors que le chiffrement des secrets n'est pas branché.
-    const tok = await call('/api/ai/connector', { method: 'POST', client: admin, json: { url: 'https://ollama.exemple.test:11434', token: FAKE_TOKEN, confirmed: true } })
-    expect(tok.status).toBe(503)
-
     const ok = await call('/api/ai/connector', { method: 'POST', client: admin, json: { url: 'http://192.0.2.10:11434', allow_insecure: true, confirmed: true } })
     expect(ok.status, JSON.stringify(ok.data)).toBe(202)
     const reqs = await incoming('set-ai-endpoint')
@@ -246,6 +242,31 @@ describe.skipIf(!DATABASE_URL)('API du connecteur IA (h3, PostgreSQL réel)', ()
     expect(removed.status).toBe(202)
     expect((await call('/api/ai/status', { client: operator })).data.token_stored).toBe(false)
     setTokenStore(null)
+  })
+
+  it('jeton : chiffré pour de vrai par la clé dédiée, l\'ancien supprimé au remplacement', async () => {
+    process.env.NUXT_AI_TOKEN_KEY_FILE = join(root, 'ai-token.key')
+    try {
+      setTokenStore(null)
+      const first = await call('/api/ai/connector', { method: 'POST', client: admin, json: { url: 'https://ollama.exemple.test:11434', token: FAKE_TOKEN, confirmed: true } })
+      expect(first.status, JSON.stringify(first.data)).toBe(202)
+      const rows = async () => (await db.pool.query<{ id: string, secret_enc: Buffer }>(`SELECT id::text, secret_enc FROM credentials WHERE kind = 'ai-token'`)).rows
+      const [one] = await rows()
+      expect(one).toBeDefined()
+      expect(Buffer.from(one!.secret_enc).toString('latin1')).not.toContain(FAKE_TOKEN)
+      expect((await stat(join(root, 'ai-token.key'))).mode & 0o777).toBe(0o600)
+      expect(await readToken(db.pool, one!.id)).toBe(FAKE_TOKEN)
+      const second = await call('/api/ai/connector', { method: 'POST', client: admin, json: { url: 'https://ollama.exemple.test:11434', token: `${FAKE_TOKEN}x`, confirmed: true } })
+      expect(second.status).toBe(202)
+      const after = await rows()
+      expect(after).toHaveLength(1)
+      expect(after[0]!.id).not.toBe(one!.id)
+      await call('/api/ai/connector', { method: 'POST', client: admin, json: { url: 'https://ollama.exemple.test:11434', token: null, confirmed: true } })
+      expect(await rows()).toHaveLength(0)
+    }
+    finally {
+      delete process.env.NUXT_AI_TOKEN_KEY_FILE
+    }
   })
 
   it('retrait du connecteur : demande enabled:false', async () => {

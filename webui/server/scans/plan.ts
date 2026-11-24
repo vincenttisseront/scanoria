@@ -143,6 +143,11 @@ export interface ResolveInput {
   projectLicense: string | null
   installed: InstalledModule[]
   catalog: Map<string, PlanCatalogEntry>
+  /**
+   * Délais forcés par module (« scan.timeout_overrides », appliqués par une
+   * personne depuis un diagnostic I15) : ne font qu'allonger le délai du manifeste.
+   */
+  timeoutOverrides?: Record<string, number>
 }
 
 /**
@@ -193,7 +198,7 @@ export function resolveProfile(input: ResolveInput): { modules: PlannedModule[],
       categories: e.categories,
       options,
       feeds: e.feeds.map(id => ({ id, version: feedsById.get(id)?.version ?? null })),
-      timeout_s: e.scan!.timeout_s,
+      timeout_s: Math.min(86_400, Math.max(e.scan!.timeout_s, input.timeoutOverrides?.[m.id] ?? 0)),
       history,
       outputs: e.outputs,
       reason: matching.length ? 'category' : 'included',

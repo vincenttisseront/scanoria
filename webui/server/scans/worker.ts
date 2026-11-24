@@ -25,6 +25,8 @@ import {
 } from './plan'
 import { EFFECTIVE_PRIORITY_SQL, retryDelayS } from './priority'
 import { makeRedactor } from './redact'
+import { loadTimeoutOverrides } from '../ai/overrides'
+import { aiLogContext } from '../ai/context'
 import type { WorkerConfig } from './config'
 
 export interface WorkerPaths {
@@ -261,6 +263,7 @@ export class ScanWorker {
       projectLicense: project.spdx_license,
       installed: state.modules,
       catalog,
+      timeoutOverrides: await loadTimeoutOverrides(client),
     })
     const plan: ScanPlan = {
       version: PLAN_VERSION,
@@ -618,6 +621,10 @@ export class ScanWorker {
       await this.integrations.enqueueAiTask(this.pool, {
         kind: 'explain-verdict', subjectType: 'scan', subjectId: scanId, projectId: r.rows[0].project_id, priority: 10,
       })
+      // I5 : résumé de l'analyse, même branchement (contrat 13).
+      await this.integrations.enqueueAiTask(this.pool, {
+        kind: 'summarize-scan', subjectType: 'scan', subjectId: scanId, projectId: r.rows[0].project_id, priority: 10,
+      })
     }
     catch (e) {
       this.log(`scan ${scanId}: AI task not queued: ${(e as Error).message}`)
@@ -645,7 +652,9 @@ export class ScanWorker {
         if (excerpt) logs.push({ module: m.module_id, excerpt })
       }
       await this.integrations.enqueueAiTask(this.pool, {
-        kind: 'diagnose-scan', subjectType: 'scan', subjectId: scanId, projectId, context: { logs },
+        kind: 'diagnose-scan', subjectType: 'scan', subjectId: scanId, projectId,
+        // Format et bornes du chantier D : masqué de nouveau (règle IA), fin de journal, 16 Ko en tout.
+        context: aiLogContext(logs.map(l => ({ module: l.module, log: l.excerpt }))),
       })
     }
     catch (e) {

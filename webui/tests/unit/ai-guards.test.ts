@@ -8,6 +8,7 @@
 import { randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { charset, looksRandom, redactText, redactValue, shannon, shape } from '../../server/ai/redact'
+import { redact as redactFinding } from '../../server/findings/redact'
 import { allowedLink, referenceLinks, sanitizeDeep, sanitizeText } from '../../server/ai/sanitize'
 import { buildMessages, encodeData, promptChars } from '../../server/ai/prompt'
 
@@ -84,6 +85,47 @@ describe('masquage des secrets', () => {
     const r = redactValue({ a: [s, 1, true], b: { c: s }, d: null })
     expect(JSON.stringify(r.value)).not.toContain(s)
     expect(r.count).toBe(2)
+  })
+})
+
+describe('masquage : contournements (relecture de la 0.4)', () => {
+  // Valeurs générées à l'exécution : rien qui ressemble à un secret dans l'historique.
+  const word = () => randomBytes(4).toString('hex')
+  const both = (s: string) => [redactText(s).text, redactFinding(s, { aggressive: true })]
+
+  it('valeur entre guillemets avec espaces : masquée entière', () => {
+    const v = `${word()} ${word()} ${word()}`
+    for (const out of both(`password = "${v}" ok`)) {
+      expect(out).not.toContain(v.split(' ')[1]!)
+      expect(out).toMatch(/" ok$/)
+    }
+    for (const out of both(`DB_PASSWORD='${v}'`)) expect(out).not.toContain(v.split(' ')[2]!)
+  })
+
+  it('mot de passe d’URL contenant « @ » : jusqu’au dernier « @ » avant l’hôte', () => {
+    const pw = `${word()}@${word()}`
+    for (const out of both(`jdbc:postgresql://user:${pw}@db.exemple.test/base`)) {
+      expect(out).not.toContain(pw.split('@')[1]!)
+      expect(out).toContain('@db.exemple.test/base')
+    }
+  })
+
+  it('un faux masque ne cache pas le secret collé à lui', () => {
+    const tok = `ghp_${randomBytes(20).toString('hex')}`
+    const tail = `${word()}${word()}`
+    for (const fake of ['[REDACTED type=x len=1 charset=a]', '[secret masqué : x, longueur 1]']) {
+      for (const out of both(`${fake}${tok}`)) expect(out).not.toContain(tok.slice(4))
+      for (const out of both(`password=${fake}${tail}`)) expect(out).not.toContain(tail)
+    }
+  })
+
+  it('idempotent dans les deux présentations', () => {
+    for (const s of [`password = "${word()} ${word()}"`, `https://u:${word()}@exemple.test/`, `token=${word()}${word()}`]) {
+      const ai = redactText(s).text
+      expect(redactText(ai).text).toBe(ai)
+      const f = redactFinding(s, { aggressive: true })
+      expect(redactFinding(f, { aggressive: true })).toBe(f)
+    }
   })
 })
 

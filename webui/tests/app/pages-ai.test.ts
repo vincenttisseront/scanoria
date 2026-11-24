@@ -146,6 +146,10 @@ describe('page Système › IA', () => {
     setUser('admin')
     route('GET', '/api/ai/status', () => activeStatus({ circuit: { state: 'open', last_failure_at: '2026-11-24T09:00:00Z' } }))
     route('GET', '/api/ai/calls', () => ({ calls: CALLS }))
+    route('GET', '/api/ai/agreement', () => ({ days: 90, items: [
+      { kind: 'explain-finding', model: 'qwen-test:14b', votes: 4, up: 3, rate: 0.75, triaged: null, matched: null, triage_rate: null },
+      { kind: 'triage-finding', model: 'qwen-test:14b', votes: 0, up: 0, rate: null, triaged: 5, matched: 4, triage_rate: 0.8 },
+    ] }))
     route('PUT', '/api/ai/models', () => ({ models: {} }))
     route('POST', '/api/ai/probe', () => ({ queued: true }))
     const w = await mountIn(AiPage)
@@ -170,6 +174,11 @@ describe('page Système › IA', () => {
     expect(text).toContain('alpha')
     expect(text).toContain('1834')
     expect(text).toContain('délai dépassé')
+    // I24 : taux d'accord par tâche et par modèle.
+    const agreement = w.find('[data-testid="ai-agreement"]').text()
+    expect(agreement).toContain('Qualité mesurée')
+    expect(agreement).toContain('75 %')
+    expect(agreement).toContain('80 % (4 sur 5)')
 
     await click(button('Redécouvrir les modèles'))
     expect(callsTo('POST', '/api/ai/probe')).toHaveLength(1)

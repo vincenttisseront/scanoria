@@ -30,14 +30,26 @@ GRANT USAGE ON SCHEMA public TO "scanoria-ai";
 GRANT SELECT (version) ON schema_migrations TO "scanoria-ai";
 GRANT SELECT (key, value) ON appliance_settings TO "scanoria-ai";
 GRANT SELECT (id, slug, name, ai_opt_out, archived_at) ON projects TO "scanoria-ai";
-GRANT SELECT (id, project_id, number, ref, commit_sha, status, verdict, verdict_details) ON scans TO "scanoria-ai";
+GRANT SELECT (id, project_id, number, ref, commit_sha, status, verdict, verdict_details,
+              coverage, plan, error, queued_at) ON scans TO "scanoria-ai";
+-- 0.4 : status_by, status_at et status_reason servent aux exemples de pré-tri
+-- (I24, tris faits par des personnes du MÊME projet seulement).
 GRANT SELECT (id, project_id, tool, rule_id, category, severity, native_severity, title, message,
-              path, start_line, end_line, cwe, vuln_ids, package, malicious, secret_type, status, snippet)
+              path, start_line, end_line, cwe, vuln_ids, package, malicious, secret_type, status, snippet,
+              status_by, status_at, status_reason)
     ON findings TO "scanoria-ai";
+-- 0.4 : résumé (I5) et diagnostic (I15) d'une analyse ; jamais les journaux
+-- eux-mêmes (log_path) : l'extrait masqué arrive par ai_tasks.context.
+GRANT SELECT (scan_id, finding_id, is_new) ON scan_findings TO "scanoria-ai";
+GRANT SELECT (scan_id, module_id, module_version, status, error_class, attempts, duration_ms, peak_memory_mb)
+    ON scan_modules TO "scanoria-ai";
 GRANT SELECT (id, kind, secret_enc) ON credentials TO "scanoria-ai";
 
 -- Écritures : tables ai_* seulement.
-GRANT SELECT, INSERT ON ai_tasks TO "scanoria-ai";
+GRANT SELECT ON ai_tasks TO "scanoria-ai";
+-- Insertion limitée aux bancs d'essai qu'il se planifie : statut, sortie,
+-- projet et contexte prennent leur valeur par défaut (aucune sortie forgée).
+GRANT INSERT (kind, subject_type, subject_id, priority) ON ai_tasks TO "scanoria-ai";
 -- Mise à jour limitée à l'état d'exécution : ni le sujet, ni le projet, ni la priorité.
 GRANT UPDATE (status, output, error, model, model_digest, input_hash, attempts, started_at, finished_at) ON ai_tasks TO "scanoria-ai";
 GRANT SELECT, INSERT, DELETE ON ai_cache TO "scanoria-ai";

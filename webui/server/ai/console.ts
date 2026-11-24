@@ -13,6 +13,13 @@ import { aiPaths, loadAiSettings, loadCheckStatus, loadEndpoint, ModelOverrides,
 import { AI_PRIORITY, connectorEnabled, enqueueAiTask } from './enqueue'
 import { TASK_KINDS, TASKS } from './tasks'
 import { SUITES } from './testbed'
+import { UUID_RE } from './task-kit'
+import { failedModules, proposeTimeout, type TimeoutProposal } from './tasks/diagnose'
+import { ruleKey } from './tasks/translate'
+import { myFeedback } from './feedback'
+import { loadTimeoutOverrides, TimeoutOverrides } from './overrides'
+
+export { loadTimeoutOverrides } from './overrides'
 
 export const AI_TASK_KINDS = TASK_KINDS
 
@@ -33,17 +40,21 @@ export const ModelsBody = z.strictObject({
   models: z.partialRecord(z.enum(TASK_KINDS as [string, ...string[]]), z.string().min(1).max(200).nullable()),
 })
 
+/** Identifiant de sujet conforme à la tâche (uuid, ou clé outil:version:règle pour I17). */
+const subjectFits = (b: { kind: string, subject_id: string }) => (TASKS[b.kind]?.subjectPattern ?? UUID_RE).test(b.subject_id)
+const SUBJECT_ISSUE = { message: 'subject_id does not match the task', path: ['subject_id'] }
+
 export const ExplainBody = z.strictObject({
   kind: z.enum(TASK_KINDS as [string, ...string[]]),
-  subject_id: z.uuid(),
+  subject_id: z.string().min(1).max(400),
   locale: z.enum(['fr', 'en']).optional(),
-})
+}).refine(subjectFits, SUBJECT_ISSUE)
 
 export const OutputQuery = z.strictObject({
   kind: z.enum(TASK_KINDS as [string, ...string[]]),
-  subject_id: z.uuid(),
+  subject_id: z.string().min(1).max(400),
   locale: z.enum(['fr', 'en']).optional(),
-})
+}).refine(subjectFits, SUBJECT_ISSUE)
 
 interface TaskRow {
   id: string
@@ -57,11 +68,16 @@ interface TaskRow {
   finished_at: Date | null
 }
 
-/** Projet du sujet d'une tâche (résultat ou analyse), pour le cloisonnement. */
+/** Sujet transverse (I17) : aucun projet, toute personne connectée peut lire la traduction d'une règle. */
+export const GLOBAL_SUBJECT = 'global' as const
+
+/** Projet du sujet d'une tâche (résultat ou analyse), pour le cloisonnement ; GLOBAL_SUBJECT pour une règle. */
 export async function subjectProject(db: Queryable, kind: string, subjectId: string): Promise<string | null> {
   const def = TASKS[kind]
-  if (!def) return null
-  const table = def.subjectType === 'finding' ? 'findings' : 'scans'
+  if (!def || !(def.subjectPattern ?? UUID_RE).test(subjectId)) return null
+  if (def.projectScoped === false) return GLOBAL_SUBJECT
+  const table = def.subjectType === 'finding' ? 'findings' : def.subjectType === 'scan' ? 'scans' : null
+  if (!table) return null
   const { rows } = await db.query<{ project_id: string }>(`SELECT project_id FROM ${table} WHERE id = $1`, [subjectId])
   return rows[0]?.project_id ?? null
 }
@@ -72,28 +88,30 @@ export async function requestExplanation(db: Queryable, body: z.infer<typeof Exp
   if (!projectId) return { found: false as const }
   const def = TASKS[body.kind]!
   const taskId = await enqueueAiTask(db, {
-    kind: body.kind, subjectType: def.subjectType, subjectId: body.subject_id, projectId,
+    kind: body.kind, subjectType: def.subjectType, subjectId: body.subject_id, projectId: projectId === GLOBAL_SUBJECT ? null : projectId,
     locale: body.locale ?? userLocale, priority: AI_PRIORITY.interactive, requestedBy: userId,
   })
   return { found: true as const, task_id: taskId }
 }
 
 /** Dernière sortie d'une tâche pour un sujet (langue demandée, sinon l'autre). */
-export async function latestOutput(db: Queryable, q: z.infer<typeof OutputQuery>, userLocale: 'fr' | 'en') {
+export async function latestOutput(db: Queryable, q: z.infer<typeof OutputQuery>, userLocale: 'fr' | 'en', userId: number | null = null) {
   const enabled = await connectorEnabled()
   const locale = q.locale ?? userLocale
   const projectId = await subjectProject(db, q.kind, q.subject_id)
   if (!projectId) return null
-  const optOut = (await db.query<{ ai_opt_out: boolean }>('SELECT ai_opt_out FROM projects WHERE id = $1', [projectId])).rows[0]?.ai_opt_out ?? false
+  const global = projectId === GLOBAL_SUBJECT
+  const optOut = global ? false : (await db.query<{ ai_opt_out: boolean }>('SELECT ai_opt_out FROM projects WHERE id = $1', [projectId])).rows[0]?.ai_opt_out ?? false
   const { rows } = await db.query<TaskRow>(
     `SELECT id, status, output, error, model, model_digest, locale, created_at, finished_at FROM ai_tasks
-      WHERE kind = $1 AND subject_id = $2 AND project_id = $3
+      WHERE kind = $1 AND subject_id = $2 AND project_id IS NOT DISTINCT FROM $3
       ORDER BY (status = 'done') DESC, (locale = $4) DESC, created_at DESC LIMIT 1`,
-    [q.kind, q.subject_id, projectId, locale],
+    [q.kind, q.subject_id, global ? null : projectId, locale],
   )
   // Sans connecteur, ou pour un projet exclu, la page reste celle d'une appliance sans IA.
   const t = enabled && !optOut ? rows[0] : undefined
   const current = t ? await currentDigest(db, q.kind) : null
+  const feedback = t && t.status === 'done' && userId !== null ? await myFeedback(db, t.id, userId) : null
   return {
     enabled,
     opt_out: optOut,
@@ -109,6 +127,8 @@ export async function latestOutput(db: Queryable, q: z.infer<typeof OutputQuery>
           generated_at: t.finished_at?.toISOString() ?? null,
           /** Produite par un autre modèle que celui retenu aujourd'hui. */
           stale: t.status === 'done' && current !== null && t.model_digest !== current,
+          /** I24 : retour de la personne qui lit, s'il existe. */
+          feedback,
         }
       : null,
   }
@@ -224,4 +244,77 @@ export async function aiStatus(db: Queryable, paths: AiPaths = aiPaths()) {
     latency_ms: latencies.length ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null,
     queue: { queued: queue.find(q => q.status === 'queued')?.n ?? 0, running: queue.find(q => q.status === 'running')?.n ?? 0 },
   }
+}
+
+// ---- 0.4 : suggestions en lot (I3, I14), réglage proposé par un diagnostic (I15) ----
+
+export const SuggestionsQuery = z.strictObject({
+  kind: z.enum(['triage-finding', 'classify-secret']),
+  ids: z.string().max(37 * 200).transform(s => [...new Set(s.split(',').filter(Boolean))]).pipe(z.array(z.uuid()).min(1).max(200)),
+})
+
+/**
+ * Dernières suggestions pour une liste de résultats (liste des résultats) :
+ * l'indice seul, avec le modèle. Rien sans connecteur ni pour un projet exclu.
+ */
+export async function latestSuggestions(db: Queryable, q: z.infer<typeof SuggestionsQuery>) {
+  if (!(await connectorEnabled())) return { enabled: false, items: {} as Record<string, unknown> }
+  const { rows } = await db.query<{ subject_id: string, output: Record<string, unknown>, model: string | null, model_digest: string | null }>(
+    `SELECT DISTINCT ON (t.subject_id) t.subject_id, t.output, t.model, t.model_digest
+       FROM ai_tasks t JOIN projects p ON p.id = t.project_id
+      WHERE t.kind = $1 AND t.status = 'done' AND t.subject_type = 'finding' AND t.subject_id = ANY($2::text[]) AND NOT p.ai_opt_out
+      ORDER BY t.subject_id, t.finished_at DESC`,
+    [q.kind, q.ids],
+  )
+  const items: Record<string, { value: string, model: string | null, model_digest: string | null }> = {}
+  for (const r of rows) {
+    const value = q.kind === 'triage-finding' ? r.output?.suggestion : r.output?.class
+    if (typeof value === 'string') items[r.subject_id] = { value, model: r.model, model_digest: r.model_digest }
+  }
+  return { enabled: true, items }
+}
+
+/**
+ * Réglage sûr proposé pour une analyse en échec (I15) : recalculé ici depuis
+ * les faits (module arrivé à son délai, délai du plan), jamais repris de la
+ * sortie de l'IA ni de la demande. null s'il n'y a rien de sûr à proposer.
+ */
+export async function timeoutProposal(db: Queryable, scanId: string): Promise<TimeoutProposal | null> {
+  const s = await db.query<{ project_id: string }>('SELECT project_id FROM scans WHERE id = $1', [scanId])
+  const projectId = s.rows[0]?.project_id
+  if (!projectId) return null
+  const { modules } = await failedModules(db, scanId, projectId)
+  const overrides = await loadTimeoutOverrides(db)
+  for (const m of modules) {
+    const p = proposeTimeout(m)
+    // Déjà appliqué (le délai forcé couvre la proposition) : rien de plus à proposer.
+    if (p && (overrides[p.module] ?? 0) < p.proposed_s) return p
+  }
+  return null
+}
+
+export async function applyTimeoutProposal(db: Queryable, p: TimeoutProposal, userId: number): Promise<Record<string, number>> {
+  const next = { ...(await loadTimeoutOverrides(db)), [p.module]: p.proposed_s }
+  await saveSetting(db, 'scan.timeout_overrides', TimeoutOverrides.parse(next), userId)
+  return next
+}
+
+export const RuleKeyQuery = z.strictObject({ finding_id: z.string().regex(UUID_RE) })
+
+/**
+ * Clé de traduction (I17) de la règle d'un résultat : outil, version du module
+ * de la dernière analyse qui l'a vu, règle. Calculée côté serveur, comme à
+ * l'ingestion, pour que la console retrouve la traduction précalculée.
+ * Aucune clé pour un secret (rien n'est traduit) ni pour un projet exclu.
+ */
+export async function ruleKeyOf(db: Queryable, findingId: string): Promise<{ found: boolean, key: string | null }> {
+  const { rows } = await db.query<{ tool: string, rule_id: string, category: string, ai_opt_out: boolean, module_version: string | null }>(
+    `SELECT f.tool, f.rule_id, f.category, p.ai_opt_out, sm.module_version
+       FROM findings f JOIN projects p ON p.id = f.project_id
+       LEFT JOIN scan_modules sm ON sm.scan_id = f.last_scan_id AND sm.module_id = f.tool
+      WHERE f.id = $1`, [findingId])
+  const f = rows[0]
+  if (!f) return { found: false, key: null }
+  if (f.category === 'secrets' || f.ai_opt_out) return { found: true, key: null }
+  return { found: true, key: ruleKey(f.tool, f.module_version, f.rule_id) }
 }

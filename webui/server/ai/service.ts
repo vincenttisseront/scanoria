@@ -115,6 +115,7 @@ export interface AiTaskRow {
   locale: Locale
   priority: number
   attempts: number
+  context: unknown
 }
 
 export type TickResult = { state: 'idle' } | { state: 'worked', taskId: string } | { state: 'waiting', ms: number }
@@ -142,7 +143,7 @@ export class AiService {
       `UPDATE ai_tasks SET status = 'running', started_at = now(), attempts = attempts + 1
         WHERE id = (SELECT id FROM ai_tasks WHERE status = 'queued'
                      ORDER BY priority DESC, created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
-        RETURNING id, kind, project_id, subject_type, subject_id, locale, priority, attempts`,
+        RETURNING id, kind, project_id, subject_type, subject_id, locale, priority, attempts, context`,
     )
     return rows[0] ?? null
   }
@@ -298,7 +299,9 @@ export class AiService {
   }
 
   private async runTask(task: AiTaskRow, def: TaskDefinition, client: OllamaLike): Promise<TickResult> {
-    if (!(await this.projectAllows(task.project_id))) {
+    // Tâche transverse (I17) : sans projet ; sa lecture écarte d'elle-même les projets exclus.
+    const scoped = def.projectScoped !== false
+    if (scoped ? !(await this.projectAllows(task.project_id)) : task.project_id !== null) {
       await this.finish(task.id, 'skipped', { error: 'opt-out' })
       return { state: 'worked', taskId: task.id }
     }
@@ -328,7 +331,7 @@ export class AiService {
       await this.finish(task.id, 'skipped', { error: 'disabled-by-testbed', model: choice.model, digest: choice.digest })
       return { state: 'worked', taskId: task.id }
     }
-    const input = await def.load(this.deps.db, { projectId: task.project_id, subjectId: task.subject_id })
+    const input = await def.load(this.deps.db, { projectId: task.project_id, subjectId: task.subject_id, context: task.context })
     if (input === null) {
       await this.finish(task.id, 'skipped', { error: 'subject-missing' })
       return { state: 'worked', taskId: task.id }

@@ -64,8 +64,14 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/ai/disconnect': { post: { summary: 'Request set-ai-endpoint: remove the connector and close its firewall rule', role: 'admin', status: 202 } },
   '/api/ai/probe': { post: { summary: 'Rediscover the models of the AI server', role: 'admin', status: 202 } },
   '/api/ai/models': { put: { summary: 'Force a model per AI task, or back to automatic (null)', role: 'admin', body: 'AiModels' } },
-  '/api/ai/explain': { post: { summary: 'Interactive AI explanation of a finding (I2) or a verdict (I9)', role: 'viewer', body: 'AiExplain', status: 202 } },
-  '/api/ai/output': { get: { summary: 'Latest AI output for a finding or a scan, marked as AI with model and digest', role: 'viewer' } },
+  '/api/ai/explain': { post: { summary: 'Interactive AI request: explanation (I2, I9), pre-triage (I3), scan summary (I5), secret type (I14), failure diagnosis (I15), rule translation (I17)', role: 'viewer', body: 'AiExplain', status: 202 } },
+  '/api/ai/output': { get: { summary: 'Latest AI output for a finding, a scan or a rule key, marked as AI with model and digest, with the caller\'s feedback', role: 'viewer' } },
+  '/api/ai/suggestions': { get: { summary: 'Latest AI pre-triage (I3) or secret type (I14) for up to 200 findings; suggestions only, never a status change', role: 'viewer' } },
+  '/api/ai/rule-key': { get: { summary: 'Translation key (tool:version:rule) of a finding\'s rule (I17); null for secrets and opted-out projects', role: 'viewer' } },
+  '/api/ai/feedback': { post: { summary: 'Thumbs up/down and optional correction on an AI output (I24); never sent to the model', role: 'viewer', body: 'AiFeedback' } },
+  '/api/ai/agreement': { get: { summary: 'AI/human agreement over 90 days per task and model (I24)', role: 'operator' } },
+  '/api/ai/diagnosis/proposal': { get: { summary: 'Safe setting proposed for a failed scan (I15), recomputed from facts, never taken from the AI output', role: 'operator' } },
+  '/api/ai/diagnosis/apply': { post: { summary: 'Apply the proposed module timeout (409 E_AI_STALE if it changed); audited', role: 'operator', body: 'AiDiagnosisApply' } },
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
   '/api/gates': {
@@ -208,7 +214,19 @@ export default defineEventHandler(async () => {
         },
         AiExplain: {
           type: 'object', additionalProperties: false, required: ['kind', 'subject_id'],
-          properties: { kind: { enum: ['explain-finding', 'explain-verdict'] }, subject_id: { type: 'string', format: 'uuid' }, locale: { enum: ['fr', 'en'] } },
+          properties: {
+            kind: { enum: ['explain-finding', 'explain-verdict', 'triage-finding', 'summarize-scan', 'classify-secret', 'diagnose-scan', 'translate-rule'] },
+            subject_id: { type: 'string', maxLength: 400, description: 'Finding or scan UUID; tool:version:rule key for translate-rule' },
+            locale: { enum: ['fr', 'en'] },
+          },
+        },
+        AiFeedback: {
+          type: 'object', additionalProperties: false, required: ['task_id', 'vote'],
+          properties: { task_id: { type: 'string', format: 'uuid' }, vote: { enum: [1, -1] }, correction: { type: ['string', 'null'], minLength: 1, maxLength: 4000 } },
+        },
+        AiDiagnosisApply: {
+          type: 'object', additionalProperties: false, required: ['scan_id', 'module', 'proposed_s'],
+          properties: { scan_id: { type: 'string', format: 'uuid' }, module: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,40}$' }, proposed_s: { type: 'integer', minimum: 60, maximum: 86400 } },
         },
         Error: {
           type: 'object',

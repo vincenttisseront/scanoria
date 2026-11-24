@@ -10,6 +10,8 @@
 import type { AiSubjectType } from '#shared/analysis'
 import type { Queryable } from '../utils/db'
 import { aiPaths, loadEndpoint } from './config'
+import { sanitizeContext } from './context'
+import { UUID_RE } from './task-kit'
 import { TASKS } from './tasks'
 
 export interface AiTaskRequest {
@@ -20,6 +22,12 @@ export interface AiTaskRequest {
   locale?: 'fr' | 'en'
   priority?: number
   requestedBy?: number | null
+  /**
+   * Contexte joint (I15 : { logs: [{ module, excerpt }] }, voir
+   * server/ai/context.ts, aiLogContext). Revalidé, masqué et borné ici ;
+   * ignoré pour une autre tâche ou s'il n'est pas conforme.
+   */
+  context?: unknown
 }
 
 /** Priorités : demande interactive avant précalcul (§ 3.5). */
@@ -42,18 +50,25 @@ export function clearConnectorCache(): void {
 export async function enqueueAiTask(db: Queryable, req: AiTaskRequest): Promise<string | null> {
   try {
     const def = TASKS[req.kind]
-    if (!def || def.subjectType !== req.subjectType || !req.projectId || !/^[0-9a-f-]{36}$/.test(req.subjectId)) return null
+    if (!def || def.subjectType !== req.subjectType) return null
+    if (!(def.subjectPattern ?? UUID_RE).test(req.subjectId)) return null
+    const scoped = def.projectScoped !== false
+    if (scoped ? !req.projectId : req.projectId) return null
     if (!(await connectorEnabled())) return null
-    const project = await db.query<{ ai_opt_out: boolean }>(
-      'SELECT ai_opt_out FROM projects WHERE id = $1 AND archived_at IS NULL',
-      [req.projectId],
-    )
-    if (project.rows.length !== 1 || project.rows[0]!.ai_opt_out) return null
+    if (scoped) {
+      const project = await db.query<{ ai_opt_out: boolean }>(
+        'SELECT ai_opt_out FROM projects WHERE id = $1 AND archived_at IS NULL',
+        [req.projectId],
+      )
+      if (project.rows.length !== 1 || project.rows[0]!.ai_opt_out) return null
+    }
     let locale = req.locale
     if (!locale) {
       const s = await db.query<{ value: unknown }>(`SELECT value FROM appliance_settings WHERE key = 'ui.default_locale'`)
       locale = s.rows[0]?.value === 'en' ? 'en' : 'fr'
     }
+    // Les outils écrivent en anglais : rien à traduire pour un lecteur anglophone (I17).
+    if (req.kind === 'translate-rule' && locale === 'en') return null
     const priority = Math.max(0, Math.min(100, Math.trunc(req.priority ?? AI_PRIORITY.precompute)))
     // Une demande identique en attente suffit ; un précalcul déjà fait avec le modèle retenu n'est pas refait.
     const existing = await db.query<{ id: string, status: string }>(
@@ -72,10 +87,21 @@ export async function enqueueAiTask(db: Queryable, req: AiTaskRequest): Promise<
       }
       return found.id
     }
+    let context = sanitizeContext(req.kind, req.context)
+    if (!context && req.context === undefined && req.kind === 'diagnose-scan') {
+      // Nouvelle demande (depuis la console) : le contexte joint par la file d'analyses est repris.
+      const prev = await db.query<{ context: unknown }>(
+        `SELECT context FROM ai_tasks WHERE kind = $1 AND subject_type = $2 AND subject_id = $3 AND context IS NOT NULL
+          ORDER BY created_at DESC LIMIT 1`,
+        [req.kind, req.subjectType, req.subjectId],
+      )
+      context = sanitizeContext(req.kind, prev.rows[0]?.context)
+    }
     const { rows } = await db.query<{ id: string }>(
-      `INSERT INTO ai_tasks (kind, project_id, subject_type, subject_id, locale, priority, requested_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [req.kind, req.projectId, req.subjectType, req.subjectId, locale, priority, req.requestedBy ?? null],
+      `INSERT INTO ai_tasks (kind, project_id, subject_type, subject_id, locale, priority, requested_by, context)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [req.kind, scoped ? req.projectId : null, req.subjectType, req.subjectId, locale, priority, req.requestedBy ?? null,
+        context ? JSON.stringify(context) : null],
     )
     return rows[0]?.id ?? null
   }
