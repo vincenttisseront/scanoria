@@ -18,6 +18,7 @@ import re
 import shutil
 import stat
 import tarfile
+import time
 
 from . import catalogverify, common, selfupdate
 from .common import Fail
@@ -29,6 +30,8 @@ MAX_EXTRACTED = 256 << 20
 MAX_MEMBERS = 20000
 MAX_OUTPUT = 64 << 20
 DEFAULT_TIMEOUT = 900
+# 128 + SIGKILL : délai dépassé (podman --timeout) ou limite mémoire atteinte.
+KILLED_RC = 137
 SCANNER_OK_RC = (0, 1)
 
 
@@ -78,12 +81,18 @@ def render_command(cmd, options):
     return out
 
 
+def memory_mb(manifest):
+    """Limite mémoire du conteneur : resources.min_ram_mb du manifeste, bornée."""
+    res = manifest.get("resources") or {}
+    mem = res.get("min_ram_mb") if isinstance(res.get("min_ram_mb"), int) else 512
+    return max(128, min(int(mem), 65536))
+
+
 def confined_args(manifest, mounts=(), name=None):
     """Arguments « podman run » d'un conteneur jetable confiné (§ 6.4)."""
     res = manifest.get("resources") or {}
-    mem = res.get("min_ram_mb") if isinstance(res.get("min_ram_mb"), int) else 512
+    mem = memory_mb(manifest)
     cpu = res.get("min_cpu") if isinstance(res.get("min_cpu"), (int, float)) else 1
-    mem = max(128, min(int(mem), 65536))
     cpu = max(1, min(int(cpu), 64))
     args = ["run", "--rm", "--network=none", "--read-only", "--cap-drop=ALL",
             "--security-opt=no-new-privileges", "--user", "%d:%d" % (NOBODY, NOBODY),
@@ -425,6 +434,7 @@ def run(manifest, timeout=None):
         t = max(10, min(t, timeout or DEFAULT_TIMEOUT))
         cmd = render_command(scan["command"], option_defaults(manifest))
         mounts = [(src, "/src", "ro"), (out, "/out", "rw")] + tools
+        started = time.monotonic()
         if svc:
             try:
                 with svcnet.Attachment(svc, svcnet.TESTBED_KEY, budget_s=max(60, t - 60)) as att:
@@ -436,6 +446,11 @@ def run(manifest, timeout=None):
             rc, hint = run_confined(manifest, cmd, mounts, timeout=t, env=scan.get("env"), with_stderr=True)
         if rc not in (scan.get("exit_codes_ok") or SCANNER_OK_RC):
             msg = "scanner %s exited with code %d on its testbed" % (manifest["id"], rc)
+            if rc == KILLED_RC and time.monotonic() - started < t:
+                # Tué avant son délai : le noyau l'a arrêté à la limite mémoire du
+                # conteneur. Le message le dit, avec la limite appliquée.
+                msg = ("scanner %s was killed on its testbed, most likely out of memory "
+                       "(container limit %d MB from resources.min_ram_mb)" % (manifest["id"], memory_mb(manifest)))
             raise Fail("E_TESTBED", msg + (": " + hint if hint else ""))
         details = check_expect(collect(manifest, out), tb["expect"])
         bad = [d for d in details if not d["ok"]]
