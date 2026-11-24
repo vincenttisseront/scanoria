@@ -10,7 +10,7 @@ périmé, et alerte permanente après l'échec d'un retour arrière de mise à j
 <script setup lang="ts">
 import type { StateResponse } from '~/composables/useApplianceState'
 
-const props = defineProps<{ data: StateResponse | null }>()
+const props = defineProps<{ data: StateResponse | null, failed?: boolean }>()
 const { t } = useI18n()
 const fmt = useFormat()
 
@@ -35,6 +35,13 @@ const description = computed(() => {
 </script>
 
 <template>
+  <UAlert
+    v-if="failed"
+    color="error"
+    variant="subtle"
+    icon="i-lucide-wifi-off"
+    :title="t('state.loadFailed')"
+  />
   <UAlert
     v-if="data && !data.available"
     color="warning"

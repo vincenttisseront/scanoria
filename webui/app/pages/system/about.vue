@@ -36,6 +36,13 @@ const { data: about, status } = await useFetch<About>('/api/about')
       />
       {{ t('app.loading') }}
     </div>
+    <UAlert
+      v-else-if="status === 'error'"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-circle-x"
+      :title="t('errors.generic')"
+    />
     <UCard v-if="about">
       <dl class="grid gap-2 text-sm md:grid-cols-[max-content_1fr] md:gap-x-6">
         <dt class="text-muted">

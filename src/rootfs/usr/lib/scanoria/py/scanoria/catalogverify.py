@@ -323,7 +323,7 @@ def source_info():
 
 def refresh():
     repo = source_repo()
-    os.makedirs(CATALOG_DIR, mode=0o750, exist_ok=True)
+    common.shared_dir(CATALOG_DIR)
     tmp = selfupdate.new_staging("catalog")
     try:
         set_step("catalog-find")

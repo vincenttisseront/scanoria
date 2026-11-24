@@ -20,7 +20,7 @@ const isAdmin = computed(() => session.can('admin'))
 const fmt = useFormat()
 const { api, errorMessage } = useApi()
 const toast = useToast()
-const { data, state, refresh } = useApplianceState(15_000)
+const { data, state, failed, refresh } = useApplianceState(15_000)
 
 // --- Historique ---
 interface HistoryRow {
@@ -198,7 +198,10 @@ const codeLabel = (code: string | null | undefined) => (code && te(`codes.${code
 
 <template>
   <PageShell :title="t('updates.title')">
-    <StateAlert :data="data" />
+    <StateAlert
+      :data="data"
+      :failed="failed"
+    />
 
     <div
       v-if="state"

@@ -35,13 +35,15 @@ function message(err: unknown): string {
 
 const gates = ref<GateRow[]>([])
 const loading = ref(false)
+const loadError = ref('')
 async function load() {
   loading.value = true
   try {
     gates.value = (await api<{ items: GateRow[] }>('/api/gates')).items
+    loadError.value = ''
   }
   catch (err) {
-    toast.add({ title: message(err), color: 'error' })
+    loadError.value = message(err)
   }
   finally {
     loading.value = false
@@ -99,6 +101,13 @@ async function create() {
 
 <template>
   <PageShell :title="t('gates.title')">
+    <UAlert
+      v-if="loadError"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-circle-x"
+      :title="loadError"
+    />
     <template #actions>
       <UButton
         v-if="session.can('admin')"

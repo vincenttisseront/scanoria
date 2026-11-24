@@ -5,10 +5,17 @@
 // décisions automatiques du plan (principe 8 : l'écran dit ce qui a été fait
 // et pourquoi), contrôles de ressources, étapes des opérations.
 
-import type { InstalledModule, ModuleOperation, PlanIssue, PlanItem, ResourceCheck } from './useCatalog'
+import type { LocalizedText, InstalledModule, ModuleOperation, PlanIssue, PlanItem, ResourceCheck } from './useCatalog'
 
 export function useModuleText() {
-  const { t, te } = useI18n()
+  const { t, te, locale } = useI18n()
+
+  /** Texte du catalogue dans la langue de l'utilisateur (repli sur l'autre langue). */
+  const localized = (v: LocalizedText | string | null | undefined): string => {
+    if (!v) return ''
+    if (typeof v === 'string') return v
+    return (locale.value === 'en' ? v.en || v.fr : v.fr || v.en) ?? ''
+  }
   const fmt = useFormat()
 
   const typeLabel = (type: string) => (te(`catalog.types.${type}`) ? t(`catalog.types.${type}`) : type)
@@ -56,5 +63,5 @@ export function useModuleText() {
     return [code, e.message].filter(Boolean).join(' — ')
   }
 
-  return { typeLabel, statusLabel, restrictionLabel, issueText, reasonText, checkText, stepLabel, operationLabel, lastError }
+  return { localized, typeLabel, statusLabel, restrictionLabel, issueText, reasonText, checkText, stepLabel, operationLabel, lastError }
 }
