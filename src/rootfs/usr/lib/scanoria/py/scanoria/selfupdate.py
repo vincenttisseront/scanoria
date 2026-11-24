@@ -648,6 +648,43 @@ def post_deploy():
         common.run("systemctl", ["daemon-reload"], timeout=120)
 
 
+UNITS_LIST = "/usr/share/scanoria/units.list"
+UNIT_RE = re.compile(r"^scanoria-[a-z0-9-]{1,48}\.(service|timer|path)$")
+
+
+def listed_units():
+    """Unités de units.list (version déployée), noms validés."""
+    try:
+        with open(common.p(UNITS_LIST), encoding="utf-8") as f:
+            lines = [ln.strip() for ln in f]
+    except FileNotFoundError:
+        return []
+    return [u for u in lines if u and not u.startswith("#") and UNIT_RE.match(u)]
+
+
+def sync_units(restart=True):
+    """Active les unités de la version déployée (une version peut en ajouter)
+    et redémarre ses services pour charger le nouveau code. Sans effet avant
+    la fin du premier démarrage, qui les active lui-même. Une unité absente
+    ou en échec est journalisée sans faire échouer la mise à jour : la santé
+    de la console reste le critère du retour arrière."""
+    if not os.path.exists(common.VARLIB + "/firstboot.done"):
+        return []
+    done = []
+    for unit in listed_units():
+        if common.run("systemctl", ["cat", unit], timeout=60).returncode != 0:
+            common.log("unit %s not installed, skipped" % unit)
+            continue
+        r = common.run("systemctl", ["enable", "--now", unit], timeout=300)
+        if r.returncode == 0 and restart and unit.endswith(".service"):
+            r = common.run("systemctl", ["try-restart", unit], timeout=300)
+        if r.returncode != 0:
+            common.log("unit %s could not be started" % unit)
+            continue
+        done.append(unit)
+    return done
+
+
 def set_link(name, version):
     path = os.path.join(common.OPT, name)
     if version is None:
@@ -881,6 +918,7 @@ def auto_rollback(cur, old_prev, dump, new):
         post_deploy()
         console("start")
         health(cur)
+        sync_units()
     except Fail as e:
         msg = "automatic rollback to %s failed: %s" % (cur, e.message)
         write_alert(msg, cur)
@@ -951,6 +989,8 @@ def _apply(cur, old_prev, stg, version, upload_id):
         auto_rollback(cur, old_prev, dump, new)
         raise Fail("E_HEALTH_ROLLED_BACK", "update to %s failed (%s); %s restored" % (new, e.message, cur),
                    {"from_version": cur, "to_version": new, "rolled_back": True})
+    set_step("services")
+    sync_units()
     set_step("cleanup")
     cleanup((new, cur))
     if upload_dir:
@@ -987,6 +1027,7 @@ def cmd_rollback(expected_current, expected_target):
         console("start")
         set_step("health")
         health(prev)
+        sync_units()
     except Fail as e:
         msg = "rollback to %s failed: %s" % (prev, e.message)
         write_alert(msg, prev)

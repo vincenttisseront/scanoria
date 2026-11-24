@@ -146,6 +146,7 @@ export default {
     start: 'startup',
     health: 'health check',
     cleanup: 'cleanup',
+    services: 'service activation',
     rollback: 'rollback',
     restore: 'database restore',
     resolve: 'resolving dependencies',

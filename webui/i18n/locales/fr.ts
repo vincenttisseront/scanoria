@@ -146,6 +146,7 @@ export default {
     start: 'démarrage',
     health: 'contrôle de santé',
     cleanup: 'nettoyage',
+    services: 'activation des services',
     rollback: 'retour arrière',
     restore: 'restauration de la base',
     resolve: 'résolution des dépendances',
