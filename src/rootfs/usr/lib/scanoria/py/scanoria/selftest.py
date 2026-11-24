@@ -361,6 +361,30 @@ def check_time(rep):
     rep.add("time.sync", "pass" if ok else "warn", "clock synchronized" if ok else "clock not synchronized")
 
 
+RUNNER_STATE = common.RUN + "/runner.json"
+RUNNER_MAX_AGE_S = 120
+
+
+def check_runner(rep):
+    """runner.alive : scanoria-runner actif et capacité publiée récemment (ARCHITECTURE § 12.1)."""
+    r = common.run("systemctl", ["is-active", "scanoria-runner.service"], timeout=30)
+    active = r.text.strip() == "active"
+    st = _json(RUNNER_STATE)
+    age = None
+    try:
+        age = (common.now() - common.parse_iso(st["updated_at"])).total_seconds()
+    except (TypeError, KeyError, ValueError):
+        pass
+    fresh = age is not None and -60 <= age <= RUNNER_MAX_AGE_S
+    if active and fresh:
+        rep.add("runner.alive", "pass", "scanoria-runner active, %s slot(s), %s busy" % (st.get("slots"), st.get("busy")),
+                {"slots": st.get("slots"), "busy": st.get("busy")})
+    else:
+        rep.add("runner.alive", "fail", "scanoria-runner %s, capacity %s" % (
+            "active" if active else "not active",
+            "fresh" if fresh else ("stale" if age is not None else "not published")))
+
+
 def check_hardware(rep):
     from .state import memory_mb
     cpu, mem = os.cpu_count() or 0, memory_mb()
@@ -390,6 +414,7 @@ def run_checks(quick):
     check_queue(rep)
     check_disk(rep)
     check_routing(rep)
+    check_runner(rep)
     if not quick:
         check_dns(rep, name)
         check_time(rep)

@@ -17,6 +17,7 @@ COMMANDS = {
     "selfupdate": "scanoria.selfupdate",
     "state": "scanoria.state",
     "selftest": "scanoria.selftest",
+    "runner": "scanoria.runner",
 }
 
 
