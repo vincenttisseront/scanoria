@@ -31,9 +31,11 @@ interface AiStatusResponse {
     resolution: { pinned: string[], current: string[], changed: boolean, error: string | null } | null
     candidate: { url: string, version: string, addresses: string[], insecure: boolean } | null
   } | null
-  probe: { status: string, error: string | null, at: string | null, version: string | null } | null
-  models: { name: string, capabilities: string[] }[]
+  probe: { status: string, error: string | null, at: string | null, version: string | null, pending?: boolean } | null
+  models: { name: string, capabilities: string[], parameters_b?: number | null, context?: number | null }[]
+  models_at?: string | null
   embedding: { model: string, reason: string } | null
+  defaults?: { generation: string | null, embedding: string | null }
   tasks: TaskState[]
   circuit: { state: 'open' | 'closed', last_failure_at: string | null }
   latency_ms: number | null
@@ -148,13 +150,29 @@ async function disconnect() {
 }
 
 // --- Modèles ---
+// La découverte est faite par scanoria-ai (seul à pouvoir déchiffrer le jeton et
+// joindre le serveur) : la console dépose la demande puis suit l'état jusqu'à
+// la fin, avec un indicateur d'attente.
 const probing = ref(false)
+const PROBE_POLL_MS = 1500
+const PROBE_POLL_MAX = 40
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+async function waitProbe() {
+  for (let i = 0; i < PROBE_POLL_MAX && info.value?.probe?.pending; i++) {
+    await sleep(PROBE_POLL_MS)
+    await refresh(true)
+  }
+}
 async function rediscover() {
   probing.value = true
   try {
     await api('/api/ai/probe', { method: 'POST', body: {} })
-    toast.add({ title: t('ai.models.saved'), color: 'success', icon: 'i-lucide-circle-check' })
-    await refresh()
+    await refresh(true)
+    await waitProbe()
+    const p = info.value?.probe
+    if (p?.pending) toast.add({ title: t('ai.models.stillRunning'), color: 'info', icon: 'i-lucide-loader' })
+    else if (p?.status === 'error') toast.add({ title: t('ai.models.unreachable', { cause: outcomeLabel(p.error ?? 'error') }), color: 'error', icon: 'i-lucide-circle-x' })
+    else toast.add({ title: t('ai.models.discovered', { n: info.value?.models.length ?? 0 }), color: 'success', icon: 'i-lucide-circle-check' })
   }
   catch (err) {
     toast.add({ title: errorMessage(err), color: 'error', icon: 'i-lucide-circle-x' })
@@ -163,24 +181,70 @@ async function rediscover() {
     probing.value = false
   }
 }
+const probeBusy = computed(() => probing.value || !!info.value?.probe?.pending)
+const probeFailed = computed(() => !probeBusy.value && info.value?.probe?.status === 'error')
 
 const AUTO = '__auto__'
+const OTHER = '__other__'
+const MODEL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/
 const savingKind = ref<string | null>(null)
-const completionModels = computed(() => (info.value?.models ?? []).filter(m => m.capabilities.includes('completion')).map(m => m.name))
-function modelItems(task: TaskState) {
-  const names = new Set(completionModels.value)
-  if (task.override) names.add(task.override)
-  return [{ label: t('ai.models.automatic'), value: AUTO }, ...[...names].sort((a, b) => a.localeCompare(b)).map(n => ({ label: n, value: n }))]
+type ModelRow = AiStatusResponse['models'][number]
+const completionList = computed(() => (info.value?.models ?? []).filter(m => m.capabilities.includes('completion')))
+const embeddingList = computed(() => (info.value?.models ?? []).filter(m => m.capabilities.includes('embedding')))
+const completionModels = computed(() => completionList.value.map(m => m.name))
+function modelLabel(m: ModelRow) {
+  const parts = [m.name]
+  if (typeof m.parameters_b === 'number') parts.push(m.parameters_b >= 1 ? `${Math.round(m.parameters_b * 10) / 10} B` : `${Math.round(m.parameters_b * 1000)} M`)
+  if (typeof m.context === 'number') parts.push(t('ai.models.contextK', { k: Math.round(m.context / 1024) }))
+  return parts.join(' · ')
 }
-async function setOverride(kind: string, value: string) {
+/** Éléments d'une liste : automatique, modèles du serveur, choix actuel absent du serveur, saisie libre. */
+function pickerItems(list: ModelRow[], current: string | null, autoLabel: string, withOther = true) {
+  const items = [{ label: autoLabel, value: AUTO }]
+  for (const m of [...list].sort((a, b) => a.name.localeCompare(b.name))) items.push({ label: modelLabel(m), value: m.name })
+  if (current && !list.some(m => m.name === current)) items.push({ label: t('ai.models.missing', { name: current }), value: current })
+  if (withOther) items.push({ label: t('ai.models.other'), value: OTHER })
+  return items
+}
+const generationItems = computed(() => pickerItems(completionList.value, info.value?.defaults?.generation ?? null, t('ai.models.automatic')))
+const embeddingItems = computed(() => pickerItems(embeddingList.value, info.value?.defaults?.embedding ?? null, t('ai.models.automatic')))
+function modelItems(task: TaskState) {
+  const autoLabel = info.value?.defaults?.generation ? t('ai.models.sameAsDefault') : t('ai.models.automatic')
+  return pickerItems(completionList.value, task.override, autoLabel, false)
+}
+
+/** Saisie libre de secours (liste vide ou serveur injoignable) : « default » ou « embedding ». */
+const custom = reactive<Record<'default' | 'embedding', { open: boolean, value: string }>>({
+  default: { open: false, value: '' },
+  embedding: { open: false, value: '' },
+})
+const customValid = (key: 'default' | 'embedding') => MODEL_NAME_RE.test(custom[key].value.trim())
+function pickGlobal(key: 'default' | 'embedding', value: string) {
+  if (value === OTHER) {
+    custom[key].open = true
+    custom[key].value = ''
+    return
+  }
+  custom[key].open = false
+  void setOverride(key, value)
+}
+async function saveCustom(key: 'default' | 'embedding') {
+  if (!customValid(key)) return
+  if (await setOverride(key, custom[key].value.trim())) custom[key].open = false
+}
+
+async function setOverride(kind: string, value: string): Promise<boolean> {
   savingKind.value = kind
   try {
     await api('/api/ai/models', { method: 'PUT', body: { models: { [kind]: value === AUTO ? null : value } } })
     toast.add({ title: t('ai.models.saved'), color: 'success', icon: 'i-lucide-circle-check' })
-    await refresh()
+    await refresh(true)
+    void waitProbe()
+    return true
   }
   catch (err) {
     toast.add({ title: errorMessage(err), color: 'error', icon: 'i-lucide-circle-x' })
+    return false
   }
   finally {
     savingKind.value = null
@@ -410,17 +474,93 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
               icon="i-lucide-refresh-cw"
               color="neutral"
               variant="outline"
-              :loading="probing"
+              :loading="probeBusy"
+              :disabled="probeBusy"
               :label="t('ai.models.rediscover')"
+              data-testid="ai-rediscover"
               @click="rediscover"
             />
           </div>
         </template>
         <p
-          v-if="!completionModels.length && info.probe"
+          v-if="probeBusy"
+          class="mb-3 flex items-center gap-2 text-sm text-muted"
+          data-testid="ai-probe-pending"
+        >
+          <UIcon
+            name="i-lucide-loader-circle"
+            class="size-4 animate-spin"
+          />
+          {{ t('ai.models.discovering') }}
+        </p>
+        <UAlert
+          v-else-if="probeFailed"
+          class="mb-3"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-server-off"
+          data-testid="ai-probe-error"
+          :title="t('ai.models.unreachable', { cause: outcomeLabel(info.probe?.error ?? 'error') })"
+          :description="info.models_at ? t('ai.models.lastKnown', { at: formatDate(info.models_at) }) : t('ai.models.typeName')"
+        />
+        <p
+          v-else-if="!completionModels.length && info.probe"
           class="mb-3 text-sm text-warning"
         >
           {{ t('ai.models.none') }}
+        </p>
+
+        <!-- Cas courant : un modèle de rédaction pour toutes les tâches, un modèle d'embedding. -->
+        <div
+          class="mb-4 grid gap-4 sm:grid-cols-2"
+          data-testid="ai-model-pickers"
+        >
+          <div
+            v-for="key in (['default', 'embedding'] as const)"
+            :key="key"
+            :data-testid="`ai-pick-${key}`"
+          >
+            <p class="mb-1 text-sm font-medium">
+              {{ t(key === 'default' ? 'ai.models.generation' : 'ai.models.embedding') }}
+            </p>
+            <template v-if="isAdmin">
+              <USelect
+                :model-value="(key === 'default' ? info.defaults?.generation : info.defaults?.embedding) ?? AUTO"
+                :items="key === 'default' ? generationItems : embeddingItems"
+                :loading="savingKind === key"
+                :disabled="savingKind === key"
+                class="w-full"
+                @update:model-value="pickGlobal(key, $event)"
+              />
+              <div
+                v-if="custom[key].open"
+                class="mt-2 flex gap-2"
+              >
+                <UInput
+                  v-model="custom[key].value"
+                  :placeholder="key === 'default' ? 'qwen2.5-coder:14b' : 'nomic-embed-text'"
+                  class="flex-1 font-mono"
+                  :data-testid="`ai-custom-${key}`"
+                  @keydown.enter="saveCustom(key)"
+                />
+                <UButton
+                  :label="t('ai.models.use')"
+                  :disabled="!customValid(key)"
+                  :loading="savingKind === key"
+                  @click="saveCustom(key)"
+                />
+              </div>
+            </template>
+            <p
+              v-else
+              class="font-mono text-sm"
+            >
+              {{ (key === 'default' ? info.defaults?.generation : info.defaults?.embedding) ?? t('ai.models.automatic') }}
+            </p>
+          </div>
+        </div>
+        <p class="mb-2 text-sm text-muted">
+          {{ t('ai.models.perTask') }}
         </p>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -482,7 +622,7 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
                   <span
                     v-if="task.embedding"
                     class="text-xs text-muted"
-                  >{{ t('ai.models.embeddingAuto') }}</span>
+                  >{{ t('ai.models.embeddingAbove') }}</span>
                   <USelect
                     v-else
                     :model-value="task.override ?? AUTO"

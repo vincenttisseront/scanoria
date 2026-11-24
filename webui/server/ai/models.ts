@@ -15,7 +15,16 @@ export interface ModelInfo {
   family: string | null
 }
 
-export type SelectionReason = 'admin-choice' | 'only-model' | 'best-balance' | 'largest-context' | 'admin-choice-missing'
+export type SelectionReason = 'admin-choice' | 'admin-default' | 'only-model' | 'best-balance' | 'largest-context' | 'admin-choice-missing'
+
+/**
+ * Clés réservées des choix forcés (appliance_settings ai.models), à côté des
+ * types de tâche : « default » = modèle de rédaction de toutes les tâches sans
+ * choix propre, « embedding » = modèle d'embedding (I7). Une seule liste
+ * déroulante suffit donc dans le cas courant.
+ */
+export const DEFAULT_KEY = 'default'
+export const EMBEDDING_KEY = 'embedding'
 
 export interface ModelChoice {
   model: string
@@ -81,15 +90,23 @@ export function selectModels(models: ModelInfo[], taskKinds: readonly string[], 
   const embeddings = models.filter(m => m.capabilities.includes('embedding'))
   const ranked = [...completion].sort((a, b) => completionScore(b) - completionScore(a) || a.name.localeCompare(b.name))
   const tasks: Record<string, ModelChoice | null> = {}
+  const fallback = overrides[DEFAULT_KEY]
+  const forcedDefault = fallback ? completion.find(m => m.name === fallback) : undefined
   for (const kind of taskKinds) {
-    const wanted = overrides[kind]
-    const forced = wanted ? completion.find(m => m.name === wanted) : undefined
+    const own = overrides[kind]
+    const forced = own ? completion.find(m => m.name === own) : undefined
     if (forced) tasks[kind] = choice(forced, 'admin-choice')
+    else if (forcedDefault) tasks[kind] = choice(forcedDefault, 'admin-default')
     else if (ranked.length === 0) tasks[kind] = null
-    else tasks[kind] = choice(ranked[0]!, wanted ? 'admin-choice-missing' : ranked.length === 1 ? 'only-model' : 'best-balance')
+    else tasks[kind] = choice(ranked[0]!, own || fallback ? 'admin-choice-missing' : ranked.length === 1 ? 'only-model' : 'best-balance')
   }
+  const wantedEmb = overrides[EMBEDDING_KEY]
+  const forcedEmb = wantedEmb ? embeddings.find(m => m.name === wantedEmb) : undefined
   const emb = [...embeddings].sort((a, b) => (b.context ?? 0) - (a.context ?? 0) || a.name.localeCompare(b.name))[0]
-  return { tasks, embedding: emb ? choice(emb, embeddings.length === 1 ? 'only-model' : 'largest-context') : null }
+  const embedding = forcedEmb
+    ? choice(forcedEmb, 'admin-choice')
+    : emb ? choice(emb, wantedEmb ? 'admin-choice-missing' : embeddings.length === 1 ? 'only-model' : 'largest-context') : null
+  return { tasks, embedding }
 }
 
 /** Contexte dimensionné à la demande : entrée estimée + réponse, arrondi au kilo-jeton. */

@@ -68,7 +68,7 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/ai/connector': { post: { summary: 'Request set-ai-endpoint: enable or change the Ollama connector (confirmed: true required)', role: 'admin', body: 'AiConnector', status: 202 } },
   '/api/ai/disconnect': { post: { summary: 'Request set-ai-endpoint: remove the connector and close its firewall rule', role: 'admin', status: 202 } },
   '/api/ai/probe': { post: { summary: 'Rediscover the models of the AI server', role: 'admin', status: 202 } },
-  '/api/ai/models': { put: { summary: 'Force a model per AI task, or back to automatic (null)', role: 'admin', body: 'AiModels' } },
+  '/api/ai/models': { put: { summary: 'Choose the text generation model for all tasks (default), the embedding model (embedding) or a model per task; null goes back to automatic', role: 'admin', body: 'AiModels' } },
   '/api/ai/explain': { post: { summary: 'Interactive AI request: explanation (I2, I9), pre-triage (I3), scan summary (I5), secret type (I14), failure diagnosis (I15), rule translation (I17)', role: 'viewer', body: 'AiExplain', status: 202 } },
   '/api/ai/output': { get: { summary: 'Latest AI output for a finding, a scan or a rule key, marked as AI with model and digest, with the caller\'s feedback', role: 'viewer' } },
   '/api/ai/suggestions': { get: { summary: 'Latest AI pre-triage (I3) or secret type (I14) for up to 200 findings; suggestions only, never a status change', role: 'viewer' } },
@@ -218,7 +218,7 @@ export default defineEventHandler(async () => {
         },
         AiModels: {
           type: 'object', additionalProperties: false, required: ['models'],
-          properties: { models: { type: 'object', additionalProperties: { type: ['string', 'null'], maxLength: 200 } } },
+          properties: { models: { type: 'object', description: 'Keys: default, embedding, or a text generation task kind', additionalProperties: { type: ['string', 'null'], maxLength: 200 } } },
         },
         AiExplain: {
           type: 'object', additionalProperties: false, required: ['kind', 'subject_id'],

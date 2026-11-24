@@ -14,6 +14,7 @@ import { AI_PRIORITY, connectorEnabled, enqueueAiTask } from './enqueue'
 import { COMPLETION_KINDS, TASK_KINDS, TASKS } from './tasks'
 import { EMBED_SUITE, SUITES } from './testbed'
 import { UUID_RE } from './task-kit'
+import { DEFAULT_KEY, EMBEDDING_KEY } from './models'
 import { failedModules, proposeTimeout, type TimeoutProposal } from './tasks/diagnose'
 import { ruleKey } from './tasks/translate'
 import { myFeedback } from './feedback'
@@ -36,9 +37,15 @@ export const ConnectorBody = z.strictObject({
   .refine(b => !b.url.startsWith('http:') || b.allow_insecure === true, { message: 'http requires allow_insecure', path: ['allow_insecure'] })
 export type ConnectorBody = z.infer<typeof ConnectorBody>
 
-/** Choix forcé par tâche de rédaction ; le modèle d'embedding (I7) est choisi automatiquement. */
+/**
+ * Choix forcé : « default » (toutes les tâches de rédaction), « embedding »
+ * (I7) ou une tâche de rédaction précise ; null rend au choix automatique.
+ * Un nom libre est accepté (saisie de secours quand la liste est vide) : tant
+ * qu'il est absent du serveur, le choix automatique s'applique et le dit.
+ */
+export const MODEL_KEYS = [DEFAULT_KEY, EMBEDDING_KEY, ...COMPLETION_KINDS] as [string, ...string[]]
 export const ModelsBody = z.strictObject({
-  models: z.partialRecord(z.enum(COMPLETION_KINDS as [string, ...string[]]), z.string().min(1).max(200).nullable()),
+  models: z.partialRecord(z.enum(MODEL_KEYS), z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/).nullable()),
 })
 
 /** Identifiant de sujet conforme à la tâche (uuid, ou clé outil:version:règle pour I17). */
@@ -207,6 +214,9 @@ export async function aiStatus(db: Queryable, paths: AiPaths = aiPaths()) {
   const queue = (await db.query<{ status: string, n: number }>(
     `SELECT status, count(*)::int AS n FROM ai_tasks WHERE status IN ('queued', 'running') GROUP BY status`,
   )).rows
+  const probePending = (await db.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM ai_tasks WHERE kind = 'probe' AND status IN ('queued', 'running')`,
+  )).rows[0]!.n > 0
   const latencies = calls.filter(c => c.outcome === 'ok' && c.duration_ms !== null).map(c => c.duration_ms!)
   const lastFailure = calls.find(c => c.outcome !== 'ok' && c.outcome !== 'invalid-output')
   const failuresInRow = calls.findIndex(c => c.outcome === 'ok' || c.outcome === 'invalid-output')
@@ -222,7 +232,7 @@ export async function aiStatus(db: Queryable, paths: AiPaths = aiPaths()) {
       /** I7 : modèle d'embedding, choisi automatiquement (aucun choix forcé). */
       embedding,
       model: choice,
-      override: embedding ? null : (settings.models[kind] ?? null),
+      override: (embedding ? settings.models[EMBEDDING_KEY] : settings.models[kind]) ?? null,
       testbed: tbCurrent
         ? {
             score: tbCurrent.output.score, threshold: tbCurrent.output.threshold, passed: tbCurrent.output.passed, cases: tbCurrent.output.cases, at: tbCurrent.finished_at.toISOString(),
@@ -243,10 +253,17 @@ export async function aiStatus(db: Queryable, paths: AiPaths = aiPaths()) {
     token_stored: settings.tokenCredentialId !== null,
     check,
     probe: probeRow
-      ? { status: probeRow.status, error: probeRow.error, at: probeRow.finished_at?.toISOString() ?? null, version: (lastGood?.output?.version as string | undefined) ?? null }
-      : null,
+      ? {
+          status: probeRow.status, error: probeRow.error, at: probeRow.finished_at?.toISOString() ?? null,
+          version: (lastGood?.output?.version as string | undefined) ?? null, pending: probePending,
+        }
+      : (probePending ? { status: 'queued', error: null, at: null, version: null, pending: true } : null),
+    /** Liste de la dernière découverte réussie, et sa date (gardée si le serveur ne répond plus). */
     models: (lastGood?.output?.models ?? []) as unknown[],
+    models_at: lastGood?.finished_at.toISOString() ?? null,
     embedding: selection?.embedding ?? null,
+    /** Choix globaux : un modèle de rédaction pour toutes les tâches, un modèle d'embedding. */
+    defaults: { generation: settings.models[DEFAULT_KEY] ?? null, embedding: settings.models[EMBEDDING_KEY] ?? null },
     tasks,
     circuit: { state: endpoint.enabled && circuitOpen ? 'open' : 'closed', last_failure_at: lastFailure?.at.toISOString() ?? null },
     latency_ms: latencies.length ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null,

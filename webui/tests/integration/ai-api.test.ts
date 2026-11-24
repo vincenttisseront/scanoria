@@ -346,6 +346,18 @@ describe.skipIf(!DATABASE_URL)('API du connecteur IA (h3, PostgreSQL réel)', ()
     expect(probe.status).toBe(202)
     const queued = await db.pool.query(`SELECT count(*)::int AS n FROM ai_tasks WHERE kind = 'probe' AND status = 'queued'`)
     expect(queued.rows[0].n).toBe(1)
+
+    // Découverte en attente visible par la console (indicateur d'attente).
+    expect((await call('/api/ai/status', { client: operator })).data.probe).toMatchObject({ pending: true })
+
+    // Liste déroulante globale : rédaction pour toutes les tâches, embedding, nom libre de secours.
+    const globals = await call('/api/ai/models', { method: 'PUT', client: admin, json: { models: { default: 'qwen-test:14b', embedding: 'nomic-embed-text' } } })
+    expect(globals.status, JSON.stringify(globals.data)).toBe(200)
+    st = await call('/api/ai/status', { client: operator })
+    expect(st.data.defaults).toEqual({ generation: 'qwen-test:14b', embedding: 'nomic-embed-text' })
+    expect((await call('/api/ai/models', { method: 'PUT', client: admin, json: { models: { default: 'bad name; rm' } } })).status).toBe(400)
+    await call('/api/ai/models', { method: 'PUT', client: admin, json: { models: { default: null, embedding: null } } })
+    expect((await call('/api/ai/status', { client: operator })).data.defaults).toEqual({ generation: null, embedding: null })
   })
 
   it('explications : demande interactive, sortie lue, projet exclu respecté, sujet inconnu', async () => {

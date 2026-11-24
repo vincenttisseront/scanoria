@@ -18,7 +18,7 @@ export interface FakeModel {
   family?: string
 }
 
-export type FakeMode = 'ok' | 'down' | 'slow' | 'invalid-json' | 'invalid-schema' | 'echo-data' | 'uncited'
+export type FakeMode = 'ok' | 'down' | 'slow' | 'invalid-json' | 'invalid-schema' | 'echo-data' | 'uncited' | 'unauthorized'
 
 export interface RecordedRequest {
   method: string
@@ -180,6 +180,8 @@ export async function startFakeOllama(models: FakeModel[] = [
     const body = Buffer.concat(chunks).toString('utf8')
     requests.push({ method: req.method ?? '', path: req.url ?? '', headers: req.headers, body })
     if (state.mode === 'down') return send(res, 503, { error: 'unavailable' })
+    // Proxy placé devant Ollama qui refuse le jeton porteur.
+    if (state.mode === 'unauthorized') return send(res, 401, { error: 'unauthorized' })
     if (state.mode === 'slow' || state.delayMs) await new Promise(r => setTimeout(r, state.delayMs || 2000))
     if (req.url === '/api/version') return send(res, 200, { version: '0.12.3' })
     if (req.url === '/api/tags') {

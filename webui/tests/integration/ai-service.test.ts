@@ -310,6 +310,17 @@ describe.skipIf(!DATABASE_URL)('service scanoria-ai (PostgreSQL réel, faux Olla
     expect(await task(id)).toMatchObject({ status: 'skipped', error: 'disabled-by-testbed' })
   })
 
+  it('jeton refusé par le serveur : la découverte échoue avec une cause lisible', async () => {
+    fake.mode = 'unauthorized'
+    const s = makeService()
+    await pool.query(`UPDATE ai_tasks SET status = 'done' WHERE status IN ('queued', 'running')`)
+    await s.enqueueInternal('probe', 'connector', 70)
+    await drain(s)
+    const row = (await pool.query(`SELECT error FROM ai_tasks WHERE kind = 'probe' AND status = 'error' ORDER BY finished_at DESC LIMIT 1`)).rows[0]
+    expect(row).toMatchObject({ error: 'unauthorized' })
+    await pool.query(`DELETE FROM ai_tasks WHERE kind = 'probe' AND status = 'error'`)
+  })
+
   it('reprend une tâche interrompue et rafraîchit une découverte trop ancienne', async () => {
     const s = makeService()
     const id = (await pool.query<{ id: string }>(
