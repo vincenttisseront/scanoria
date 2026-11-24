@@ -177,6 +177,7 @@ canoniques).
 | `scanoria-cert-renew.timer` | quotidien ; `issue-certificate` (sans `force`) en mode interne |
 | `scanoria-firewall.service` | charge les règles au démarrage, avant le réseau |
 | `scanoria-firstboot.service` | lot C ; tant que `firstboot.done` est absent |
+| `scanoria-dns-check.timer` + `.path` + `.service` | 0.2 : `exec --origin timer --type check-dns` toutes les heures, à chaque réécriture de `appliance.json` (changement de nom) et après chaque changement de routage (§ 4.1) |
 
 ### 3.6 Environnement de la console (`/etc/scanoria/console.env`)
 
@@ -217,6 +218,46 @@ La console expose `GET /api/health` sans authentification :
   propriété du rôle `scanoria`, `pg_hba` : `local scanoria scanoria peer`,
   locale `en_US.UTF-8`.
 
+### 4.1 Aiguillage des modules par nom (0.2)
+
+- `scanoria.routing.apply(fqdn, services)`, appelé par le moteur des modules sous
+  le verrou du helper, avec la liste **complète** des modules `service`
+  `[{id, hostname, port, enabled}]`. Il écrit `/etc/nginx/scanoria.d/`
+  (inclus par le site de la console) depuis
+  `/usr/share/scanoria/nginx/modules/*.tmpl` :
+  - `module-<id>.conf` : module actif → `<hostname>.<nom>` vers
+    `127.0.0.1:<port>`, certificat générique, en-têtes de sécurité de la console
+    (cadre `SAMEORIGIN`, en-têtes amont masqués), corps jusqu'à 256 Mio sans
+    tampon ; module désactivé → redirection 302 vers
+    `https://<nom>/modules/unavailable?m=<id>` ;
+  - `00-catchall.conf` : tout autre `<libellé>.<nom>` → même page
+    (`m=<libellé>`), et port 80 → `https://<libellé>.<nom>` ;
+  - un fichier géré absent de la liste est retiré, les autres fichiers du
+    répertoire ne sont jamais touchés.
+- Validation stricte avant toute écriture (`E_INVALID_PARAM`) : id
+  `[a-z0-9-]{1,64}`, libellé = une étiquette DNS en minuscules, nom complet
+  ≤ 253, port entier 1024–65535 hors 3000 et 5432, `enabled` booléen, ni id ni
+  libellé ni port actif en double. Écriture atomique fichier par fichier, liens
+  plantés retirés sans être suivis, `nginx -t`, rechargement ; si `nginx -t`
+  échoue, l'ancien contenu est remis à l'identique (`E_INTERNAL`).
+- Dernière liste appliquée : `/var/lib/scanoria/routing/sites.json`
+  (`{fqdn, applied_at, services}`). `routing.resync()` la rejoue quand le nom
+  de l'appliance a changé (lancé par `check-dns`).
+- Chaque site porte une ligne `# scanoria-route: id=… mode=… host=… port=… fqdn=…`
+  relue par le contrôle `routing.sites` de `scanoria-selftest`.
+
+### 4.2 Vérification DNS (0.2)
+
+Demande `check-dns {}` : résout `<nom>`, `*.<nom>` (nom de sonde aléatoire) et
+`<libellé>.<nom>` de chaque module routé, en `A` (et `AAAA` si l'appliance a une
+IPv6), par `resolvectl --synthesize=no --cache=no -p dns` (sans `/etc/hosts`,
+où l'appliance se déclare elle-même). Adresse attendue : adresse source de la
+route vers une adresse de documentation (`ip route get`, aucun paquet émis).
+Résultat dans `/var/lib/scanoria/dns/status.json` (root:scanoria 0640,
+`schemas/dns-status.schema.json`) : `{fqdn, checked_at, records: [{name, type,
+expected, resolved, ok}]}` ; `output` : `{fqdn, records, ok, not_resolved,
+routing_resynced}`. Sans nom : `E_PRECONDITION` et `fqdn: null`.
+
 ## 5. Protocole des demandes console → scanoria-helper
 
 ### 5.1 Types (liste fermée en 0.1)
@@ -232,6 +273,7 @@ La console expose `GET /api/health` sans authentification :
 | `rollback-update` | `expected_current`, `expected_target` | § 6.5 ; la version abandonnée n'est plus réinstallée automatiquement | 3300 s |
 | `set-update-policy` | `channel`, `auto_check`, `auto_apply`, `maintenance_window` | `update.json` ; `auto_apply` exige une fenêtre | 30 s |
 | `run-selftest` | `quick` | `scanoria-selftest --json` ; rapport dans `output` | 300 s |
+| `check-dns` | aucun | 0.2, § 4.2 : sites des modules régénérés si le nom a changé, puis vérification DNS | 180 s |
 
 Schémas complets (JSON Schema 2020-12, `additionalProperties: false` partout) :
 `src/rootfs/usr/share/scanoria/requests/<type>.schema.json`. La console valide
@@ -522,6 +564,7 @@ Vérifications (identifiants stables, traduits par la console) :
 | `firewall.loaded` | table `inet scanoria` chargée, ensembles non vides | oui |
 | `requests.queue` | aucune demande de plus de 10 min dans `incoming/` (`warn`) | oui |
 | `disk.free` | `/` et `/var` : < 10 % `warn`, < 5 % `fail` | oui |
+| `routing.sites` | 0.2 : sites de `/etc/nginx/scanoria.d/` générés pour le nom actuel et cohérents avec `modules/state.json` (aucun site d'un module absent, module routé = site actif, module désactivé jamais servi) | oui |
 | `dns.resolve` | `<nom>` et `test.<nom>` résolus (`warn`) | non |
 | `time.sync` | horloge synchronisée (`warn`) | non |
 | `hardware.floor` | ≥ 2 vCPU, 4 Go, 40 Go (`warn`) | non |
