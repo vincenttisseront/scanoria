@@ -9,11 +9,19 @@
 import { z } from 'zod'
 import { ExceptionTargets, type ExceptionKind } from '#shared/analysis'
 import type { Queryable } from '../utils/db'
+import { redact } from './redact'
 
 /** Durée maximale d'une exception : elle doit être revue au moins une fois par an. */
 export const MAX_EXCEPTION_DAYS = 366
 
-const dateSchema = z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)
+/** Date réelle au format AAAA-MM-JJ (le 31 novembre est refusé). */
+export function isValidDay(value: string): boolean {
+  if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value)) return false
+  const d = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
+}
+
+const dateSchema = z.string().refine(isValidDay)
 
 const base = {
   project_id: z.string().uuid(),
@@ -81,10 +89,13 @@ export async function listExceptions(db: Queryable, projectId: string, includeIn
 
 export async function createException(db: Queryable, input: ExceptionCreate, userId: number | null, today = isoDay()): Promise<ExceptionRow> {
   const max = isoDay(MAX_EXCEPTION_DAYS, new Date(`${today}T00:00:00Z`))
-  if (input.expires_on < today || input.expires_on > max) throw new ExceptionError('E_VALIDATION')
+  if (!isValidDay(input.expires_on) || input.expires_on < today || input.expires_on > max) throw new ExceptionError('E_VALIDATION')
   const project = await db.query('SELECT 1 FROM projects WHERE id = $1', [input.project_id])
   if (!project.rowCount) throw new ExceptionError('E_NOT_FOUND')
-  if (input.kind === 'vuln' && /^MAL-/i.test(String(input.target.vuln_id))) throw new ExceptionError('E_MALICIOUS')
+  // H4 : aucun avis MAL- ne s'exempte, ni par avis ni par règle (le quality gate
+  // ignore de plus toute exception pour un résultat malveillant).
+  if ((input.kind === 'vuln' && /^MAL-/i.test(String(input.target.vuln_id)))
+    || (input.kind === 'rule' && /^MAL-/i.test(String(input.target.rule_id)))) throw new ExceptionError('E_MALICIOUS')
   if (input.kind === 'finding') {
     const f = await db.query<{ malicious: boolean }>('SELECT malicious FROM findings WHERE id = $1 AND project_id = $2', [input.target.finding_id, input.project_id])
     if (!f.rows[0]) throw new ExceptionError('E_NOT_FOUND')
@@ -93,7 +104,7 @@ export async function createException(db: Queryable, input: ExceptionCreate, use
   const r = await db.query<{ id: string }>(
     `INSERT INTO exceptions (project_id, kind, target, reason, expires_on, created_by)
      VALUES ($1, $2, $3, $4, $5::date, $6) RETURNING id`,
-    [input.project_id, input.kind, JSON.stringify(input.target), input.reason, input.expires_on, userId],
+    [input.project_id, input.kind, JSON.stringify(input.target), redact(input.reason), input.expires_on, userId],
   )
   return (await getException(db, r.rows[0]!.id))!
 }

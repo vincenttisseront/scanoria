@@ -292,6 +292,25 @@ describe('findings : masquage des secrets (F7)', () => {
     expect(redact('Package: minimist author: someone token in file')).toBe('Package: minimist author: someone token in file')
   })
 
+  it('secret sans mot-clé : l\'extrait d\'un résultat de secret n\'est jamais gardé ; CWE-798 = secret', () => {
+    const value = `Xq7!mZ9pLr2#${alnum(8)}&kLm`
+    const out = parseSarif(sarif([result('generic-api-key', 'a.cfg', `value ${value} end`)]), { moduleId: 'gitleaks', moduleCategories: ['secrets'] })
+    expect(JSON.stringify(out)).not.toContain(value)
+    expect(out.findings[0]!.snippet).toMatch(/^\[secret masqué : snippet, longueur \d+\]$/)
+    const sast = parseSarif(sarif([result('hardcoded', 'a.py', `pw = "${value}"`, 1, { properties: { tags: ['CWE-798'] } })]), { moduleId: 'semgrep', moduleCategories: ['sast'] })
+    expect(sast.findings[0]).toMatchObject({ category: 'secrets', secretType: 'hardcoded' })
+    expect(JSON.stringify(sast)).not.toContain(value)
+  })
+
+  it('aucun retour arrière quadratique ; texte borné', () => {
+    const t0 = Date.now()
+    redact(`token${' '.repeat(200_000)}x`)
+    redact(`Bearer${' '.repeat(200_000)}x`)
+    redact(`password${'a'.repeat(200_000)}`, { aggressive: true })
+    expect(Date.now() - t0).toBeLessThan(2000)
+    expect(redact('a'.repeat(20_000)).length).toBeLessThanOrEqual(8001)
+  })
+
   it('forme d\'une valeur', () => {
     expect(secretShape('0123', 't')).toEqual({ type: 't', length: 4, charset: 'digits' })
     expect(secretShape('deadbeef').charset).toBe('hex')

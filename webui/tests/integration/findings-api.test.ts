@@ -137,6 +137,7 @@ describe.skipIf(!DATABASE_URL)('API des résultats (h3, PostgreSQL réel)', () =
     expect((await call(`/api/findings/${ids.vuln}/status`, 'operator', { method: 'POST', json: { status: 'accepted', reason: 'x' } })).status).toBe(400)
     expect((await call(`/api/findings/${ids.vuln}/status`, 'operator', { method: 'POST', json: { status: 'accepted', reason: 'correctif prévu', until: isoDay(400) } })).status).toBe(400)
     expect((await call(`/api/findings/${ids.vuln}/status`, 'operator', { method: 'POST', json: { status: 'fixed' } })).status).toBe(400)
+    expect((await call(`/api/findings/${ids.vuln}/status`, 'operator', { method: 'POST', json: { status: 'accepted', reason: 'date invalide', until: '2026-11-31' } })).status).toBe(400)
     const ok = await call(`/api/findings/${ids.vuln}/status`, 'operator', { method: 'POST', json: { status: 'accepted', reason: 'correctif prévu', until: isoDay(20) } })
     expect(ok.status).toBe(200)
     expect(ok.data).toMatchObject({ status: 'accepted', status_by: 'operator', status_reason: 'correctif prévu' })

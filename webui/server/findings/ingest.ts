@@ -23,6 +23,8 @@ import { computeCoverage, mergeCoverageGaps, type CoverageGap } from './coverage
 export const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 const OUTPUT_PATH_RE = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/
 const BATCH = 500
+/** Erreurs qui rendent la sortie d'un module inexploitable (rien ne peut passer « corrigé »). */
+const UNREADABLE = new Set<string>(['output-unreadable', 'output-too-large', 'output-path', 'invalid-json', 'invalid-document'])
 
 export interface IngestInput {
   scanId: string
@@ -88,7 +90,7 @@ export async function readOutput(resultDir: string, rel: string): Promise<{ doc?
       if ((await lstat(cur)).isSymbolicLink()) return { error: { code: 'output-path' } }
     }
     const st = await lstat(full)
-    if (!st.isFile()) return { error: { code: 'output-unreadable' } }
+    if (!st.isFile() || st.nlink > 1) return { error: { code: 'output-unreadable' } }
     if (st.size > MAX_OUTPUT_BYTES) return { error: { code: 'output-too-large', detail: `${st.size}` } }
     const real = await realpath(full)
     if (!real.startsWith(root + sep)) return { error: { code: 'output-path' } }
@@ -223,9 +225,13 @@ export async function ingestModuleOutputs(db: Db, input: IngestInput): Promise<I
     const severities = await resolveSeverities(q, input.moduleId, unique.map(f => f.nativeSeverity), hints.severityMap)
     const withSeverity = unique.map(f => ({ ...f, severity: severities.get(f.nativeSeverity) ?? 'medium' }))
     const res = await upsert(q, scan, withSeverity)
-    if (errors.some(e => e.code === 'truncated')) {
-      await mergeCoverageGaps(q, scan.id, [{ kind: 'output-truncated', module: input.moduleId }], ['output-truncated'], input.moduleId)
-    }
+    // G15 : sortie tronquée ou illisible consignée dans la couverture. Une sortie
+    // illisible empêche aussi de déclarer « corrigés » les résultats de ce module.
+    const gaps: CoverageGap[] = []
+    if (errors.some(e => e.code === 'truncated')) gaps.push({ kind: 'output-truncated', module: input.moduleId })
+    const unreadable = errors.find(e => UNREADABLE.has(e.code))
+    if (unreadable) gaps.push({ kind: 'output-error', module: input.moduleId, code: unreadable.code })
+    await mergeCoverageGaps(q, scan.id, gaps, ['output-truncated', 'output-error'], input.moduleId)
     return res
   })
 
@@ -253,8 +259,9 @@ export interface FinalizeOutcome {
  * Contrat 5 : après le dernier module.
  * - is_new : absent de la dernière analyse réussie de la même branche (tout est
  *   nouveau au premier passage) ;
- * - complete : un résultat vu en dernier sur cette branche, d'un module qui a
- *   tourné, et absent de l'analyse passe « corrigé » ;
+ * - complete : un résultat présent dans l'analyse réussie précédente de la même
+ *   branche, d'un module qui a tourné et dont la sortie a été lue, et absent de
+ *   celle-ci passe « corrigé » (sans analyse précédente, rien n'est corrigé) ;
  * - couverture (G15) dans scans.coverage.gaps.
  */
 export async function finalizeScanFindings(db: Db, scanId: string, opts: { complete: boolean }): Promise<FinalizeOutcome> {
@@ -275,15 +282,18 @@ export async function finalizeScanFindings(db: Db, scanId: string, opts: { compl
       [scan.id, prevId],
     )
     let fixedCount = 0
-    if (opts.complete) {
+    if (opts.complete && prevId) {
       const fixed = await q.query(
         `UPDATE findings f SET status = 'fixed', status_until = NULL, status_by = NULL, status_at = now(), updated_at = now()
           WHERE f.project_id = $1
             AND (f.status IN ('new', 'confirmed') OR (f.status = 'accepted' AND f.status_until < current_date))
             AND f.tool IN (SELECT module_id FROM scan_modules WHERE scan_id = $2 AND status = 'ok')
-            AND f.last_scan_id IN (SELECT id FROM scans WHERE project_id = $1 AND ref = $3)
+            AND f.tool NOT IN (SELECT g->>'module' FROM scans s, jsonb_array_elements(
+                  CASE WHEN jsonb_typeof(s.coverage->'gaps') = 'array' THEN s.coverage->'gaps' ELSE '[]'::jsonb END) g
+                 WHERE s.id = $2 AND g->>'kind' = 'output-error')
+            AND EXISTS (SELECT 1 FROM scan_findings p WHERE p.scan_id = $3 AND p.finding_id = f.id)
             AND NOT EXISTS (SELECT 1 FROM scan_findings sf WHERE sf.scan_id = $2 AND sf.finding_id = f.id)`,
-        [scan.project_id, scan.id, scan.ref],
+        [scan.project_id, scan.id, prevId],
       )
       fixedCount = fixed.rowCount ?? 0
     }

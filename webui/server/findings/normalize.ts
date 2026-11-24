@@ -185,6 +185,9 @@ export function fixedFromHelp(markdown: string, name: string): string[] {
   return [...out]
 }
 
+/** Identifiants codés en dur : mot de passe (259), identifiants (798), clé (321). */
+const SECRET_CWES = new Set(['CWE-259', 'CWE-321', 'CWE-798'])
+
 /**
  * Catégorie d'un résultat (findings.category) : déduite des étiquettes, des
  * identifiants d'avis et des catégories déclarées par le module.
@@ -194,9 +197,11 @@ export function inferCategory(opts: {
   tags: string[]
   hasVuln: boolean
   hasPackage: boolean
+  cwe?: string[]
 }): Category | 'quality' {
   const tags = opts.tags.map(t => t.toLowerCase())
   const mod = opts.moduleCategories
+  if (opts.cwe?.some(c => SECRET_CWES.has(c))) return 'secrets'
   if (tags.some(t => t === 'secret' || t === 'secrets') || (mod.length && mod.every(c => c === 'secrets'))) return 'secrets'
   if (opts.hasVuln || opts.hasPackage || tags.includes('vulnerability')) return mod.includes('container') && !mod.includes('sca') ? 'container' : 'sca'
   if (tags.some(t => t === 'misconfiguration' || t === 'iac')) return 'iac'

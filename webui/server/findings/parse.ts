@@ -6,7 +6,7 @@
 // nettoyés et masqués (aucun secret), aucun HTML interprété (l'interface
 // échappe tout). Fonctions pures, sans accès à la base.
 
-import { redact } from './redact'
+import { maskToken, redact } from './redact'
 import {
   cleanText, ecosystemFromPath, extractCwe, extractVulnIds, fingerprintOf, fixedFromHelp,
   inferCategory, isVulnId, normalizePath, packageFromMessage, parsePurl, primaryVulnId, splitVersions,
@@ -62,7 +62,11 @@ const line = (v: unknown): number | null => (typeof v === 'number' && Number.isI
 
 const SEVERITY_TAG_RE = /^(critical|high|medium|low|unknown|info)$/i
 
-/** Ajoute un rang d'occurrence aux empreintes répétées (même règle, même fichier, sans contexte). */
+/**
+ * Ajoute un rang d'occurrence aux empreintes répétées (même règle, même fichier,
+ * même contexte). Limite connue : insérer une occurrence identique au-dessus
+ * renumérote les suivantes.
+ */
 function dedupe(findings: ParsedFinding[]): ParsedFinding[] {
   const seen = new Map<string, number>()
   const out: ParsedFinding[] = []
@@ -95,16 +99,19 @@ interface Draft {
 
 function finish(ctx: ParseContext, d: Draft): ParsedFinding {
   const vulnId = primaryVulnId(d.vulnIds) ?? (d.pkg ? d.ruleId : null)
+  const cwe = extractCwe(d.cweSources)
   const category = inferCategory({
     moduleCategories: ctx.moduleCategories,
     tags: d.tags,
     hasVuln: d.vulnIds.length > 0,
     hasPackage: !!d.pkg,
+    cwe,
   })
   const secret = category === 'secrets'
-  // Secrets : masquage agressif (toute chaîne aléatoire), jamais la valeur.
+  // Secrets : masquage agressif (toute chaîne aléatoire), jamais la valeur ;
+  // l'extrait d'un secret n'est jamais gardé, seulement sa forme.
   const mask = (s: string) => redact(s, { aggressive: secret })
-  const snippet = d.snippet ? mask(d.snippet) : ''
+  const snippet = !d.snippet ? '' : secret ? maskToken('snippet', d.snippet.length) : mask(d.snippet)
   const title = mask(d.title || d.ruleId)
   const message = mask(d.message)
   const ruleId = cleanText(d.ruleId, 255) || 'unknown'
@@ -120,11 +127,11 @@ function finish(ctx: ParseContext, d: Draft): ParsedFinding {
     startLine: d.startLine,
     endLine: d.endLine ?? d.startLine,
     snippet: snippet ? cleanText(snippet, MAX_SNIPPET) : null,
-    cwe: extractCwe(d.cweSources),
+    cwe,
     vulnIds: d.vulnIds,
     package: d.pkg,
     malicious: d.vulnIds.some(i => i.startsWith('MAL-')),
-    secretType: secret ? cleanText(d.secretHint ?? ruleId, 64) : null,
+    secretType: secret ? cleanText(redact(d.secretHint ?? ruleId, { aggressive: true }), 64) : null,
   }
 }
 
@@ -248,6 +255,10 @@ export function parseCycloneDx(doc: unknown, ctx: ParseContext): ParseOutput {
     const label = ratings.map(r => str(r.severity)).find(s => !!s && s !== 'unknown')
     const fixed: string[] = []
     for (const a of arr(v.affects).slice(0, 100)) {
+      if (drafts.length >= MAX_RESULTS) {
+        if (!issues.some(i => i.code === 'truncated')) issues.push({ code: 'truncated', detail: 'affects' })
+        break
+      }
       if (!isObj(a) || typeof a.ref !== 'string') continue
       const comp = components.get(a.ref)
       const pkg = parsePurl(comp?.purl ?? a.ref) ?? (comp && typeof comp.name === 'string'

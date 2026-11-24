@@ -6,6 +6,7 @@
 import { z } from 'zod'
 import { CATEGORIES, FINDING_STATUSES, SEVERITIES, SECRET_STATES } from '#shared/analysis'
 import { MODULE_ID_RE } from '#shared/schemas'
+import { isValidDay } from './exceptions'
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const uuid = z.string().regex(UUID_RE)
@@ -31,7 +32,7 @@ export const findingQuerySchema = z.strictObject({
   q: z.string().trim().min(1).max(200).optional(),
 })
 
-const day = z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)
+const day = z.string().refine(isValidDay)
 
 export const statusChangeSchema = z.discriminatedUnion('status', [
   z.strictObject({ status: z.literal('new'), reason: z.string().trim().max(2000).optional() }),

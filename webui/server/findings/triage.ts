@@ -6,6 +6,7 @@
 // Un résultat malveillant (H4) ne peut être ni accepté ni classé faux positif.
 
 import type { Queryable } from '../utils/db'
+import { redact } from './redact'
 
 /** Statut effectif : une acceptation échue redevient « nouveau » d'elle-même. */
 export const EFFECTIVE_STATUS = `CASE WHEN f.status = 'accepted' AND f.status_until < current_date THEN 'new' ELSE f.status END`
@@ -217,7 +218,7 @@ export async function setFindingStatus(db: Queryable, id: string, change: Status
   await db.query(
     `UPDATE findings SET status = $2, status_reason = $3, status_until = $4::date, status_by = $5, status_at = now(), updated_at = now()
       WHERE id = $1`,
-    [id, change.status, change.reason ?? null, change.status === 'accepted' ? change.until : null, userId],
+    [id, change.status, change.reason ? redact(change.reason) : null, change.status === 'accepted' ? change.until : null, userId],
   )
   return { before: cur }
 }
@@ -226,6 +227,8 @@ export async function setFindingStatus(db: Queryable, id: string, change: Status
 export async function setSecretState(db: Queryable, id: string, state: 'to-revoke' | 'revoked' | 'false-positive', userId: number | null): Promise<{ before: Current }> {
   const cur = await lockFinding(db, id)
   if (!cur.secret_type) throw new TriageError('E_NOT_SECRET')
+  // H4 : « pas un secret » classerait faux positif un résultat malveillant.
+  if (cur.malicious && state === 'false-positive') throw new TriageError('E_MALICIOUS')
   await db.query(
     `UPDATE findings SET secret_state = $2, secret_state_by = $3, secret_state_at = now(), updated_at = now(),
             status = CASE WHEN $2 = 'false-positive' THEN 'false-positive'

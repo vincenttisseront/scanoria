@@ -193,6 +193,42 @@ describe.skipIf(!DATABASE_URL)('résultats unifiés (PostgreSQL réel)', () => {
     expect((await listFindings(db.pool, { limit: 50, offset: 0, scan_id: s3 })).total).toBe(8)
   })
 
+  it('croisement de branches : un résultat vu sur une PR puis corrigé sur main passe « corrigé »', async () => {
+    const rule = { version: '2.1.0', runs: [{ tool: { driver: { name: 's' } }, results: [{ ruleId: 'xbranch', message: { text: 'm' }, locations: [{ physicalLocation: { artifactLocation: { uri: 'x.js' }, region: { startLine: 1, snippet: { text: 'eval(x)' } } } }] }] }] }
+    const empty = { version: '2.1.0', runs: [{ tool: { driver: { name: 's' } }, results: [] }] }
+    const m1 = await newScan({ ref: 'xmain', modules: ['semgrep'] })
+    await ingest(m1, 'semgrep', rule)
+    await finalizeScanFindings(db.pool, m1, { complete: true })
+    await done(m1)
+    const pr = await newScan({ ref: 'xpr', modules: ['semgrep'] })
+    await ingest(pr, 'semgrep', rule)
+    await finalizeScanFindings(db.pool, pr, { complete: true })
+    await done(pr)
+    const m2 = await newScan({ ref: 'xmain', modules: ['semgrep'] })
+    await ingest(m2, 'semgrep', empty)
+    expect((await finalizeScanFindings(db.pool, m2, { complete: true })).fixedCount).toBe(1)
+    await done(m2)
+    expect((await listFindings(db.pool, { limit: 1, offset: 0, q: 'xbranch' })).items[0]!.status).toBe('fixed')
+  })
+
+  it('sortie illisible : rien n\'est déclaré « corrigé », la couverture le signale', async () => {
+    const rule = { version: '2.1.0', runs: [{ tool: { driver: { name: 's' } }, results: [{ ruleId: 'unread', message: { text: 'm' }, locations: [{ physicalLocation: { artifactLocation: { uri: 'y.js' }, region: { startLine: 1, snippet: { text: 'eval(y)' } } } }] }] }] }
+    const a = await newScan({ ref: 'unread', modules: ['semgrep'] })
+    await ingest(a, 'semgrep', rule)
+    await finalizeScanFindings(db.pool, a, { complete: true })
+    await done(a)
+    const b = await newScan({ ref: 'unread', modules: ['semgrep'] })
+    const dir = join(root, 'scans', 'results', jobs.get(b)!)
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'bad.sarif'), '{')
+    const res = await ingestModuleOutputs(db.pool, { scanId: b, moduleId: 'semgrep', resultDir: dir, outputs: { sarif: 'bad.sarif' } })
+    expect(res.errors).toEqual([{ code: 'invalid-json', output: 'sarif' }])
+    expect((await finalizeScanFindings(db.pool, b, { complete: true })).fixedCount).toBe(0)
+    const cov = (await db.pool.query('SELECT coverage FROM scans WHERE id = $1', [b])).rows[0].coverage
+    expect(cov.gaps).toContainEqual({ kind: 'output-error', module: 'semgrep', code: 'invalid-json' })
+    await done(b)
+  })
+
   it('couverture (G15) : fichiers ignorés, langages sans module, verrouillage absent, entrées de C conservées', async () => {
     const s = await newScan({ modules: ['gitleaks'] })
     await db.pool.query(`UPDATE scans SET coverage = '{"gaps":[{"kind":"category","category":"sast"}],"profile":"rapide"}' WHERE id = $1`, [s])
@@ -258,6 +294,10 @@ describe.skipIf(!DATABASE_URL)('résultats unifiés (PostgreSQL réel)', () => {
     await expect(setFindingStatus(db.pool, mal.id, { status: 'accepted', reason: 'r', until: isoDay(10) }, userId)).rejects.toThrow(TriageError)
     await expect(setFindingStatus(db.pool, mal.id, { status: 'false-positive', reason: 'r' }, userId)).rejects.toThrow('E_MALICIOUS')
     await setFindingStatus(db.pool, mal.id, { status: 'confirmed' }, userId)
+    await expect(createException(db.pool, { project_id: projectId, kind: 'rule', target: { rule_id: 'MAL-2025-42' }, reason: 'non', expires_on: isoDay(10) }, userId)).rejects.toThrow('E_MALICIOUS')
+    await db.pool.query(`UPDATE findings SET secret_type = 'x', secret_state = 'to-revoke' WHERE id = $1`, [mal.id])
+    await expect(setSecretState(db.pool, mal.id, 'false-positive', userId)).rejects.toThrow('E_MALICIOUS')
+    await db.pool.query(`UPDATE findings SET secret_type = NULL, secret_state = NULL WHERE id = $1`, [mal.id])
     await expect(createException(db.pool, { project_id: projectId, kind: 'finding', target: { finding_id: mal.id }, reason: 'non', expires_on: isoDay(10) }, userId)).rejects.toThrow('E_MALICIOUS')
     await expect(createException(db.pool, { project_id: projectId, kind: 'vuln', target: { vuln_id: 'MAL-2025-42' }, reason: 'non', expires_on: isoDay(10) }, userId)).rejects.toThrow(ExceptionError)
     const summary = await findingsSummary(db.pool)
@@ -296,6 +336,7 @@ describe.skipIf(!DATABASE_URL)('résultats unifiés (PostgreSQL réel)', () => {
     expect(e).toMatchObject({ kind: 'path', active: true, expired: false, created_by: 'ops', target: { glob: 'tests/**' } })
     await expect(createException(db.pool, { project_id: projectId, kind: 'rule', target: { rule_id: 'x' }, reason: 'trop long', expires_on: isoDay(400) }, userId)).rejects.toThrow('E_VALIDATION')
     await expect(createException(db.pool, { project_id: projectId, kind: 'rule', target: { rule_id: 'x' }, reason: 'passé', expires_on: isoDay(-1) }, userId)).rejects.toThrow('E_VALIDATION')
+    await expect(createException(db.pool, { project_id: projectId, kind: 'rule', target: { rule_id: 'x' }, reason: 'date', expires_on: '2026-02-31' }, userId)).rejects.toThrow('E_VALIDATION')
     await expect(createException(db.pool, { project_id: crypto.randomUUID(), kind: 'rule', target: { rule_id: 'x' }, reason: 'inconnu', expires_on: isoDay(1) }, userId)).rejects.toThrow('E_NOT_FOUND')
     await expect(createException(db.pool, { project_id: projectId, kind: 'finding', target: { finding_id: crypto.randomUUID() }, reason: 'inconnu', expires_on: isoDay(1) }, userId)).rejects.toThrow('E_NOT_FOUND')
     const old = await createException(db.pool, { project_id: projectId, kind: 'vuln', target: { vuln_id: 'CVE-2021-44906' }, reason: 'échue', expires_on: isoDay(0) }, userId)

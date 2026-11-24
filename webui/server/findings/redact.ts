@@ -28,6 +28,9 @@ export function maskToken(type: string, length: number): string {
   return `[secret masqué : ${type}, longueur ${length}]`
 }
 
+/** Longueur maximale traitée ; au-delà, le texte est tronqué. */
+export const MAX_REDACT = 8000
+
 const MASK_RE = /\[secret masqué : [a-z0-9-]+, longueur [0-9]+\]/g
 
 // Motifs construits par morceaux : aucun ne doit ressembler lui-même à un secret.
@@ -42,16 +45,19 @@ const PATTERNS: { type: string, re: RegExp, group?: number }[] = [
   { type: 'slack-token', re: /\bxox[abposr]-[A-Za-z0-9-]{10,}\b/g },
   { type: 'scanoria-token', re: /\bscn_[A-Za-z0-9]{40}\b/g },
   { type: 'api-key', re: /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b/g },
+  // Les motifs suivants capturent un préfixe conservé (groupe 1) puis la valeur ;
+  // espaces bornés : aucun retour arrière quadratique.
   // Identifiants dans une URL : seul le mot de passe est masqué.
   // eslint-disable-next-line no-control-regex
-  { type: 'url-password', re: /(?<=[a-z][a-z0-9+.-]*:\/\/[^\s:/@]{1,256}:)[^\s@/\u0000]{1,256}(?=@)/gi },
+  { type: 'url-password', re: /(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]{1,256}:)([^\s@/\u0000]{1,256})(?=@)/gi, group: 1 },
   // Affectation « clé = valeur » dont le nom évoque un secret.
   {
     type: 'assignment',
     // eslint-disable-next-line no-control-regex
-    re: /(?<=\b[A-Za-z0-9_.-]*(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|credential)s?[A-Za-z0-9_.-]*["']?\s*(?::=|=>|[:=])\s*["'`]?)[^\s"'`,;<>\u0000]{4,}/gi,
+    re: /(\b[A-Za-z0-9_.-]{0,64}?(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|credential)s?[A-Za-z0-9_.-]{0,64}["']?[ \t]{0,8}(?::=|=>|[:=])[ \t]{0,8}["'`]?)([^\s"'`,;<>\u0000]{4,})/gi,
+    group: 1,
   },
-  { type: 'bearer', re: /(?<=\bBearer\s+)[A-Za-z0-9._~+/-]{8,}=*/g },
+  { type: 'bearer', re: /(\bBearer[ \t]{1,8})([A-Za-z0-9._~+/-]{8,}=*)/g, group: 1 },
 ]
 
 /** Entropie de Shannon par caractère. */
@@ -86,8 +92,10 @@ export interface RedactResult {
 }
 
 /** Masque tout motif de secret connu (et, en mode agressif, toute chaîne aléatoire). */
-export function redactText(input: string, opts: RedactOptions = {}): RedactResult {
+export function redactText(raw: string, opts: RedactOptions = {}): RedactResult {
   const found: SecretShape[] = []
+  // Taille bornée avant masquage : coût linéaire garanti.
+  const input = raw.length > MAX_REDACT ? `${raw.slice(0, MAX_REDACT)}…` : raw
   // Les masques déjà posés sont protégés (idempotence).
   const kept: string[] = []
   // eslint-disable-next-line no-control-regex
@@ -101,7 +109,11 @@ export function redactText(input: string, opts: RedactOptions = {}): RedactResul
     kept.push(maskToken(type, m.length))
     return `\u0000${kept.length - 1}\u0000`
   }
-  for (const p of PATTERNS) text = text.replace(p.re, m => hide(p.type, m))
+  for (const p of PATTERNS) {
+    text = p.group
+      ? text.replace(p.re, (_m, prefix: string, value: string) => `${prefix}${hide(p.type, value)}`)
+      : text.replace(p.re, m => hide(p.type, m))
+  }
   if (opts.aggressive) text = text.replace(CANDIDATE_RE, m => (looksRandom(m) ? hide('high-entropy', m) : m))
   // eslint-disable-next-line no-control-regex
   text = text.replace(/\u0000([0-9]+)\u0000/g, (_m, i: string) => kept[Number(i)] ?? '')

@@ -17,6 +17,7 @@ export type CoverageGap
     | { kind: 'language-without-module', language: string }
     | { kind: 'lockfile-missing', manifest: string, manager: string | null }
     | { kind: 'output-truncated', module: string }
+    | { kind: 'output-error', module: string, code: string }
 
 export function scansDir(): string {
   return process.env.SCANORIA_SCANS_DIR || '/var/lib/scanoria/scans'
