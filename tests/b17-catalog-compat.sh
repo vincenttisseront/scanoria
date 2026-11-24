@@ -25,7 +25,7 @@ ok() { PASS=$((PASS + 1)); printf 'ok   %s\n' "$1"; }
 ko() { FAIL=$((FAIL + 1)); printf 'FAIL %s\n' "$1"; }
 
 cd "$ROOT"
-latest() { git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1; }
+latest() { git tag -l 'v*' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -1; }
 TAG=$(latest)
 if [[ -z "$TAG" ]]; then
 	TAG=$(git ls-remote --tags --refs origin 'v*' 2>/dev/null | sed -n 's#.*refs/tags/##p' |
