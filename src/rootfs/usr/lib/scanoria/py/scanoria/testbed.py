@@ -1,0 +1,328 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+"""Banc d'essai à l'installation (F12) et exécution confinée des scanners (§ 6.4).
+
+Le banc d'essai d'un module est une archive testbed-<id>-<version>.tar.zst de
+la release du catalogue, dont l'empreinte est dans l'index signé. Elle est
+téléchargée, vérifiée, extraite sans lien ni chemin sortant, puis analysée par
+le scanner dans un conteneur jetable : aucun réseau, système de fichiers en
+lecture seule, sources en lecture seule sur /src, /out seul écrivable, aucune
+capacité, no-new-privileges, utilisateur non root, limites mémoire, CPU et
+PIDs, délai maximal. Les sorties déclarées sont validées (SARIF 2.1.0 ou
+CycloneDX) puis comparées aux résultats attendus (testbed.expect).
+"""
+
+import json
+import os
+import re
+import shutil
+import stat
+import tarfile
+
+from . import catalogverify, common, selfupdate
+from .common import Fail
+
+WORK = common.VARLIB + "/modules/work"
+NOBODY = 65534
+MAX_ARCHIVE = 64 << 20
+MAX_EXTRACTED = 256 << 20
+MAX_MEMBERS = 20000
+MAX_OUTPUT = 64 << 20
+DEFAULT_TIMEOUT = 900
+SCANNER_OK_RC = (0, 1)
+
+
+# --------------------------------------------------------------------------
+# Conteneur confiné
+# --------------------------------------------------------------------------
+
+def confined_args(manifest, mounts=(), name=None):
+    """Arguments « podman run » d'un conteneur jetable confiné (§ 6.4)."""
+    res = manifest.get("resources") or {}
+    mem = res.get("min_ram_mb") if isinstance(res.get("min_ram_mb"), int) else 512
+    cpu = res.get("min_cpu") if isinstance(res.get("min_cpu"), (int, float)) else 1
+    mem = max(128, min(int(mem), 65536))
+    cpu = max(1, min(int(cpu), 64))
+    args = ["run", "--rm", "--network=none", "--read-only", "--cap-drop=ALL",
+            "--security-opt=no-new-privileges", "--user", "%d:%d" % (NOBODY, NOBODY),
+            "--memory", "%dm" % mem, "--memory-swap", "%dm" % mem, "--cpus", str(cpu),
+            "--pids-limit", "512", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777",
+            "--pull=never", "--log-driver=none"]
+    if name:
+        args += ["--name", name]
+    for host, target, mode in mounts:
+        args += ["--volume", "%s:%s:%s" % (host, target, mode)]
+    return args
+
+
+FEEDS = common.VARLIB + "/feeds"
+
+
+def feed_mounts(manifest):
+    """Chaque feed de requires.feeds, en lecture seule sur /feeds/<id>."""
+    res = []
+    for fid in ((manifest.get("requires") or {}).get("feeds") or []):
+        if not isinstance(fid, str) or not catalogverify.MODULE_ID_RE.match(fid):
+            raise Fail("E_DEPENDENCY", "invalid feed id")
+        host = os.path.join(FEEDS, fid)
+        os.makedirs(host, mode=0o755, exist_ok=True)
+        res.append((host, "/feeds/" + fid, "ro"))
+    return res
+
+
+def run_confined(manifest, command, mounts=(), timeout=DEFAULT_TIMEOUT, env=None):
+    """Lance command dans l'image du module ; retourne le code de sortie."""
+    args = confined_args(manifest, list(mounts) + feed_mounts(manifest))
+    for k in sorted(env or {}):
+        args += ["--env", "%s=%s" % (k, env[k])]
+    args += ["--entrypoint", json.dumps([command[0]]), manifest["image"]] + list(command[1:])
+    r = common.run("podman", args, timeout=timeout, stdout_limit=1 << 20)
+    return r.returncode
+
+
+# --------------------------------------------------------------------------
+# Archive du banc d'essai
+# --------------------------------------------------------------------------
+
+def _member_path(name):
+    """Chemin relatif sûr, ou None. Retire un éventuel préfixe « ./ »."""
+    if not isinstance(name, str) or "\x00" in name or "\\" in name or name.startswith("/"):
+        return None
+    parts = [x for x in name.split("/") if x not in ("", ".")]
+    if not parts or any(x == ".." for x in parts) or len(name) > 1024:
+        return None
+    return "/".join(parts)
+
+
+def extract(archive, dest):
+    """Extrait une archive tar.zst dans dest (créé vide) : fichiers et répertoires seulement."""
+    tar_path = archive + ".tar"
+    r = common.run("zstd", ["-q", "-d", "-f", "--no-progress", "-o", tar_path, archive], timeout=300)
+    if r.returncode != 0 or not os.path.isfile(tar_path):
+        raise Fail("E_ARCHIVE", "testbed archive cannot be decompressed")
+    if os.path.getsize(tar_path) > MAX_EXTRACTED + (MAX_MEMBERS * 1024):
+        raise Fail("E_ARCHIVE", "testbed archive too large")
+    try:
+        tf = tarfile.open(tar_path, "r:")
+    except tarfile.TarError:
+        raise Fail("E_ARCHIVE", "testbed archive is not a tar archive")
+    with tf:
+        members, total = [], 0
+        for i, m in enumerate(tf):
+            if i >= MAX_MEMBERS:
+                raise Fail("E_ARCHIVE", "too many entries in the testbed archive")
+            rel = _member_path(m.name)
+            if rel is None:
+                raise Fail("E_ARCHIVE", "unsafe path in the testbed archive")
+            if not (m.isreg() or m.isdir()):
+                raise Fail("E_ARCHIVE", "testbed archive may only hold files and directories")
+            total += m.size
+            if total > MAX_EXTRACTED:
+                raise Fail("E_ARCHIVE", "testbed archive too large once extracted")
+            members.append((rel, m))
+        if not members:
+            raise Fail("E_ARCHIVE", "empty testbed archive")
+        # Préfixe unique « testbed/ » retiré s'il couvre toutes les entrées.
+        if all(rel == "testbed" or rel.startswith("testbed/") for rel, _ in members):
+            members = [(rel[len("testbed/"):], m) for rel, m in members if rel != "testbed"]
+        os.makedirs(dest, mode=0o755, exist_ok=False)
+        base = os.path.realpath(dest)
+        for rel, m in members:
+            # rel est relatif sans « .. » et seuls des répertoires réels sont créés
+            # (aucun lien) : la cible reste sous base.
+            target = os.path.join(base, rel)
+            if m.isdir():
+                _mkdirs(base, rel)
+                continue
+            _mkdirs(base, os.path.dirname(rel))
+            src = tf.extractfile(m)
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+            with os.fdopen(fd, "wb") as out, src:
+                shutil.copyfileobj(src, out, 1 << 20)
+    os.unlink(tar_path)
+
+
+def _mkdirs(base, rel):
+    cur = base
+    for part in [x for x in rel.split("/") if x]:
+        cur = os.path.join(cur, part)
+        try:
+            st = os.lstat(cur)
+        except FileNotFoundError:
+            os.mkdir(cur, 0o755)
+            continue
+        if not stat.S_ISDIR(st.st_mode):
+            raise Fail("E_ARCHIVE", "path conflict in the testbed archive")
+
+
+def fetch_archive(manifest, dest):
+    """Télécharge et vérifie l'archive du banc d'essai déclarée dans l'index."""
+    name, digest = manifest.get("testbed_archive"), manifest.get("testbed_sha256")
+    if not isinstance(name, str) or not isinstance(digest, str):
+        raise Fail("E_TESTBED", "module %s has no testbed in the catalog" % manifest["id"])
+    src = catalogverify.source_info()
+    if src is None:
+        raise Fail("E_PRECONDITION", "catalog source unknown: refresh the catalog")
+    url = catalogverify.download_url(src["repo"], catalogverify.tag_number(src["tag"]), name)
+    code, _ = selfupdate.curl(url, dest, MAX_ARCHIVE, timeout=300)
+    if code != 200:
+        raise Fail("E_NETWORK", "cannot download the testbed (HTTP %d)" % code)
+    if selfupdate.sha256_file(dest) != digest:
+        raise Fail("E_CHECKSUM", "testbed checksum mismatch")
+
+
+# --------------------------------------------------------------------------
+# Sorties et résultats attendus
+# --------------------------------------------------------------------------
+
+def _out_path(out_dir, declared):
+    if not isinstance(declared, str) or not declared.startswith("/out/"):
+        raise Fail("E_TESTBED", "declared output must be under /out")
+    rel = _member_path(declared[len("/out/"):])
+    if rel is None:
+        raise Fail("E_TESTBED", "invalid declared output path")
+    return os.path.join(out_dir, rel)
+
+
+def _read_output(path):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        raise Fail("E_TESTBED", "declared output missing")
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise Fail("E_TESTBED", "declared output is not a regular file")
+        data = f.read(MAX_OUTPUT + 1)
+    if len(data) > MAX_OUTPUT:
+        raise Fail("E_TESTBED", "output too large")
+    try:
+        return common.loads_strict(data)
+    except common.JsonError:
+        raise Fail("E_TESTBED", "output is not valid JSON")
+
+
+def sarif_results(doc, version="2.1.0"):
+    """Contrôle de forme SARIF ; retourne [(ruleId, catégories)]."""
+    if not isinstance(doc, dict) or doc.get("version") != version or not isinstance(doc.get("runs"), list):
+        raise Fail("E_TESTBED", "output is not SARIF %s" % version)
+    found = []
+    for run in doc["runs"]:
+        drv = run.get("tool", {}).get("driver") if isinstance(run, dict) and isinstance(run.get("tool"), dict) else None
+        if not isinstance(drv, dict) or not isinstance(drv.get("name"), str):
+            raise Fail("E_TESTBED", "SARIF run without tool.driver.name")
+        rules = {}
+        for r in drv.get("rules") or []:
+            if isinstance(r, dict) and isinstance(r.get("id"), str):
+                props = r.get("properties") if isinstance(r.get("properties"), dict) else {}
+                tags = props.get("tags") if isinstance(props.get("tags"), list) else []
+                rules[r["id"]] = {t for t in tags if isinstance(t, str)}
+        results = run.get("results")
+        if not isinstance(results, list):
+            raise Fail("E_TESTBED", "SARIF run without results array")
+        for res in results:
+            if not isinstance(res, dict) or not isinstance(res.get("message"), dict):
+                raise Fail("E_TESTBED", "malformed SARIF result")
+            rid = res.get("ruleId") if isinstance(res.get("ruleId"), str) else None
+            cats = set(rules.get(rid, set()))
+            props = res.get("properties") if isinstance(res.get("properties"), dict) else {}
+            if isinstance(props.get("category"), str):
+                cats.add(props["category"])
+            for t in props.get("tags") or []:
+                if isinstance(t, str):
+                    cats.add(t)
+            found.append((rid, cats))
+    return found
+
+
+def cyclonedx_components(doc, version):
+    if not isinstance(doc, dict) or doc.get("bomFormat") != "CycloneDX":
+        raise Fail("E_TESTBED", "output is not CycloneDX")
+    spec = doc.get("specVersion")
+    if not isinstance(spec, str) or not (spec == version or spec.startswith(str(version).rstrip("x").rstrip("."))):
+        raise Fail("E_TESTBED", "unexpected CycloneDX version")
+    comps = doc.get("components", [])
+    if not isinstance(comps, list):
+        raise Fail("E_TESTBED", "malformed CycloneDX components")
+    return [(c.get("name") if isinstance(c, dict) else None, set()) for c in comps]
+
+
+def check_expect(found, expect):
+    """Vérifie chaque attente {rule?, category?, min} ; retourne les détails."""
+    details = []
+    for e in expect:
+        if not isinstance(e, dict) or not isinstance(e.get("min"), int) or isinstance(e.get("min"), bool):
+            raise Fail("E_TESTBED", "malformed testbed expectation")
+        # category n'est qu'une étiquette du rapport (convention des manifestes).
+        n = sum(1 for rid, _ in found if "rule" not in e or rid == e["rule"])
+        details.append({"rule": e.get("rule"), "category": e.get("category"), "min": e["min"],
+                        "found": n, "ok": n >= e["min"]})
+    return details
+
+
+def collect(manifest, out_dir):
+    outputs = manifest.get("outputs")
+    if not isinstance(outputs, dict) or not outputs:
+        raise Fail("E_TESTBED", "module declares no output")
+    found = []
+    for kind, spec in sorted(outputs.items()):
+        if not isinstance(spec, dict):
+            raise Fail("E_TESTBED", "malformed output declaration")
+        doc = _read_output(_out_path(out_dir, spec.get("path")))
+        if kind == "sarif":
+            found += sarif_results(doc, spec.get("version", "2.1.0"))
+        elif kind == "cyclonedx":
+            found += cyclonedx_components(doc, spec.get("version", "1.5"))
+        else:
+            raise Fail("E_TESTBED", "unsupported output kind %s" % kind)
+    return found
+
+
+# --------------------------------------------------------------------------
+# Banc d'essai complet
+# --------------------------------------------------------------------------
+
+def _prepare_out(out):
+    os.mkdir(out, 0o700)
+    if os.geteuid() == 0 and not common.TEST_ROOT:
+        os.chown(out, NOBODY, NOBODY)
+    else:  # podman sans root : l'utilisateur du conteneur est un sous-uid
+        os.chmod(out, 0o777)
+
+
+def run(manifest, timeout=None):
+    """Lance le banc d'essai ; retourne {passed, at, details} ou lève Fail(E_TESTBED…)."""
+    tb = manifest.get("testbed")
+    if manifest.get("type") != "scanner":
+        return {"passed": True, "at": common.iso(common.now()), "details": "no testbed for this module type"}
+    if not isinstance(tb, dict) or not isinstance(tb.get("expect"), list) or not tb["expect"]:
+        raise Fail("E_TESTBED", "scanner %s declares no testbed expectation" % manifest["id"])
+    scan = manifest.get("scan") or {}
+    if scan.get("network", "none") != "none":
+        raise Fail("E_PRECONDITION", "networked scanners are not supported yet")
+    os.makedirs(WORK, mode=0o700, exist_ok=True)
+    import secrets
+    work = os.path.join(WORK, "testbed-%s-%s" % (manifest["id"], secrets.token_hex(6)))
+    os.mkdir(work, 0o711)
+    try:
+        archive = os.path.join(work, "testbed.tar.zst")
+        fetch_archive(manifest, archive)
+        src, out = os.path.join(work, "src"), os.path.join(work, "out")
+        extract(archive, src)
+        os.unlink(archive)
+        _prepare_out(out)
+        t = scan.get("timeout_s") if isinstance(scan.get("timeout_s"), int) else DEFAULT_TIMEOUT
+        t = max(10, min(t, timeout or DEFAULT_TIMEOUT))
+        rc = run_confined(manifest, scan["command"], [(src, "/src", "ro"), (out, "/out", "rw")], timeout=t,
+                          env=scan.get("env"))
+        if rc not in (scan.get("exit_codes_ok") or SCANNER_OK_RC):
+            raise Fail("E_TESTBED", "scanner exited with code %d on its testbed" % rc)
+        details = check_expect(collect(manifest, out), tb["expect"])
+        bad = [d for d in details if not d["ok"]]
+        if bad:
+            raise Fail("E_TESTBED", "testbed expectation not met: %s" % ", ".join(
+                "%s≥%d (found %d)" % (d["rule"] or d["category"] or "results", d["min"], d["found"]) for d in bad),
+                {"testbed": {"passed": False, "details": details}})
+        return {"passed": True, "at": common.iso(common.now()), "details": details}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+

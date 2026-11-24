@@ -16,7 +16,7 @@ from . import common, schema
 SERVICES = (
     "postgresql.service", "nginx.service", "scanoria-console.service", "scanoria-helper.path",
     "scanoria-firewall.service", "scanoria-state.timer", "scanoria-update-check.timer",
-    "scanoria-update-apply.timer", "scanoria-cert-renew.timer",
+    "scanoria-update-apply.timer", "scanoria-cert-renew.timer", "scanoria-catalog-refresh.timer",
 )
 SERVICE_STATES = ("active", "inactive", "failed", "activating", "deactivating", "unknown")
 

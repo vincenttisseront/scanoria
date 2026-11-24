@@ -48,7 +48,12 @@
             "apply-update",
             "rollback-update",
             "set-update-policy",
-            "run-selftest"
+            "run-selftest",
+            "refresh-catalog",
+            "install-modules",
+            "uninstall-module",
+            "set-module-state",
+            "update-module"
           ]
         }
       ]
@@ -99,7 +104,12 @@
         "E_HEALTH_ROLLED_BACK",
         "E_ROLLBACK_FAILED",
         "E_TIMEOUT",
-        "E_INTERNAL"
+        "E_INTERNAL",
+        "E_RESOURCES",
+        "E_DEPENDENCY",
+        "E_CONFLICT",
+        "E_LICENSE",
+        "E_TESTBED"
       ]
     },
     "message": {
