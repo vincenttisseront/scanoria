@@ -54,11 +54,16 @@ options_i18n:
     fr: { title: Ignorer les vulnérabilités sans correctif, description: Ne remonte que les vulnérabilités qui ont une version corrigée. }
     en: { title: Ignore unfixed vulnerabilities, description: Only reports vulnerabilities that have a fixed version. }
 scan:
-  inputs: [repo, archive]
+  inputs: [repo, archive, sbom]
   command: ["trivy", "fs", "--cache-dir", "/feeds/trivy-db",
             "--skip-db-update", "--skip-java-db-update", "--skip-check-update", "--offline-scan",
             "--scanners", "vuln,misconfig,secret", "--exit-code", "0", "--quiet",
             "--format", "sarif", "--output", "/out/result.sarif", "/src"]
+  # Re-corrélation (0.5, contrat 16) : vulnérabilités du SBOM écrit par le runner.
+  sbom_command: ["trivy", "sbom", "--cache-dir", "/feeds/trivy-db",
+                 "--skip-db-update", "--skip-java-db-update", "--skip-check-update", "--offline-scan",
+                 "--scanners", "vuln", "--exit-code", "0", "--quiet",
+                 "--format", "sarif", "--output", "/out/result.sarif", "/src/sbom.cdx.json"]
   timeout_s: 1200
   network: none
   exit_codes_ok: [0]

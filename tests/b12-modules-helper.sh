@@ -443,7 +443,30 @@ printf '%s' "$SARIF_OK" > "$FIX/scan-output"
 echo 2 > "$FIX/scan-rc"
 hx install-modules "$(inst wopt 1.0.0)"
 expect "banc d'essai : code de sortie inattendu → échec" "$(code)" E_TESTBED
+# 0.4.0 : OSV-Scanner tué (137) à sa limite mémoire ; le message doit le dire.
+echo 137 > "$FIX/scan-rc"
+hx install-modules "$(inst wopt 1.0.0)"
+expect "banc d'essai : tué avant son délai → manque de mémoire signalé avec la limite" \
+	"$(code)/$(jq -r .message <<< "$R" | grep -c -F 'most likely out of memory (container limit 256 MB')" E_TESTBED/1
 rm "$FIX/scan-rc"
+
+# Catalogue actualisé avant une installation quand il date de plus d'une heure :
+# sinon une appliance installe avec les manifestes de la veille (0.4.0).
+SRCF="$T/var/lib/scanoria/catalog/source.json"
+publish 5 "$ALL"
+hx install-modules "$(inst gitleaks 8.0.0)"
+expect "install : catalogue vérifié il y a moins d'une heure, pas réactualisé" \
+	"$(code)/$(jq -r .version "$T/var/lib/scanoria/catalog/catalog-index.json")" OK/4
+jq '.checked_at = "2026-01-01T00:00:00Z"' "$SRCF" > "$TMP/s.json" && cat "$TMP/s.json" > "$SRCF"
+hx install-modules "$(inst gitleaks 8.0.0)"
+expect "install : catalogue ancien actualisé avant l'installation" \
+	"$(code)/$(jq -r .version "$T/var/lib/scanoria/catalog/catalog-index.json")" OK/5
+jq '.checked_at = "2026-01-01T00:00:00Z"' "$SRCF" > "$TMP/s.json" && cat "$TMP/s.json" > "$SRCF"
+echo 500 > "$FIX/api-code"
+hx install-modules "$(inst gitleaks 8.0.0)"
+expect "install : actualisation impossible, l'index en place sert" \
+	"$(code)/$(jq -r .version "$T/var/lib/scanoria/catalog/catalog-index.json")" OK/5
+rm "$FIX/api-code"
 hx install-modules "$(inst trapl 1.0.0)"
 expect "banc d'essai : archive avec lien symbolique refusée" "$(code)/$(mstate trapl)" E_ARCHIVE/absent
 hx install-modules "$(inst trapd 1.0.0)"
