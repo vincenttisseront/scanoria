@@ -46,7 +46,7 @@ export function expectedMs(id: string, durations: Durations): number {
  */
 export function orderModules(modules: PlannedModule[], catalog: Map<string, PlanCatalogEntry>, durations: Durations): PlannedModule[] {
   const role = new Map(modules.map(m => [m.id, sbomRole(m, catalog)]))
-  const producers = modules.filter(m => role.get(m.id) === 'producer').map(m => m.id).sort()
+  const producers = modules.filter(m => role.get(m.id) === 'producer').map(m => m.id).sort((a, b) => a.localeCompare(b))
   const after = new Map(modules.map(m => [m.id, role.get(m.id) === 'consumer' ? producers.filter(p => p !== m.id) : []]))
   const own = new Map(modules.map(m => [m.id, expectedMs(m.id, durations)]))
   // Rang = chaîne la plus longue qui part du module (sans cycle : un consommateur n'est jamais producteur).
