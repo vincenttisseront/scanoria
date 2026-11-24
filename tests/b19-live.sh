@@ -214,7 +214,7 @@ DT="$RES/$(jq -r '.modules[] | select(.id == "dtrack-upload") | .outputs.cyclone
 expect "Syft : un composant par écosystème" "$(jq -r '[.components[].name] | map(select(. == "minimist" or . == "six" or . == "github.com/google/uuid")) | unique | length' "$SBOM")" 3
 jq -e '.runs[0].results | map(.ruleId) | index("GHSA-xvch-5gv4-984h-minimist") != null' "$SARIF" > /dev/null \
 	&& ok "Grype : vulnérabilité connue trouvée hors ligne à partir du SBOM" || { ko "Grype : vulnérabilité non trouvée"; jq -c '[.runs[].results[].ruleId]' "$SARIF"; }
-grep -q 'sbom:/sbom/sbom.cdx.json' "$RES/grype/module.log" 2> /dev/null && ok "Grype : lancé sur le SBOM de l'analyse" \
+grep -q 'sbom:/src/sbom.cdx.json' "$RES/grype/module.log" 2> /dev/null && ok "Grype : lancé sur le SBOM de l'analyse" \
 	|| echo "     (journal de Grype sans la commande : vérifiée par b19-sbom)"
 DUUID=$(jq -r '.metadata.properties[] | select(.name == "scanoria:dtrack:project") | .value' "$DT")
 expect "dtrack-upload : projet $PKEY, version archive, dans Dependency-Track" \

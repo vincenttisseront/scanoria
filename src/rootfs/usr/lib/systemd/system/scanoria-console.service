@@ -55,10 +55,13 @@ AmbientCapabilities=
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged
-# La console n'écoute que sur la boucle locale et ne sort pas sur le réseau
-# (les recherches de mises à jour passent par le helper).
-IPAddressAllow=localhost
-IPAddressDeny=any
+# Réseau : la boucle locale (PostgreSQL, nginx) et la sortie vers les API des
+# forges (détection F1, découverte, interrogation des commits), qui sont
+# HTTPS seulement ; le transport des forges refuse lui-même toute adresse
+# résolue de bouclage, de lien local ou de multidiffusion. Les mises à jour
+# passent toujours par le helper. Ne pas tout refuser (valeur « any ») :
+# la console et le worker ne joindraient plus aucune forge (EPERM).
+IPAddressDeny=link-local multicast
 
 [Install]
 WantedBy=multi-user.target

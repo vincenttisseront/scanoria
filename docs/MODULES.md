@@ -279,14 +279,16 @@ Le service root prend tout en charge ; le manifeste ne déclare que le besoin.
 ### 4.4 SBOM : Syft, Grype, Dependency-Track (0.5, contrat 14)
 
 - **Enchaînement dans une analyse** (`sbom.py`). Les producteurs de SBOM
-  (sortie `cyclonedx`, sans `scan.sbom_command`) passent en premier ; le
-  premier SBOM obtenu est copié dans `sbom/sbom.cdx.json` de l'espace de
-  travail et monté en lecture seule sur `/sbom` pour les consommateurs.
-  Grype lance alors `scan.sbom_command` (`grype sbom:/sbom/sbom.cdx.json`),
-  sinon il analyse le dépôt lui-même. Un module `requires_sbom` sans SBOM
-  est sauté (`E_SBOM_MISSING`), un module `service_optional` sans son
-  service aussi (`E_SERVICE_MISSING`). L'ordre de la tâche est gardé dans
-  le résultat.
+  (sortie `cyclonedx`) passent en premier ; le premier SBOM obtenu est copié
+  dans `sbom/sbom.cdx.json` de l'espace de travail. Un module
+  `scan.prefers_sbom` (Grype) lance alors `scan.sbom_command` avec ce SBOM
+  monté sur `/src` à la place du dépôt, exactement comme en re-corrélation
+  (contrat 16) ; sans SBOM, il analyse le dépôt (`scan.command`). Un module
+  `requires_sbom` (dtrack-upload) lit le SBOM sur `/sbom` ; sans SBOM, il est
+  sauté (`E_SBOM_MISSING`). OSV-Scanner et Trivy gardent leur commande
+  habituelle dans une analyse : leur `sbom_command` ne sert qu'à la
+  re-corrélation. Un module `service_optional` sans son service est sauté
+  (`E_SERVICE_MISSING`). L'ordre de la tâche est gardé dans le résultat.
 - **Syft** produit du CycloneDX 1.6, sans réseau. La console range le SBOM
   dans `sbom_components` (au plus 50 000 composants, purl normalisé, licences,
   dépendance directe ou transitive, chemins) ; un SBOM invalide rend le

@@ -108,6 +108,8 @@ out = vols["/out"]
 print("scan de /src avec " + os.environ.get("SCANORIA_GIT_TOKEN", "aucun jeton"))
 print("valeur trouvée : $TOKEN")
 open("$TMP/last-cmd", "w").write(json.dumps([ep[0]] + rest))
+if os.path.isfile(vols.get("/src", "") + "/sbom.cdx.json"):
+    open("$TMP/last-sbom", "w").write(open(vols["/src"] + "/sbom.cdx.json").read())
 if scen == "scan-exit3":
     sys.exit(3)
 if scen == "scan-oom":
@@ -160,6 +162,8 @@ reg = {"modules": {
     "absent-img": m("absent-img", img.replace("exemple/faux", "exemple/absent")),
     "eteint": m("eteint", img, enabled=False),
     "git-fetch": m("git-fetch", gimg, cats=("system",)),
+    # 0.5 (contrat 16) : re-corrélation d'un SBOM.
+    "sca-sbom": m("sca-sbom", img, {"inputs": ["repo", "sbom"], "sbom_command": ["faux", "sbom", "/src/sbom.cdx.json", "--out", "/out/result.sarif"]}, cats=("sca",)),
 }, "operations": []}
 reg["modules"]["git-fetch"]["manifest"]["requires"]["modules"] = []
 json.dump(reg, open(path, "w"))
@@ -507,6 +511,28 @@ c = [x for x in rep.checks if x["id"] == "runner.alive"][0]
 # systemctl est un bouchon (sortie vide) : service non actif, mais capacité fraîche.
 assert c["status"] == "fail" and "not active" in c["message"] and "capacity fresh" in c["message"], c
 EOF
+
+# --- 10. Source SBOM : re-corrélation (0.5, contrat 16) -------------------------------------
+SBOM_SRC=$(jq -cn --arg s "$(uuid)" '{kind: "sbom", scan_id: $s, components: ["pkg:npm/minimist@1.2.5", "pkg:npm/%40exemple/outil@2.0.0", "pkg:pypi/requests@2.31.0"]}')
+rm -f "$TMP/last-git" "$TMP/last-sbom"
+id=$(uuid); drop "$id" "$(job "$id" "$SBOM_SRC" '[{"id": "sca-sbom", "version": "1.0.0"}, {"id": "faux", "version": "1.0.0"}]')"; run_runner
+expect "sbom : tâche acceptée" "$(res "$id" | jq -r .status)" ok
+expect "sbom : sbom_command lancée" "$(jq -c . "$TMP/last-cmd")" '["faux","sbom","/src/sbom.cdx.json","--out","/out/result.sarif"]'
+expect "sbom : module sans sbom_command ignoré" "$(res "$id" | jq -r '.modules[] | select(.id == "faux") | .status')" skipped
+expect "sbom : module SCA ok" "$(res "$id" | jq -r '.modules[] | select(.id == "sca-sbom") | .status')" ok
+expect "sbom : rien n'est cloné (source sbom, historique none)" "$(res "$id" | jq -c '.source | [.kind, .history, .commit]')" '["sbom","none",null]'
+expect "sbom : CycloneDX écrit par le runner" "$(jq -c '[.bomFormat, .specVersion, (.components | length)]' "$TMP/last-sbom" 2> /dev/null)" '["CycloneDX","1.5",3]'
+expect "sbom : groupe et nom d'un paquet npm à portée" "$(jq -c '.components[] | select(.purl == "pkg:npm/%40exemple/outil@2.0.0") | [.group, .name, .version]' "$TMP/last-sbom" 2> /dev/null)" '["@exemple","outil","2.0.0"]'
+valid "$id" > /dev/null && ok "sbom : résultat conforme au schéma" || ko "sbom : résultat non conforme ($(valid "$id"))"
+[[ -z "$(ls -A "$T/var/lib/scanoria/scans/workspaces")" ]] && ok "sbom : espace de travail supprimé" || ko "sbom : espace de travail laissé"
+# Demandes hostiles : purl invalide, liste vide, champ inconnu.
+for bad in '{"kind": "sbom", "scan_id": "'"$(uuid)"'", "components": []}' \
+	'{"kind": "sbom", "scan_id": "'"$(uuid)"'", "components": ["pkg:npm/a b@1"]}' \
+	'{"kind": "sbom", "scan_id": "'"$(uuid)"'", "components": ["../../etc/passwd"]}' \
+	'{"kind": "sbom", "scan_id": "'"$(uuid)"'", "components": ["pkg:npm/x@1"], "path": "/etc"}'; do
+	id=$(uuid); drop "$id" "$(job "$id" "$bad" '[{"id": "sca-sbom", "version": "1.0.0"}]')"; run_runner
+	expect "sbom hostile refusée : $(jq -c .components <<< "$bad" | cut -c1-40)" "$(res "$id" | jq -r .error.code)" E_JOB_INVALID
+done
 
 echo
 echo "b14 : $PASS réussis, $FAIL échoués"

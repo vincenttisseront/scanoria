@@ -31,6 +31,7 @@ import stat
 import sys
 import threading
 import time
+import urllib.parse
 
 import contextlib
 
@@ -329,7 +330,7 @@ def recover():
                         obj = common.loads_strict(f.read(MAX_JOB))
                         scan_id = obj.get("scan_id") if isinstance(obj, dict) else None
                         src = obj.get("source_kind") or (obj.get("source") or {}).get("kind")
-                        kind = src if src in ("git", "archive") else "git"
+                        kind = src if src in ("git", "archive", "sbom") else "git"
             except (OSError, common.JsonError, AttributeError):
                 pass
         _discard(p)
@@ -366,7 +367,7 @@ def _module_entry(mid, version, status, error=None, m=None):
 def plan(reg, job):
     """[(entrée de résultat, spécification exécutable ou None)] dans l'ordre de la tâche."""
     kind = job["source"]["kind"]
-    want_input = "repo" if kind == "git" else "archive"
+    want_input = {"git": "repo", "archive": "archive", "sbom": "sbom"}[kind]
     out = []
     for item in job["modules"]:
         mid, ver = item["id"], item["version"]
@@ -386,10 +387,13 @@ def plan(reg, job):
             hist_cmd = scan.get("history_command")
             if hist_cmd is not None:
                 catalogverify._check_command(hist_cmd, mid)
+            if scan.get("sbom_command") is not None:
+                catalogverify._check_command(scan["sbom_command"], mid)
         except Fail as f:
             out.append((_module_entry(mid, ver, "missing", _err("E_MODULE_INVALID", "input", f.message), m), None))
             continue
-        if want_input not in (scan.get("inputs") or []):
+        # 0.5 (contrat 16) : une source SBOM ne lance que sbom_command ; sans lui, le module est ignoré.
+        if want_input not in (scan.get("inputs") or []) or (kind == "sbom" and not scan.get("sbom_command")):
             out.append((_module_entry(mid, ver, "skipped", _err(
                 "E_INPUT_UNSUPPORTED", "input", "module %s does not read a %s source" % (mid, want_input)), m),
                 None))
@@ -429,7 +433,8 @@ def plan(reg, job):
             continue
         history = kind == "git" and wants_history(m, options)
         try:
-            command = testbed.render_command(hist_cmd if history and hist_cmd else scan["command"], options)
+            base_cmd = scan["sbom_command"] if kind == "sbom" else (hist_cmd if history and hist_cmd else scan["command"])
+            command = testbed.render_command(base_cmd, options)
         except Fail as f:
             out.append((_module_entry(mid, ver, "error", _err("E_OPTIONS_INVALID", "input", f.message), m), None))
             continue
@@ -573,15 +578,16 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
         return finish("error", _err("E_FEED_MISSING", "infra", f.message))
     timeout = scan.get("timeout_s") if isinstance(scan.get("timeout_s"), int) else testbed.DEFAULT_TIMEOUT
     timeout = max(10, min(timeout, 86400))
-    mounts = [(os.path.join(ws, "src"), "/src", "ro"), (out, "/out", "rw")]
     # Contrat 14 (0.5) : SBOM produit plus tôt dans l'analyse, lu par Grype et dtrack-upload.
-    sbom_dir = sbom.available(ws)
-    if sbom.consumes(m):
-        if sbom_dir is None and sbom.required(m):
-            return finish("skipped", _err(sbom.E_SBOM_MISSING, "input", "module %s needs the SBOM of the analysis, "
-                                          "which no module produced" % mid))
-        if sbom_dir is not None:
-            mounts.append((sbom_dir, sbom.MOUNT, "ro"))
+    sbom_dir = sbom.available(ws) if sbom.consumes(m) else None
+    if sbom_dir is None and sbom.required(m):
+        return finish("skipped", _err(sbom.E_SBOM_MISSING, "input", "module %s needs the SBOM of the analysis, "
+                                      "which no module produced" % mid))
+    use_sbom = sbom_dir is not None and sbom.prefers(m) and spec.get("sbom_command") is not None
+    # Grype sur le SBOM : il remplace le dépôt sur /src, comme en re-corrélation (contrat 16).
+    mounts = [(sbom_dir if use_sbom else os.path.join(ws, "src"), "/src", "ro"), (out, "/out", "rw")]
+    if sbom_dir is not None and not use_sbom:
+        mounts.append((sbom_dir, sbom.MOUNT, "ro"))
     if spec["history"] and os.path.isdir(os.path.join(ws, "git")):
         mounts.append((os.path.join(ws, "git"), "/git", "ro"))
     mounts += spec.get("mounts") or []
@@ -608,7 +614,7 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
         for k in sorted(scan.get("env") or {}):
             args += ["--env", "%s=%s" % (k, scan["env"][k])]
         cmd = spec["command"]
-        if sbom_dir is not None and spec.get("sbom_command"):
+        if use_sbom:
             cmd = spec["sbom_command"]
         args += ["--entrypoint", json.dumps([cmd[0]]), m["image"]] + list(cmd[1:])
         sampler = Sampler(name)
@@ -698,6 +704,8 @@ def execute(job):
                 source["commit"] = fetch.fetch_git(job, ws, reg["modules"], history,
                                                    os.path.join(ws, "logs", "fetch.log"), secrets)
                 files, size, skipped = fetch.bound_tree(os.path.join(ws, "src"))
+            elif src["kind"] == "sbom":
+                files, size, skipped = write_sbom(src["components"], ws)
             else:
                 files, size, skipped = fetch.extract_upload(src["upload_id"], ws)
         except fetch.SourceError as e:
@@ -717,6 +725,65 @@ def execute(job):
         shutil.rmtree(ws, ignore_errors=True)
     result["finished_at"] = common.iso(common.now())
     return result
+
+
+# --------------------------------------------------------------------------
+# Source SBOM (re-corrélation, 0.5, contrat 16)
+# --------------------------------------------------------------------------
+
+SBOM_PURL_RE = re.compile(r"pkg:([a-z][a-z0-9.+-]{0,31})/([\x21-\x7e]{1,1000})\Z")
+
+
+def _purl_component(purl):
+    """Composant CycloneDX minimal tiré d'un purl, ou None. Seul le purl est
+    gardé tel quel ; nom, groupe et version en sont déduits ici."""
+    m = SBOM_PURL_RE.match(purl) if isinstance(purl, str) and len(purl) <= 1024 else None
+    if not m:
+        return None
+    rest = m.group(2).split("#", 1)[0].split("?", 1)[0]
+    path, _, version = rest.rpartition("@") if "@" in rest else (rest, "", "")
+    segs = [s for s in path.split("/") if s]
+    if not segs:
+        return None
+    try:
+        segs = [urllib.parse.unquote(s, errors="strict") for s in segs]
+        version = urllib.parse.unquote(version, errors="strict")
+    except UnicodeDecodeError:
+        return None
+    if any(not s.isprintable() or len(s) > 255 for s in segs) or not version.isprintable() or len(version) > 128:
+        return None
+    comp = {"type": "library", "bom-ref": purl, "name": segs[-1], "purl": purl}
+    if len(segs) > 1:
+        comp["group"] = "/".join(segs[:-1])
+    if version:
+        comp["version"] = version
+    return comp
+
+
+def write_sbom(purls, ws):
+    """Écrit ws/src/sbom.cdx.json (CycloneDX 1.5) à partir des purl de la tâche."""
+    comps, seen = [], set()
+    for p in purls:
+        c = _purl_component(p)
+        if c and p not in seen:
+            seen.add(p)
+            comps.append(c)
+    if not comps:
+        raise fetch.SourceError("E_SOURCE_EMPTY", "input", "no usable package URL in the SBOM")
+    doc = {"bomFormat": "CycloneDX", "specVersion": "1.5", "version": 1,
+           "metadata": {"tools": {"components": [{"type": "application", "name": "scanoria-runner"}]}},
+           "components": comps}
+    src = os.path.join(ws, "src")
+    os.mkdir(src, 0o755)
+    path = os.path.join(src, "sbom.cdx.json")
+    data = json.dumps(doc, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    # Comme une archive (fetch) : l'arbre appartient à l'utilisateur du
+    # conteneur ; le masque du runner (077) rendrait sinon le fichier illisible.
+    testbed._give_to_container(src)
+    return 1, len(data), []
 
 
 def _copy_fetch_log(ws, rdir):

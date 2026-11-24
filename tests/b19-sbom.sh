@@ -58,7 +58,7 @@ expect "syft : aucun réseau" "$(jq -r .scan.network "$TMP/syft.json")" none
 expect "syft : SBOM CycloneDX 1.6 sur /out" "$(jq -c .outputs.cyclonedx "$TMP/syft.json")" '{"path":"/out/sbom.cdx.json","version":"1.6"}'
 expect "syft : catégorie sbom (profils complet et release)" "$(jq -c .categories "$TMP/syft.json")" '["sbom"]'
 expect "grype : base grype-db requise" "$(jq -c .requires.feeds "$TMP/grype.json")" '["grype-db"]'
-expect "grype : lit le SBOM de l'analyse" "$(jq -r '.scan.sbom_command[1]' "$TMP/grype.json")" "sbom:/sbom/sbom.cdx.json"
+expect "grype : lit le SBOM de l'analyse" "$(jq -r '.scan.sbom_command[1]' "$TMP/grype.json")" "sbom:/src/sbom.cdx.json"
 expect "grype : sans SBOM, analyse /src elle-même" "$(jq -r '.scan.command[1]' "$TMP/grype.json")" "dir:/src"
 expect "grype : aucune mise à jour ni validation d'âge en ligne" \
 	"$(jq -c '[.scan.env.GRYPE_DB_AUTO_UPDATE, .scan.env.GRYPE_DB_VALIDATE_AGE, .scan.env.GRYPE_DB_REQUIRE_UPDATE_CHECK, .scan.env.GRYPE_CHECK_FOR_APP_UPDATE]' "$TMP/grype.json")" \
@@ -86,7 +86,7 @@ def case(label, fn, want):
     errs = modcheck.manifest_errors(m, v)
     print("%s\t%s" % (label, "oui" if any(want in e for e in errs) else "non: %s" % errs[:2]))
 case("sbom_command sans entrée sbom", lambda m: m["scan"].update(inputs=["repo"]), "entrée « sbom »")
-case("sbom_command sans la sortie", lambda m: m["scan"].update(sbom_command=["/grype", "sbom:/sbom/sbom.cdx.json"]), "absent de scan.sbom_command")
+case("sbom_command sans la sortie", lambda m: m["scan"].update(sbom_command=["/grype", "sbom:/src/sbom.cdx.json"]), "absent de scan.sbom_command")
 case("sbom_command avec « .. »", lambda m: m["scan"]["sbom_command"].append("/sbom/../etc"), "« .. »")
 case("service_optional sans service", lambda m: m["scan"].update(service_optional=True), "service:<id>")
 case("requires_sbom non booléen", lambda m: m["scan"].update(requires_sbom="oui"), "schéma")
@@ -384,6 +384,7 @@ name = {"$SYFT_IMG": "syft", "$GRYPE_IMG": "grype", "$UP_IMG": "dtrack-upload"}[
 with open("$TMP/runs.jsonl", "a") as f:
     f.write(json.dumps({"module": name, "cmd": [ep[0]] + rest, "sbom": vols.get("/sbom", [None, None])[1],
                         "sbom_file": os.path.exists(os.path.join(vols["/sbom"][0], "sbom.cdx.json")) if "/sbom" in vols else False,
+                        "src_sbom": os.path.exists(os.path.join(vols["/src"][0], "sbom.cdx.json")) if "/src" in vols else False,
                         "args": a}) + "\n")
 out = vols["/out"][0]
 if name == "syft":
@@ -445,8 +446,9 @@ id=$(uuid); drop "$id" "$(job "$id" "$(mods '["grype", "dtrack-upload", "syft"]'
 expect "chaîne : les trois modules réussissent" "$(statuses "$id")" "grype=ok dtrack-upload=ok syft=ok"
 check "chaîne : résultat conforme au schéma" valid "$id"
 expect "chaîne : Syft lancé avant les modules qui lisent le SBOM" "$(runs)" "syft grype dtrack-upload"
-expect "chaîne : Grype lit le SBOM (sbom_command)" "$(jq -r 'select(.module == "grype") | .cmd[1]' "$TMP/runs.jsonl")" "sbom:/sbom/sbom.cdx.json"
-expect "chaîne : SBOM monté en lecture seule pour Grype et dtrack-upload" "$(jq -r 'select(.module != "syft") | .sbom + "/" + (.sbom_file | tostring)' "$TMP/runs.jsonl" | paste -sd' ')" "ro/true ro/true"
+expect "chaîne : Grype lit le SBOM (sbom_command)" "$(jq -r 'select(.module == "grype") | .cmd[1]' "$TMP/runs.jsonl")" "sbom:/src/sbom.cdx.json"
+expect "chaîne : Grype lit le SBOM sur /src à la place du dépôt (comme en re-corrélation)" "$(jq -r 'select(.module == "grype") | (.src_sbom | tostring) + "/" + (.sbom // "aucun")' "$TMP/runs.jsonl")" "true/aucun"
+expect "chaîne : SBOM monté en lecture seule sur /sbom pour dtrack-upload" "$(jq -r 'select(.module == "dtrack-upload") | .sbom + "/" + (.sbom_file | tostring)' "$TMP/runs.jsonl")" "ro/true"
 expect "chaîne : Syft ne voit pas de SBOM" "$(jq -r 'select(.module == "syft") | .sbom // "aucun"' "$TMP/runs.jsonl")" aucun
 jq -r 'select(.module == "dtrack-upload") | .args[]' "$TMP/runs.jsonl" > "$TMP/up-args.txt"
 grep -qx "SCANORIA_REF=v1.2.0" "$TMP/up-args.txt" && ok "chaîne : version Dependency-Track = étiquette analysée" || ko "chaîne : SCANORIA_REF absent"
@@ -481,6 +483,18 @@ cases = [({"kind": "git", "ref": "refs/tags/v1.0"}, "v1.0"), ({"kind": "git", "r
          ({"kind": "git", "ref": "x;y"}, "unknown"), ({"kind": "git"}, "unknown")]
 print(all(sbom.ref_label(s) == w for s, w in cases))' "$PYLIB")
 expect "sbom.ref_label : référence nettoyée, valeurs hostiles écartées" "$R" True
+
+# Qui lit le SBOM d'une analyse : Grype (prefers_sbom) et dtrack-upload (requires_sbom) ;
+# OSV-Scanner et Trivy ont un sbom_command de re-corrélation (contrat 16) mais
+# analysent le dépôt dans une analyse.
+R=$(python3 -c '
+import sys, yaml; sys.path.insert(0, sys.argv[1]); from scanoria import sbom
+out = []
+for mid in ("grype", "dtrack-upload", "osv-scanner", "trivy", "syft"):
+    m = yaml.safe_load(open("%s/modules/%s/module.yaml" % (sys.argv[2], mid)))
+    out.append("%s=%s%s" % (mid, int(sbom.consumes(m)), int(sbom.prefers(m))))
+print(" ".join(out))' "$PYLIB" "$ROOT")
+expect "contrat 14 : seuls Grype et dtrack-upload lisent le SBOM de l'analyse" "$R" "grype=11 dtrack-upload=10 osv-scanner=00 trivy=00 syft=00"
 
 echo
 echo "b19-sbom : $PASS réussis, $FAIL échoués"

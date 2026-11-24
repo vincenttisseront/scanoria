@@ -13,6 +13,7 @@ comme HTML : noms et licences viennent de l'outil.
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import { h } from 'vue'
+import SbomLicenseDecision from './LicenseDecision.vue'
 
 const props = defineProps<{ scanId: string }>()
 const { t } = useI18n()
@@ -79,9 +80,29 @@ watch(filters, () => {
     else void load()
   }, 250)
 })
+// Décision de licence de chaque composant (F8, chantier B), par purl ; sans
+// elle (erreur, droits), la colonne garde les licences brutes.
+type Decision = { purl: string, decision: 'allowed' | 'review' | 'denied', source: 'project' | 'global' | 'default' | 'unknown' }
+const decisions = ref(new Map<string, Decision>())
+async function loadDecisions() {
+  try {
+    const res = await api<{ items: Decision[] }>(`/api/licenses/scans/${encodeURIComponent(props.scanId)}`)
+    decisions.value = new Map(res.items.map(i => [i.purl, i]))
+  }
+  catch {
+    decisions.value = new Map()
+  }
+}
+
 watch(page, () => void load())
-watch(() => props.scanId, () => void load())
-onMounted(() => void load())
+watch(() => props.scanId, () => {
+  void load()
+  void loadDecisions()
+})
+onMounted(() => {
+  void load()
+  void loadDecisions()
+})
 onBeforeUnmount(() => clearTimeout(debounce))
 
 const ecosystemItems = computed(() => [
@@ -117,9 +138,13 @@ const columns = computed<TableColumn<Component>[]>(() => [
   {
     id: 'licenses',
     header: t('sbom.columns.licenses'),
-    cell: ({ row }) => row.original.licenses.length
-      ? h('span', { class: 'text-xs' }, row.original.licenses.join(', '))
-      : h('span', { class: 'text-xs text-muted' }, t('sbom.noLicense')),
+    cell: ({ row }) => {
+      const d = decisions.value.get(row.original.purl)
+      if (d) return h(SbomLicenseDecision, { licenses: row.original.licenses, decision: d.decision, source: d.source })
+      return row.original.licenses.length
+        ? h('span', { class: 'text-xs' }, row.original.licenses.join(', '))
+        : h('span', { class: 'text-xs text-muted' }, t('sbom.noLicense'))
+    },
   },
   { id: 'direct', header: t('sbom.columns.direct'), cell: ({ row }) => h('span', { class: 'text-xs' }, directText(row.original.direct)) },
   { id: 'paths', header: t('sbom.columns.paths'), cell: ({ row }) => h('span', { class: 'font-mono text-xs break-all text-muted' }, row.original.paths.join(', ')) },

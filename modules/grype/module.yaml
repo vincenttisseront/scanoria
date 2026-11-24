@@ -39,7 +39,8 @@ options:
 scan:
   inputs: [repo, archive, sbom, image]
   command: ["/grype", "dir:/src", "--quiet", "--output", "sarif", "--file", "/out/result.sarif"]
-  sbom_command: ["/grype", "sbom:/sbom/sbom.cdx.json", "--quiet", "--output", "sarif", "--file", "/out/result.sarif"]
+  prefers_sbom: true
+  sbom_command: ["/grype", "sbom:/src/sbom.cdx.json", "--quiet", "--output", "sarif", "--file", "/out/result.sarif"]
   env:
     GRYPE_DB_CACHE_DIR: /feeds/grype-db
     GRYPE_DB_AUTO_UPDATE: "false"

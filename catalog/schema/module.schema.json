@@ -550,6 +550,17 @@
           },
           "description": "argv lancé à la place de command quand la source est un dépôt Git lu avec son historique (history: full) ; le dépôt Git est monté en lecture seule sur /git."
         },
+        "sbom_command": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "description": "argv lancé à la place de command quand la source est un SBOM (entrée « sbom », re-corrélation de la 0.5, contrat 16) : le runner écrit le CycloneDX dans /src/sbom.cdx.json (lecture seule). Sans ce champ, le module est ignoré (skipped) pour une source SBOM."
+        },
         "severity_map": {
           "type": "object",
           "additionalProperties": {
@@ -576,16 +587,10 @@
           "pattern": "^[a-z0-9][a-z0-9-]{0,40}$",
           "description": "Outil de l'appliance monté en lecture seule sur /scanoria : /usr/lib/scanoria/scan-tools/<tool> (convertisseur, orchestration). Livré et signé avec l'appliance, jamais avec le catalogue."
         },
-        "sbom_command": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 64,
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 500
-          },
-          "description": "argv lancé à la place de command quand l'analyse dispose déjà d'un SBOM CycloneDX (contrat 14 de la 0.5, produit par un module précédent de la même analyse, ou SBOM rangé pour une re-corrélation) : il est monté en lecture seule sur /sbom/sbom.cdx.json. Le module doit déclarer l'entrée « sbom »."
+        "prefers_sbom": {
+          "type": "boolean",
+          "default": false,
+          "description": "Dans une analyse qui a produit un SBOM (contrat 14 de la 0.5), le module lance sbom_command sur ce SBOM (monté sur /src) au lieu d'analyser le dépôt (Grype). Sans prefers_sbom, sbom_command ne sert qu'à la re-corrélation."
         },
         "requires_sbom": {
           "type": "boolean",

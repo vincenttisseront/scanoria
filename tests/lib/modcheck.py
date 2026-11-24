@@ -94,12 +94,16 @@ def scan_errors(manifest):
                 errs.append(f"outputs.{kind}: {out['path']} absent de scan.{key}")
     if "sbom_command" in scan and "sbom" not in scan.get("inputs", []):
         errs.append("scan.sbom_command exige l'entrée « sbom »")
+    if scan.get("prefers_sbom") and not scan.get("sbom_command"):
+        errs.append("scan.prefers_sbom exige scan.sbom_command")
     if scan.get("requires_sbom") and "sbom" not in scan.get("inputs", []):
         errs.append("scan.requires_sbom exige l'entrée « sbom »")
     if scan.get("service_optional") and not str(scan.get("network", "")).startswith("service:"):
         errs.append("scan.service_optional exige scan.network: service:<id>")
     if "history_command" in scan and scan.get("history") != "full":
         errs.append("scan.history_command exige scan.history: full")
+    if "sbom_command" in scan and ("sbom" not in scan.get("inputs", []) or not any(a == "/src/sbom.cdx.json" or a.endswith(":/src/sbom.cdx.json") for a in scan["sbom_command"])):
+        errs.append("scan.sbom_command exige l'entrée sbom et lit /src/sbom.cdx.json")
     feeds = manifest.get("requires", {}).get("feeds", [])
     for feed in feeds:
         if not any(f"/feeds/{feed}" in arg for arg in scan["command"] + list((scan.get("env") or {}).values())):

@@ -59,7 +59,8 @@
             "refresh-feeds",
             "backup-module",
             "restore-module",
-            "reset-service-admin"
+            "reset-service-admin",
+            "package-dates"
           ]
         }
       ]

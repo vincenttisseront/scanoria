@@ -45,6 +45,7 @@ function page(patch: Record<string, unknown> = {}) {
 describe('onglet SBOM', () => {
   it('composants, licences, dépendances, couverture, export et lien Dependency-Track', async () => {
     route('GET', PATH, () => page())
+    route('GET', `/api/licenses/scans/${ID}`, () => ({ counts: { allowed: 1, review: 0, denied: 0 }, items: [{ purl: 'pkg:npm/minimist@1.2.8', name: 'minimist', version: '1.2.8', licenses: ['MIT'], decision: 'allowed', source: 'default' }] }))
     await mountIn(SbomComponents, { props: { scanId: ID } })
     await settle()
     const text = bodyText()
@@ -61,6 +62,9 @@ describe('onglet SBOM', () => {
     const link = document.body.querySelector<HTMLAnchorElement>('[data-testid="sbom-dtrack"]')!
     expect(link.getAttribute('href')).toBe(`https://dtrack.analyse.exemple.test/projects/${DTRACK}`)
     expect(link.getAttribute('rel')).toContain('noopener')
+    // Décision de licence (F8) pour le composant connu de la politique, licences brutes pour les autres.
+    expect(document.body.querySelectorAll('[data-testid="license-allowed"]')).toHaveLength(1)
+    expect(text).toContain('Autorisée')
     expect(callsTo('GET', PATH)[0]!.query).toMatchObject({ page: '1', per_page: '50', sort: 'name', order: 'asc' })
   })
 

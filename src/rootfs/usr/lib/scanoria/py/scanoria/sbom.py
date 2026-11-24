@@ -32,8 +32,17 @@ REF_LABEL_RE = re.compile(r"[A-Za-z0-9._/-]{1,200}\Z")
 def consumes(m):
     """Le module lit le SBOM de l'analyse (entrée « sbom » déclarée)."""
     scan = m.get("scan") or {}
-    return "sbom" in (scan.get("inputs") or []) and (scan.get("requires_sbom") is True
-                                                     or bool(scan.get("sbom_command")))
+    return "sbom" in (scan.get("inputs") or []) and (scan.get("requires_sbom") is True or prefers(m))
+
+
+def prefers(m):
+    """Le module analyse le SBOM de l'analyse plutôt que le dépôt quand il existe
+    (scan.prefers_sbom, Grype) : scan.sbom_command, SBOM monté sur /src comme
+    pour une re-corrélation (contrat 16). Les autres modules qui déclarent
+    sbom_command (OSV-Scanner, Trivy) ne s'en servent qu'en re-corrélation et
+    analysent le dépôt lui-même dans une analyse."""
+    scan = m.get("scan") or {}
+    return scan.get("prefers_sbom") is True and bool(scan.get("sbom_command"))
 
 
 def required(m):

@@ -52,6 +52,8 @@ export interface DetectionError {
   version: typeof DETECTION_VERSION
   analyzed_at: string
   error: string
+  /** Code système de la cause réseau (ENOTFOUND, EPERM…), quand il est connu. */
+  detail?: string
 }
 
 const ts = (col: string, alias = col.split('.').pop()!) => `to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS ${alias}`
@@ -306,6 +308,7 @@ export function detectionError(err: unknown, now = new Date()): DetectionError {
     version: DETECTION_VERSION,
     analyzed_at: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
     error: err instanceof ForgeError ? err.code : 'E_DETECTION',
+    ...(err instanceof ForgeError && err.detail ? { detail: err.detail } : {}),
   }
 }
 

@@ -57,9 +57,11 @@ AmbientCapabilities=
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged
-# Le worker ne parle qu'à PostgreSQL (socket local) : aucun accès réseau.
-IPAddressAllow=localhost
-IPAddressDeny=any
+# Réseau : PostgreSQL (boucle locale) et la sortie vers les API des forges
+# (planification : découverte, interrogation des commits, détection F1),
+# HTTPS seulement, contrôlée par le transport des forges (voir la console).
+# Ne pas tout refuser (valeur « any ») : aucune forge ne serait joignable.
+IPAddressDeny=link-local multicast
 
 [Install]
 WantedBy=multi-user.target
