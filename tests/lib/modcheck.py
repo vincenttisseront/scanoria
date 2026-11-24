@@ -32,7 +32,8 @@ from scanoria import schema as appliance_schema  # noqa: E402
 
 SCHEMA_PATH = os.path.join(ROOT, "catalog/schema/module.schema.json")
 OPTION_NAME = re.compile(r"^[a-z][a-z0-9_]{0,40}\Z")
-ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}\Z")
+# Même règle que catalogverify.ENV_KEY_RE : ni LD_*, ni PATH, ni HOME.
+ENV_NAME = re.compile(r"^(?!LD_|PATH\Z|HOME\Z)[A-Z][A-Z0-9_]{0,63}\Z")
 TESTBED_NAME = re.compile(r"^[A-Za-z0-9._+@-]+\Z")
 
 

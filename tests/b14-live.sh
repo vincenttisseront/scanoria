@@ -206,8 +206,8 @@ jq -e '.modules[0].stats.peak_memory_mb >= 0' <<< "$R" > /dev/null && ok "git : 
 expect "git : espace de travail supprimé" "$(find "$SCANS/workspaces" -mindepth 1 | wc -l)" 0
 expect "git : aucun conteneur laissé" "$(podman ps -a --format '{{.Names}}' | grep -c '^scanoria-' || true)" 0
 expect "nftables : autorisation retirée après le clone" \
-	"$(nft -j list set inet scanoria_fetch allow4 | jq '[.nftables[] | select(.set) | .set.elem // [] | length] | add')" 0
-nft list table inet scanoria_fetch | sed 's/^/     /'
+	"$( (nft -j list set inet scanoria_fetch allow4 || echo '{"nftables": []}') | jq '[.nftables[] | select(.set) | .set.elem // [] | length] | add // "table absente"')" 0
+nft list table inet scanoria_fetch 2>&1 | sed 's/^/     /' || true
 
 # --- 2. Jeton faux : authentification refusée --------------------------------------------
 id=$(uuid)

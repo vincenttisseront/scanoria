@@ -46,7 +46,6 @@ scan:
   # par scanoria-runner (fetch.py), jamais par une analyse.
   command: ["/bin/sh", "-ec", "cp -R /src /tmp/o; cd /tmp/o; git init -q; git add -A; git commit -qm testbed; git clone -q --depth 1 --no-tags file:///tmp/o /tmp/c; cmp /src/README.md /tmp/c/README.md; test ! -e /tmp/c/.gitmodules; r=; for f in $(cd /tmp/c; find . -type f ! -path './.git/*'); do r=\"$r${r:+,}{\\\"ruleId\\\":\\\"git-clone\\\",\\\"message\\\":{\\\"text\\\":\\\"cloned\\\"}}\"; done; printf '{\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"git-fetch\"}},\"results\":[%s]}]}' \"$r\" > \"$1\"", "git-fetch", "/out/result.sarif"]
   env:
-    HOME: /tmp
     GIT_CONFIG_NOSYSTEM: "1"
     GIT_CONFIG_GLOBAL: /dev/null
     GIT_TERMINAL_PROMPT: "0"
