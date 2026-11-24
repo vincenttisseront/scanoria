@@ -165,7 +165,7 @@ Toutes les versions sont **à épingler au moment de l'intégration**. Ne jamais
 ### 5.1 Modules
 | Module | Type | Catégories | Licence (à revérifier) | Contraintes à connaître |
 |---|---|---|---|---|
-| **SonarQube Community Build** | service | qualité, SAST | LGPL-3.0 | **Branche principale seulement, pas d'analyse de PR** ; PostgreSQL ; `vm.max_map_count` ; ≥ 4 Go RAM pour lui seul |
+| **SonarQube Community Build** | service | qualité, SAST | LGPL-3.0 | **Branche principale seulement, pas d'analyse de PR**, sauf avec la variante « plugin de branches » (communautaire, LGPL-3.0, activée dès qu'une version compatible est épinglée) ; PostgreSQL ; `vm.max_map_count` ; ≥ 4 Go RAM pour lui seul |
 | **gitleaks** | scanner | secrets | MIT | historique complet ; configuration d'exceptions par projet |
 | **TruffleHog** | scanner | secrets | AGPL-3.0 | **vérification active des secrets désactivée** (aucun appel réseau) |
 | **OSV-Scanner** | scanner + feed | SCA | Apache-2.0 | base OSV hors ligne ; exceptions datées par projet |

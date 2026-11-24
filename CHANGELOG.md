@@ -10,7 +10,41 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.4.1 — non publiée
+## 0.5.0 — non publiée
+
+SBOM : chaque analyse relève ses composants, et toute la chaîne de la 0.5
+(composants, licences, quarantaine, EPSS et KEV, recoupement) fonctionne de
+bout en bout. Les fonctions arrivées en 0.4.1 sont décrites dans sa section.
+
+### Ajouté
+- **Syft** : le SBOM CycloneDX 1.6 de chaque analyse est rangé dans la
+  console (carte SBOM de l'analyse, filtres, décision de licence par
+  composant, export CycloneDX). Il alimente les pages Composants et Licences
+  ainsi que la quarantaine.
+- **Grype** et sa base hors ligne **grype-db**, téléchargée et mise à jour
+  chaque jour par l'appliance. Grype analyse le SBOM de l'analyse et participe
+  à la re-corrélation sans réanalyse.
+- **OWASP Dependency-Track**, installable depuis le catalogue sur
+  `dtrack.<appliance>` et mis en service automatiquement. Le module
+  `dtrack-upload` lui envoie le SBOM de chaque analyse, un projet par projet
+  Scanoria.
+- **SonarQube, analyse des branches et des PR** par le plugin communautaire
+  de branches, sous forme de variante d'image du module. Elle s'active
+  d'elle-même dès qu'une version du plugin compatible avec le SonarQube
+  embarqué est épinglée. D'ici là, l'analyse reste sur la branche principale,
+  et la console dit pourquoi.
+- IA : l'explication des licences « à revoir » ou inhabituelles (I18)
+  apparaît sur la page Licences. C'est une aide, pas un avis juridique.
+- Catalogue n° 11.
+
+### Limites connues
+- La sortie Internet de Dependency-Track est déclarée, mais pas encore
+  filtrée par destination. Le miroir hors ligne arrive en 0.6.
+- Seul le premier SBOM d'une analyse est ingéré.
+- Aucune version du plugin de branches n'est encore publiée pour le
+  SonarQube embarqué (26.11).
+
+## 0.4.1 — 2026-11-24
 
 Correctif : la console et le worker joignent de nouveau les forges.
 
