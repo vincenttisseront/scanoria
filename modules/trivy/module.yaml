@@ -26,7 +26,7 @@ image: ghcr.io/aquasecurity/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39
 version: "0.76.2"
 resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 300 }
 hostname: null
-requires: { modules: [], feeds: [trivy-db], appliance: ">=0.2.0" }
+requires: { modules: [git-fetch], feeds: [trivy-db], appliance: ">=0.2.0" }
 conflicts: []
 needs: { sysctl: {}, postgres: false }
 options:

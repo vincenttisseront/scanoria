@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import Ajv2020 from 'ajv/dist/2020.js'
 import { describe, expect, it } from 'vitest'
 import {
-  CATEGORIES, ERROR_CLASSES, EXCEPTION_KINDS, FINDING_STATUSES, FORGE_KINDS, GateRules, SCAN_MODULE_STATUSES,
+  CATEGORIES, SYSTEM_CATEGORY, ERROR_CLASSES, EXCEPTION_KINDS, FINDING_STATUSES, FORGE_KINDS, GateRules, SCAN_MODULE_STATUSES,
   SCAN_PRIORITY, SCAN_STATUSES, SCAN_TRIGGERS, SCHEDULES, SECRET_STATES, SEVERITIES, VERDICTS, VerdictDetails,
   ExceptionTargets,
 } from '#shared/analysis'
@@ -33,7 +33,8 @@ describe('contrats des analyses', () => {
 
   it('catégories identiques au schéma des modules', () => {
     const mod = JSON.parse(readFileSync(root('catalog/schema/module.schema.json'), 'utf8'))
-    expect([...CATEGORIES]).toEqual(mod.properties.categories.items.enum)
+    // « system » (git-fetch) est réservée au runner : jamais proposée aux profils.
+    expect([...CATEGORIES, SYSTEM_CATEGORY]).toEqual(mod.properties.categories.items.enum)
   })
 
   it('priorités : release > webhook/api > manuel > planifié', () => {

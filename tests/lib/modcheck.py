@@ -32,7 +32,8 @@ from scanoria import schema as appliance_schema  # noqa: E402
 
 SCHEMA_PATH = os.path.join(ROOT, "catalog/schema/module.schema.json")
 OPTION_NAME = re.compile(r"^[a-z][a-z0-9_]{0,40}\Z")
-ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}\Z")
+# Même règle que catalogverify.ENV_KEY_RE : ni LD_*, ni PATH, ni HOME.
+ENV_NAME = re.compile(r"^(?!LD_|PATH\Z|HOME\Z)[A-Z][A-Z0-9_]{0,63}\Z")
 TESTBED_NAME = re.compile(r"^[A-Za-z0-9._+@-]+\Z")
 
 
@@ -78,9 +79,18 @@ def scan_errors(manifest):
             errs.append(f"scan.env: nom de variable invalide : {name!r}")
     if any(".." in arg.split("/") for arg in scan["command"]):
         errs.append("scan.command: chemin avec « .. »")
+    props = (manifest.get("options") or {}).get("properties") or {}
+    for key in ("command", "history_command"):
+        for arg in scan.get(key) or []:
+            for name in re.findall(r"\{opt\.([^}]*)\}", arg):
+                if name not in props:
+                    errs.append(f"scan.{key}: option inconnue dans {{opt.{name}}}")
     for kind, out in (manifest.get("outputs") or {}).items():
-        if out["path"] not in scan["command"]:
-            errs.append(f"outputs.{kind}: {out['path']} absent de scan.command")
+        for key in ("command", "history_command"):
+            if key in scan and out["path"] not in scan[key]:
+                errs.append(f"outputs.{kind}: {out['path']} absent de scan.{key}")
+    if "history_command" in scan and scan.get("history") != "full":
+        errs.append("scan.history_command exige scan.history: full")
     feeds = manifest.get("requires", {}).get("feeds", [])
     for feed in feeds:
         if not any(f"/feeds/{feed}" in arg for arg in scan["command"] + list((scan.get("env") or {}).values())):
@@ -211,8 +221,19 @@ def podman_args(manifest, src, out, feeds):
         args.append(f"--volume={os.path.join(feeds, feed)}:/feeds/{feed}:ro")
     for k, v in sorted((scan.get("env") or {}).items()):
         args.append(f"--env={k}={v}")
-    args += [f"--entrypoint={scan['command'][0]}", manifest["image"]] + scan["command"][1:]
+    cmd = render_defaults(manifest, scan["command"])
+    args += [f"--entrypoint={cmd[0]}", manifest["image"]] + cmd[1:]
     return args
+
+
+def render_defaults(manifest, command):
+    """{opt.<nom>} remplacé par le défaut de l'option (comme testbed.render_command)."""
+    props = (manifest.get("options") or {}).get("properties") or {}
+
+    def value(m):
+        v = props[m.group(1)]["default"]
+        return ("true" if v else "false") if isinstance(v, bool) else ",".join(v) if isinstance(v, list) else str(v)
+    return [re.sub(r"\{opt\.([a-z][a-z0-9_]{0,40})\}", value, a) for a in command]
 
 
 def main(argv):

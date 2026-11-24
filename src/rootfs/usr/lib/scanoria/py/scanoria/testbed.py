@@ -36,6 +36,48 @@ SCANNER_OK_RC = (0, 1)
 # Conteneur confiné
 # --------------------------------------------------------------------------
 
+PLACEHOLDER_RE = re.compile(r"\{opt\.([a-z][a-z0-9_]{0,40})\}")
+SAFE_ARG_RE = re.compile(r"[A-Za-z0-9._,:=/@+-]*\Z")
+
+
+def option_defaults(manifest):
+    props = (manifest.get("options") or {}).get("properties") or {}
+    return {k: p["default"] for k, p in props.items() if isinstance(p, dict) and "default" in p}
+
+
+def render_command(cmd, options):
+    """Remplace {opt.<nom>} dans l'argv par la valeur de l'option (G3).
+
+    Valeur au jeu de caractères sûr ; un argument qui ne commençait pas par « - »
+    ne peut pas en commencer un après substitution (aucune option injectée)."""
+    vals = {}
+    for k, v in (options or {}).items():
+        if isinstance(v, bool):
+            vals[k] = "true" if v else "false"
+        elif isinstance(v, (int, float)):
+            vals[k] = str(v)
+        elif isinstance(v, str):
+            vals[k] = v
+        elif isinstance(v, list) and all(isinstance(x, str) for x in v):
+            vals[k] = ",".join(v)
+    out = []
+    for arg in cmd:
+        def sub(mm):
+            k = mm.group(1)
+            if k not in vals:
+                raise Fail("E_INVALID_PARAM", "unknown placeholder {opt.%s}" % k)
+            if not SAFE_ARG_RE.match(vals[k]):
+                raise Fail("E_INVALID_PARAM", "unsafe value for option %s" % k)
+            return vals[k]
+        new = PLACEHOLDER_RE.sub(sub, arg)
+        if new != arg and new.startswith("-") and not arg.startswith("-"):
+            raise Fail("E_INVALID_PARAM", "option value cannot start with '-'")
+        if not new or len(new) > 1000:
+            raise Fail("E_INVALID_PARAM", "invalid rendered argument")
+        out.append(new)
+    return out
+
+
 def confined_args(manifest, mounts=(), name=None):
     """Arguments « podman run » d'un conteneur jetable confiné (§ 6.4)."""
     res = manifest.get("resources") or {}
@@ -348,7 +390,8 @@ def run(manifest, timeout=None):
         _prepare_out(out)
         t = scan.get("timeout_s") if isinstance(scan.get("timeout_s"), int) else DEFAULT_TIMEOUT
         t = max(10, min(t, timeout or DEFAULT_TIMEOUT))
-        rc = run_confined(manifest, scan["command"], [(src, "/src", "ro"), (out, "/out", "rw")], timeout=t,
+        cmd = render_command(scan["command"], option_defaults(manifest))
+        rc = run_confined(manifest, cmd, [(src, "/src", "ro"), (out, "/out", "rw")], timeout=t,
                           env=scan.get("env"))
         if rc not in (scan.get("exit_codes_ok") or SCANNER_OK_RC):
             raise Fail("E_TESTBED", "scanner exited with code %d on its testbed" % rc)

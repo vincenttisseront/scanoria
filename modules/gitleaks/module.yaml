@@ -24,7 +24,7 @@ image: ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c6
 version: "8.30.1"
 resources: { min_ram_mb: 256, min_cpu: 1, disk_mb: 100 }
 hostname: null
-requires: { modules: [], feeds: [], appliance: ">=0.2.0" }
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.2.0" }
 conflicts: []
 needs: { sysctl: {}, postgres: false }
 options:
@@ -35,7 +35,7 @@ options:
       type: boolean
       default: true
       title: Analyser l'historique Git
-      description: Parcourt tous les commits quand la source est un dépôt Git (appliqué par le worker d'analyses, 0.3).
+      description: Parcourt tous les commits quand la source est un dépôt Git.
     max_target_megabytes:
       type: integer
       default: 10
@@ -53,9 +53,16 @@ options_i18n:
 scan:
   inputs: [repo, archive]
   # Le secret n'apparaît jamais dans la sortie (--redact) : CLAUDE.md § 6.3.
+  # {opt.<nom>} : valeur de l'option du module (G3), substituée par le runner.
   command: ["gitleaks", "dir", "/src", "--no-banner", "--redact", "--exit-code", "0",
-            "--max-target-megabytes", "10",
+            "--max-target-megabytes", "{opt.max_target_megabytes}",
             "--report-format", "sarif", "--report-path", "/out/result.sarif"]
+  # Dépôt Git : tout l'historique est parcouru (clone complet, dépôt en lecture
+  # seule sur /git), sauf si l'option history est à false.
+  history: full
+  history_command: ["gitleaks", "git", "/src", "--no-banner", "--redact", "--exit-code", "0",
+                    "--max-target-megabytes", "{opt.max_target_megabytes}",
+                    "--report-format", "sarif", "--report-path", "/out/result.sarif"]
   timeout_s: 900
   network: none
   exit_codes_ok: [0]
