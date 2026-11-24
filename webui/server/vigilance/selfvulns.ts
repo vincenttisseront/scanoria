@@ -134,9 +134,11 @@ export async function ingestSelfStatus(db: Queryable, status: SelfStatus | null,
       })
     }
   }
-  // Sujet disparu (module désinstallé) : ses vulnérabilités sont résolues.
-  const present = status.subjects.map(s => s.subject)
-  const gone = await db.query(`UPDATE self_vulns SET resolved_at = now() WHERE resolved_at IS NULL AND NOT (subject = ANY($1::text[]))`, [present])
+  // Sujet disparu parce que le module est désinstallé : ses vulnérabilités sont
+  // résolues. Un sujet absent du relevé pour une autre raison (Syft absent, délai
+  // atteint) garde les siennes : un relevé manqué ne fait rien disparaître.
+  const kept = ['console', ...ctx.installed.map(m => `module:${m.id}`)]
+  const gone = await db.query(`UPDATE self_vulns SET resolved_at = now() WHERE resolved_at IS NULL AND NOT (subject = ANY($1::text[]))`, [kept])
   resolved += gone.rowCount ?? 0
   await db.query(
     `INSERT INTO appliance_settings (key, value, updated_at) VALUES ($1, $2, now())

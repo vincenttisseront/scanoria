@@ -1977,6 +1977,7 @@ export default {
     canary: {
       ok: 'Canari réussi',
       failed: 'Canari en échec',
+      infra: 'Canari non exécuté (infrastructure)',
       last: 'version {version}, {date}',
       notDisabled: 'Le module n’est pas désactivé : c’est à un administrateur de décider (mise à jour, retour à une version précédente, retrait).',
       missing: '{rule} : {found} trouvé(s) pour {min} attendu(s)',

@@ -31,6 +31,7 @@ export default defineEventHandler(async (event) => {
     trial_candidates: installed?.type === 'scanner'
       ? (ctx.index?.modules ?? []).filter(m => m.id === id && compareVersions(m.version, installed.version) > 0).map(m => m.version)
       : [],
+    installed_version: installed?.version ?? null,
     pins: pins.rows,
     vulns: installed ? await listSelfVulns(pool, `module:${id}`, 50) : [],
   }

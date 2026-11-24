@@ -493,6 +493,8 @@ def run(manifest, timeout=None):
                 # conteneur. Le message le dit, avec la limite appliquée.
                 msg = ("scanner %s was killed on its testbed, most likely out of memory "
                        "(container limit %d MB from resources.min_ram_mb)" % (manifest["id"], memory_mb(manifest)))
+            elif rc == KILLED_RC:
+                msg = "scanner %s timed out on its testbed after %d s" % (manifest["id"], t)
             raise Fail("E_TESTBED", msg + (": " + hint if hint else ""))
         details = check_expect(collect(manifest, out), tb["expect"])
         bad = [d for d in details if not d["ok"]]

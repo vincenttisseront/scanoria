@@ -1977,6 +1977,7 @@ export default {
     canary: {
       ok: 'Canary passed',
       failed: 'Canary failed',
+      infra: 'Canary not run (infrastructure)',
       last: 'version {version}, {date}',
       notDisabled: 'The module is not disabled: an administrator decides (update, previous version, removal).',
       missing: '{rule}: {found} found, {min} expected',

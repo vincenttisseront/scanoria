@@ -31,12 +31,21 @@ const canarySchema = z.object({
       found: z.number().int(),
       ok: z.boolean(),
     })).max(64).default([]),
-    error: z.object({ code: z.string().max(64), message: z.string().max(500) }).optional(),
+    error: z.object({ code: z.string().max(64), message: z.string().max(500), class: z.enum(['detection', 'infra']).optional() }).optional(),
   }),
   duration_ms: z.number().int().min(0).max(86_400_000),
   run_at: z.string().regex(TIMESTAMP_RE),
 })
 export type CanaryResult = z.infer<typeof canarySchema>
+
+/**
+ * Détection perdue (G14) : le module a tourné sans trouver le cas connu. Une
+ * erreur d'infrastructure (délai, mémoire, image, runner occupé, G12) n'en est
+ * pas une : elle est gardée dans l'historique, sans alerte ni audit d'échec.
+ */
+export function isDetectionFailure(c: { ok: boolean, details: { error?: { class?: string } } }): boolean {
+  return !c.ok && c.details.error?.class !== 'infra'
+}
 
 /** Résultats run-canaries du helper pas encore rangés (console, timer ou cli). */
 export async function applyCanaryResults(db: Queryable): Promise<number> {
@@ -56,7 +65,7 @@ export async function applyCanaryResults(db: Queryable): Promise<number> {
         `INSERT INTO canary_runs (module_id, module_version, image_digest, ok, details, duration_ms, run_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [c.data.module, c.data.version, c.data.image_digest, c.data.ok, JSON.stringify(c.data.details), c.data.duration_ms, c.data.run_at])
-      if (!c.data.ok) failed.push(c.data)
+      if (isDetectionFailure(c.data)) failed.push(c.data)
       n++
     }
     for (const f of failed) {

@@ -7,7 +7,7 @@ export interface CanaryView {
   module_id: string
   module_version: string
   ok: boolean
-  details: { expect: { rule?: string | null, category?: string | null, min: number, found: number, ok: boolean }[], error?: { code: string } }
+  details: { expect: { rule?: string | null, category?: string | null, min: number, found: number, ok: boolean }[], error?: { code: string, class?: 'detection' | 'infra' } }
   duration_ms: number | null
   run_at: string
 }
@@ -75,3 +75,11 @@ export function subjectName(subject: string): string {
 export function reasonOf(err: unknown): string | undefined {
   return (err as { data?: { data?: { reason?: string } } })?.data?.data?.reason
 }
+
+/** ok, détection perdue (G14) ou erreur d'infrastructure (G12, sans alerte). */
+export function canaryState(c: Pick<CanaryView, 'ok' | 'details'>): 'ok' | 'failed' | 'infra' {
+  if (c.ok) return 'ok'
+  return c.details.error?.class === 'infra' ? 'infra' : 'failed'
+}
+
+export const CANARY_COLOR = { ok: 'success', failed: 'error', infra: 'warning' } as const

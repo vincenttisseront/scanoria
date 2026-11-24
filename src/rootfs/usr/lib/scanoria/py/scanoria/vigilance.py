@@ -38,7 +38,7 @@ SELF_DIR = VIG_DIR + "/self"
 SELF_STATUS = SELF_DIR + "/status.json"
 PINS_FILE = common.VARLIB + "/console/pins.json"
 WORK = common.VARLIB + "/modules/work"
-MAX_PINS_BYTES = 256 * 1024
+MAX_PINS_BYTES = 1024 * 1024   # 5000 entrées de la console, environ 110 octets chacune
 MAX_PINS = 5000
 MAX_RETAINED = 200
 MAX_SBOM = 64 << 20
@@ -194,17 +194,21 @@ def release(reg, mid, ver, remove_image=True):
 # --------------------------------------------------------------------------
 
 def read_pins():
-    """{(module, version, digest)} figés par au moins un projet ; vide si illisible."""
+    """{(module, version, digest)} figés par au moins un projet.
+
+    None si le fichier est absent ou illisible : l'appelant échoue alors fermé
+    (aucune image figée n'est retirée, une ancienne version est gardée)."""
     try:
         st = os.lstat(PINS_FILE)
     except OSError:
-        return set()
+        common.log("pins file missing: pinned images are kept")
+        return None
     if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > MAX_PINS_BYTES:
         common.log("pins file ignored: not a regular file or too large")
-        return set()
+        return None
     if not common.TEST_ROOT and st.st_uid != common.scanoria_ids()[0]:
         common.log("pins file ignored: bad owner")
-        return set()
+        return None
     try:
         fd = os.open(PINS_FILE, os.O_RDONLY | os.O_NOFOLLOW)
         with os.fdopen(fd, "rb") as f:
@@ -212,9 +216,10 @@ def read_pins():
         doc = common.loads_strict(data)
     except (OSError, common.JsonError):
         common.log("pins file ignored: unreadable")
-        return set()
+        return None
     if not isinstance(doc, dict) or doc.get("version") != 1 or not isinstance(doc.get("pins"), list):
-        return set()
+        common.log("pins file ignored: unknown format")
+        return None
     out = set()
     for p in doc["pins"][:MAX_PINS]:
         if not isinstance(p, dict):
@@ -231,7 +236,10 @@ def keep_pinned(old_manifest):
 
     Retourne True si l'image doit être gardée."""
     key = (old_manifest.get("id"), old_manifest.get("version"), image_digest(old_manifest.get("image")))
-    if key[2] is None or key not in read_pins():
+    pins = read_pins()
+    # pins.json illisible : l'ancienne version est gardée par précaution, gc_retained
+    # la libère quand le fichier redevient lisible et ne la fige plus.
+    if key[2] is None or (pins is not None and key not in pins):
         return False
     try:
         retain(old_manifest, "pin")
@@ -243,13 +251,15 @@ def keep_pinned(old_manifest):
 
 
 def gc_retained(reg, now=None):
-    """Versions plus figées par aucun projet, essais trop anciens : retirées."""
+    """Versions qu'aucun projet ne fige plus et essais trop anciens : retirés.
+
+    pins.json illisible : aucune version figée n'est retirée (échec fermé)."""
     pins = read_pins()
     now = now or common.now()
     released = []
     for r in list_retained():
         key = (r["module"], r["version"], r["image_digest"])
-        if r["kind"] == "pin" and key in pins:
+        if r["kind"] == "pin" and (pins is None or key in pins):
             continue
         if r["kind"] == "trial":
             try:
@@ -271,20 +281,24 @@ def gc_retained(reg, now=None):
 # Résolution par le runner (contrats 24 et 25)
 # --------------------------------------------------------------------------
 
-def alternate(entry, item):
+def alternate(entry, item, trial=False):
     """Version demandée par une tâche du runner.
 
     None : la version installée ; dict : manifeste retenu (version figée ou
     candidate) ; False : version demandée absente de la machine (module
-    « missing », classe infra, G12)."""
+    « missing », classe infra, G12). Une candidate (kind « trial ») ne sert
+    qu'une tâche d'essai (rejeu d'un essai compris : refusé) ; une version autre
+    que l'installée exige son empreinte."""
     m = entry.get("manifest") if isinstance(entry, dict) else None
     if not isinstance(m, dict):
         return None
     want = item.get("image_digest")
     if item.get("version") == m.get("version") and (want is None or want == image_digest(m.get("image"))):
         return None
+    if want is None:
+        return False
     rec = retained_for(item.get("id"), item.get("version"))
-    if rec is None or (want is not None and rec["image_digest"] != want):
+    if rec is None or rec["image_digest"] != want or rec["kind"] not in (KINDS if trial else ("pin",)):
         return False
     return rec["manifest"]
 
@@ -418,6 +432,21 @@ def canary_modules(reg, ids=None):
     return out
 
 
+def failure_class(f):
+    """« detection » : le module a tourné et ne trouve plus le cas connu (ou rend
+    une sortie invalide) ; « infra » : délai, mémoire, image, réseau, archive (G12),
+    jamais compté comme une détection perdue."""
+    if f.code != "E_TESTBED" or "killed" in f.message or "timed out" in f.message:
+        return "infra"
+    return "detection"
+
+
+def _infra_result(mid, m, code, message):
+    return {"module": mid, "version": m["version"], "image_digest": image_digest(m.get("image")),
+            "ok": False, "details": {"expect": [], "error": {"code": code, "message": message, "class": "infra"}},
+            "duration_ms": 0, "run_at": common.iso(common.now())}
+
+
 def run_canary(m, timeout):
     t0 = time.monotonic()
     res = {"module": m["id"], "version": m["version"], "image_digest": image_digest(m.get("image")),
@@ -429,10 +458,10 @@ def run_canary(m, timeout):
     except Fail as f:
         details = ((f.output or {}).get("testbed") or {}).get("details")
         res["details"] = {"expect": details if isinstance(details, list) else [],
-                          "error": {"code": f.code, "message": f.message[:500]}}
+                          "error": {"code": f.code, "message": f.message[:500], "class": failure_class(f)}}
     except Exception as exc:  # noqa: BLE001 — un module n'arrête pas les autres
         common.log("canary of %s failed: %r" % (m["id"], exc))
-        res["details"] = {"expect": [], "error": {"code": "E_INTERNAL", "message": "internal error"}}
+        res["details"] = {"expect": [], "error": {"code": "E_INTERNAL", "message": "internal error", "class": "infra"}}
     res["duration_ms"] = int((time.monotonic() - t0) * 1000)
     return res
 
@@ -451,13 +480,15 @@ def act_run_canaries(c):
     results = []
     for mid, m in todo:
         if c.left() < 60:
-            results.append({"module": mid, "version": m["version"], "image_digest": image_digest(m.get("image")),
-                            "ok": False, "details": {"expect": [], "error": {"code": "E_TIMEOUT",
-                                                                             "message": "no time left for this canary"}},
-                            "duration_ms": 0, "run_at": common.iso(common.now())})
+            results.append(_infra_result(mid, m, "E_TIMEOUT", "no time left for this canary"))
             continue
         common.set_step("wait")
         wait_idle(c)
+        if _runner_busy():
+            # Le canari ne dispute pas la machine aux analyses : il est reporté.
+            common.log("canary of %s skipped: the runner is still busy" % mid)
+            results.append(_infra_result(mid, m, "E_RUNNER_BUSY", "the runner stayed busy; canary postponed"))
+            continue
         common.set_step("run")
         results.append(run_canary(m, min(c.left() - 30, testbed.DEFAULT_TIMEOUT)))
     try:
@@ -465,7 +496,8 @@ def act_run_canaries(c):
     except Fail as f:
         common.log("retained images cleanup: %s" % f.message)
     out = {"canaries": results, "at": common.iso(common.now())}
-    failed = [r["module"] for r in results if not r["ok"]]
+    failed = [r["module"] for r in results
+              if not r["ok"] and (r["details"].get("error") or {}).get("class") != "infra"]
     if failed:
         raise Fail("E_CANARY_FAILED", "canary failed for: %s" % ", ".join(failed), out)
     return out

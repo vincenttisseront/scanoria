@@ -374,7 +374,7 @@ def plan(reg, job):
         e = reg["modules"].get(mid)
         m = e.get("manifest") if isinstance(e, dict) else None
         # 0.6 (B, contrats 24 et 25) : version figée par le projet ou candidate d'un essai.
-        alt = vigilance.alternate(e, item) if isinstance(m, dict) and e.get("status") == "healthy" \
+        alt = vigilance.alternate(e, item, vigilance.is_trial(job)) if isinstance(m, dict) and e.get("status") == "healthy" \
             and e.get("enabled") is True else None
         if alt is False:
             out.append((_module_entry(mid, ver, "missing", _err(

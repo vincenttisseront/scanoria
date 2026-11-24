@@ -10,7 +10,7 @@ Vigilance d'un module installé, sur sa fiche du catalogue :
 -->
 
 <script setup lang="ts">
-import { reasonOf, type CanaryView, type SelfVuln, type TrialView } from '~/utils/vigilance'
+import { CANARY_COLOR, canaryState, reasonOf, type CanaryView, type SelfVuln, type TrialView } from '~/utils/vigilance'
 
 const props = defineProps<{ moduleId: string, isAdmin: boolean, scanner: boolean, busy?: boolean }>()
 const emit = defineEmits<{ changed: [] }>()
@@ -19,6 +19,7 @@ interface ModuleVigilance {
   canaries: CanaryView[]
   trials: TrialView[]
   trial_candidates: string[]
+  installed_version: string | null
   pins: { project_id: string, slug: string, name: string, version: string, reason: string }[]
   vulns: SelfVuln[]
 }
@@ -45,6 +46,9 @@ onMounted(load)
 
 // Un essai en cours se suit sans recharger la page.
 let timer: ReturnType<typeof setInterval> | undefined
+// Adoption dont la mise à jour a échoué : la candidate reste abandonnable.
+const canAbandon = (tr: TrialView) => ['running', 'done', 'error'].includes(tr.status)
+  || (tr.status === 'adopted' && !!data.value?.installed_version && data.value.installed_version !== tr.to_version)
 const running = computed(() => (data.value?.trials ?? []).some(x => x.status === 'running'))
 watch(running, (on) => {
   if (timer) clearInterval(timer)
@@ -180,9 +184,9 @@ const seconds = (ms: number | null | undefined) => (ms === null || ms === undefi
         <template v-else>
           <p class="text-sm">
             <UBadge
-              :color="lastCanary.ok ? 'success' : 'error'"
+              :color="CANARY_COLOR[canaryState(lastCanary)]"
               variant="subtle"
-              :label="lastCanary.ok ? t('vigilance.canary.ok') : t('vigilance.canary.failed')"
+              :label="t(`vigilance.canary.${canaryState(lastCanary)}`)"
             />
             {{ t('vigilance.canary.last', { version: lastCanary.module_version, date: fmt.date(lastCanary.run_at) }) }}
           </p>
@@ -210,7 +214,7 @@ const seconds = (ms: number | null | undefined) => (ms === null || ms === undefi
             <UBadge
               v-for="c in data.canaries"
               :key="c.run_at"
-              :color="c.ok ? 'success' : 'error'"
+              :color="CANARY_COLOR[canaryState(c)]"
               variant="outline"
               size="sm"
               :label="fmt.date(c.run_at)"
@@ -313,7 +317,7 @@ const seconds = (ms: number | null | undefined) => (ms === null || ms === undefi
               </details>
             </template>
             <div
-              v-if="isAdmin && ['running', 'done', 'error'].includes(tr.status)"
+              v-if="isAdmin && canAbandon(tr)"
               class="mt-2 flex gap-2"
             >
               <UButton

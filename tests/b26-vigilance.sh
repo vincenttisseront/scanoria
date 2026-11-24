@@ -174,7 +174,10 @@ reg = modules.load_registry(); e = reg['modules']['gitleaks']
 r = {}
 r['installed'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.30.0'})
 r['installed-digest'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.30.0', 'image_digest': '$D1'})
-r['retained'] = (vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.30.1', 'image_digest': '$D2'}) or {}).get('image')
+r['retained'] = (vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.30.1', 'image_digest': '$D2'}, True) or {}).get('image')
+# Candidate d'essai demandée par une tâche normale (rejeu d'un essai) : refusée.
+r['trial-not-trial-job'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.30.1', 'image_digest': '$D2'})
+r['no-digest'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.30.1'}, True)
 r['wrong-digest'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.30.1', 'image_digest': '$D3'})
 r['absent'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.29.1', 'image_digest': '$D3'})
 r['traversal'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '../../x'})
@@ -182,14 +185,16 @@ r['traversal'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '../../x'}
 p = vigilance._record_path('gitleaks', '8.30.1')
 rec = json.load(open(p)); good = dict(rec)
 rec['image_digest'] = '$D3'; json.dump(rec, open(p, 'w'))
-r['tampered'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.30.1'})
+r['tampered'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.30.1', 'image_digest': '$D2'}, True)
 os.unlink(p); os.symlink('/etc/hostname', p)
-r['symlink'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.30.1'})
+r['symlink'] = vigilance.alternate(e, {'id': 'gitleaks', 'version': '8.30.1', 'image_digest': '$D2'}, True)
 os.unlink(p); json.dump(good, open(p, 'w')); os.chmod(p, 0o600)
 print(json.dumps(r))
 ")
 expect "alternate : version installée → None" "$(jq -r .installed <<< "$R")/$(jq -r '."installed-digest"' <<< "$R")" null/null
 expect "alternate : version retenue → son manifeste" "$(jq -r .retained <<< "$R")" "ghcr.io/exemple/gitleaks@$D2"
+expect "alternate : candidate refusée hors tâche d'essai" "$(jq -r '."trial-not-trial-job"' <<< "$R")" false
+expect "alternate : autre version sans empreinte refusée" "$(jq -r '."no-digest"' <<< "$R")" false
 expect "alternate : empreinte différente → absente" "$(jq -r '."wrong-digest"' <<< "$R")" false
 expect "alternate : version jamais retenue → absente (infra)" "$(jq -r .absent <<< "$R")" false
 expect "alternate : version piégée → absente" "$(jq -r .traversal <<< "$R")" false
@@ -198,21 +203,21 @@ expect "alternate : lien symbolique ignoré" "$(jq -r .symlink <<< "$R")" false
 
 # --- 5. pins.json écrit par la console, lu sans confiance -------------------------------------
 PINS="$T/var/lib/scanoria/console/pins.json"
-pins_count() { py "print(len(vigilance.read_pins()))"; }
+pins_count() { py "p = vigilance.read_pins(); print('illisible' if p is None else len(p))"; }
 echo "{\"version\": 1, \"pins\": [{\"module\": \"gitleaks\", \"version\": \"8.30.0\", \"image_digest\": \"$D1\"}, {\"module\": \"../x\", \"version\": \"1\", \"image_digest\": \"$D1\"}, {\"module\": \"gitleaks\", \"version\": \"8.30.0\", \"image_digest\": \"sha256:court\"}]}" > "$PINS"
 expect "pins.json : entrées invalides écartées" "$(pins_count)" 1
 cp "$PINS" "$TMP/pins.ok"
 ln -sf "$TMP/pins.ok" "$PINS.lnk" && mv -f "$PINS.lnk" "$PINS"
-expect "pins.json : lien symbolique ignoré" "$(pins_count)" 0
+expect "pins.json : lien symbolique ignoré" "$(pins_count)" illisible
 rm -f "$PINS"
-python3 -c 'import json; print(json.dumps({"version": 1, "pins": [], "pad": "x" * 300000}))' > "$PINS"
-expect "pins.json : plus de 256 Kio ignoré" "$(pins_count)" 0
+python3 -c 'import json; print(json.dumps({"version": 1, "pins": [], "pad": "x" * 1100000}))' > "$PINS"
+expect "pins.json : plus de 1 Mio ignoré" "$(pins_count)" illisible
 printf '{"version": 1, "pins": [], "pins": []}' > "$PINS"
-expect "pins.json : clé dupliquée ignorée" "$(pins_count)" 0
+expect "pins.json : clé dupliquée ignorée" "$(pins_count)" illisible
 printf 'pas du json' > "$PINS"
-expect "pins.json : JSON invalide ignoré" "$(pins_count)" 0
+expect "pins.json : JSON invalide ignoré" "$(pins_count)" illisible
 echo '{"version": 2, "pins": []}' > "$PINS"
-expect "pins.json : version inconnue ignorée" "$(pins_count)" 0
+expect "pins.json : version inconnue ignorée" "$(pins_count)" illisible
 
 # --- 6. Mise à jour d'un module figé : l'ancienne image est gardée ----------------------------
 cp "$TMP/pins.ok" "$PINS"
@@ -242,15 +247,20 @@ R=$(py "
 import datetime
 reg = install('8.30.1', '$D2')   # essai adopté : la candidate est désormais installée
 r = {'kept': vigilance.gc_retained(reg)}
+later = common.now() + datetime.timedelta(days=15)
+# pins.json absent (restauration) : échec fermé, la version figée reste.
+os.unlink('$PINS')
+r['no-pins'] = [x['version'] for x in vigilance.list_retained() if x['kind'] == 'pin' and x['version'] not in vigilance.gc_retained(reg, later)]
+r['no-pins-left'] = sorted(x['version'] for x in vigilance.list_retained())
 # Plus aucun projet ne fige 8.30.0, et l'essai a plus de 14 jours.
 json.dump({'version': 1, 'pins': []}, open('$PINS', 'w'))
-later = common.now() + datetime.timedelta(days=15)
 r['released'] = sorted(vigilance.gc_retained(reg, later))
 r['left'] = [x['version'] for x in vigilance.list_retained()]
 print(json.dumps(r))
 ")
 expect "ménage : essai récent et version figée gardés" "$(jq -c .kept <<< "$R")" '[]'
-expect "ménage : version libérée et essai oublié retirés" "$(jq -c .released <<< "$R")" '["gitleaks@8.30.0","gitleaks@8.30.1"]'
+expect "ménage sans pins.json : version figée gardée (échec fermé)" "$(jq -c '."no-pins-left"' <<< "$R")" '["8.30.0"]'
+expect "ménage : version libérée retirée" "$(jq -c .released <<< "$R")" '["gitleaks@8.30.0"]'
 expect "ménage : plus aucune image retenue" "$(jq -c .left <<< "$R")" '[]'
 if grep -q "\"rmi\",\"--ignore\",\"ghcr.io/exemple/gitleaks@$D1\"" "$CALLS"; then ok "ménage : ancienne image retirée"; else ko "ménage : ancienne image retirée"; fi
 if grep -q "\"rmi\",\"--ignore\",\"ghcr.io/exemple/gitleaks@$D2\"" "$CALLS"; then ko "ménage : image installée jamais retirée"; else ok "ménage : image installée jamais retirée"; fi
@@ -281,6 +291,24 @@ expect "canaris : échec signalé" "$(jq -r .code <<< "$R")" E_CANARY_FAILED
 expect "canaris : résultats de chaque module" "$(jq -c '[.output.canaries[] | [.module, .ok]]' <<< "$R")" '[["gitleaks",true],["osv-scanner",false]]'
 expect "canaris : détail de l'attendu manquant" "$(jq -c '.output.canaries[1].details | [.error.code, .expect[0].found]' <<< "$R")" '["E_TESTBED",0]'
 expect "canaris : aucun module désactivé" "$(jq -c .enabled <<< "$R")/$(jq -r .status <<< "$R")" '[true,true]/healthy'
+expect "canaris : détection perdue classée detection" "$(jq -r '.output.canaries[1].details.error.class' <<< "$R")" detection
+R=$(py "
+from scanoria import testbed
+def fake(m, timeout=None):
+    if m['id'] == 'gitleaks':
+        return {'passed': True, 'details': []}
+    raise Fail('E_TIMEOUT', 'podman timed out after 300s')
+testbed.run = fake
+class C:
+    params = {}
+    def left(self): return 3000
+try:
+    out = {'code': 'OK', 'output': vigilance.act_run_canaries(C())}
+except Fail as f:
+    out = {'code': f.code, 'output': f.output}
+print(json.dumps(out))
+")
+expect "canaris : délai dépassé = infra, sans échec de détection (G12)" "$(jq -r '.code + "/" + .output.canaries[1].details.error.class' <<< "$R")" OK/infra
 echo '{"busy": 1}' > "$TMP/runner.json"
 expect "canaris : runner occupé détecté" "$(py 'print(vigilance._runner_busy())')" True
 rm -f "$TMP/runner.json"

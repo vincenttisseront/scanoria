@@ -9,7 +9,7 @@ et chaque nuit ; un administrateur peut les relancer.
 -->
 
 <script setup lang="ts">
-import { subjectName, type SelfVuln, type VigilanceSummary } from '~/utils/vigilance'
+import { CANARY_COLOR, canaryState, subjectName, type SelfVuln, type VigilanceSummary } from '~/utils/vigilance'
 
 const emit = defineEmits<{ changed: [] }>()
 const { t, te } = useI18n()
@@ -251,9 +251,9 @@ const busy = computed(() => sbomReq.running.value || canaryReq.running.value)
           class="flex items-center gap-2"
         >
           <UBadge
-            :color="c.ok ? 'success' : 'error'"
+            :color="CANARY_COLOR[canaryState(c)]"
             variant="subtle"
-            :label="c.ok ? t('vigilance.canary.ok') : t('vigilance.canary.failed')"
+            :label="t(`vigilance.canary.${canaryState(c)}`)"
           />
           <NuxtLink
             :to="`/catalog/${encodeURIComponent(c.module_id)}`"

@@ -29,7 +29,7 @@ import { createUser } from '../../server/utils/users'
 import type { CatalogIndex, InstalledModule } from '../../server/utils/catalog'
 import { abandonTrial, getTrial, listTrials, markAdopted, startTrial, trialTick, TrialError } from '../../server/vigilance/trials'
 import { loadPins, pinModule, PinError, publishPinsFile, unpinModule } from '../../server/vigilance/pins'
-import { applyCanaryResults, canaryHistory, latestCanaries } from '../../server/vigilance/canaries'
+import { applyCanaryResults, canaryHistory, isDetectionFailure, latestCanaries } from '../../server/vigilance/canaries'
 import { ingestSelfStatus, listSelfVulns, selfVulnSummary } from '../../server/vigilance/selfvulns'
 import type { SelfStatus } from '../../server/vigilance/state'
 
@@ -178,6 +178,16 @@ describe.skipIf(!DATABASE_URL)('vigilance : essai, version figée, canaris, appl
       expect(rows.every(r => r.trigger === 'trial' && r.ref === 'trial:main' && r.priority === 5)).toBe(true)
     })
 
+    it('trial-isolation : une analyse réelle ne fusionne jamais dans un essai, un essai ne se rejoue pas', async () => {
+      const tr = (await db.pool.query(`SELECT id::text, commit_sha FROM scans WHERE trial_id = $1 ORDER BY id LIMIT 1`, [trialId])).rows[0]
+      const real = await enqueueScan(db.pool, { projectId: project, ref: 'main', commit: tr.commit_sha, trigger: 'manual' })
+      expect(real.merged).toBe(false)
+      expect((await db.pool.query('SELECT trigger, trial_id FROM scans WHERE id = $1', [real.scanId])).rows[0]).toEqual({ trigger: 'manual', trial_id: null })
+      await db.pool.query(`DELETE FROM scans WHERE id = $1`, [real.scanId])
+      await expect(enqueueScan(db.pool, { projectId: project, ref: 'main', trigger: 'replay', replayOf: tr.id }))
+        .rejects.toMatchObject({ code: 'E_SCAN_REPLAY' })
+    })
+
     it('trial-run : la candidate tourne par empreinte, sans aucun effet de bord', async () => {
       const before = await counts()
       const verdicts = (await db.pool.query('SELECT id, verdict FROM scans WHERE trial_id IS NULL ORDER BY id')).rows
@@ -210,15 +220,19 @@ describe.skipIf(!DATABASE_URL)('vigilance : essai, version figée, canaris, appl
       expect(examples).toEqual(['private-key', 'private-key'])
     })
 
-    it('trial-abandon : état refusé après adoption, analyses en file annulées', async () => {
+    it('trial-abandon : refusé après adoption réussie, permis après adoption échouée, analyses en file annulées', async () => {
       expect(await markAdopted(db.pool, trialId)).toBe(true)
       expect(await markAdopted(db.pool, trialId)).toBe(false)
       const adopted = (await getTrial(db.pool, 'gitleaks', trialId))!
-      await expect(abandonTrial(db.pool, { trial: adopted, actor: actor(), requester: requester(), requestsDir: requestsDir() })).rejects.toBeInstanceOf(TrialError)
+      // Adoption réussie (candidate installée) : plus rien à abandonner.
+      await expect(abandonTrial(db.pool, { trial: adopted, installedVersion: '8.30.1', actor: actor(), requester: requester(), requestsDir: requestsDir() })).rejects.toBeInstanceOf(TrialError)
+      // Adoption dont la mise à jour a échoué (ancienne version toujours installée) : abandonnable.
+      await abandonTrial(db.pool, { trial: adopted, installedVersion: '8.30.0', actor: actor(), requester: requester(), requestsDir: requestsDir() })
+      expect((await getTrial(db.pool, 'gitleaks', trialId))!.status).toBe('abandoned')
       // Nouvel essai abandonné en cours de route.
       await db.pool.query(`INSERT INTO module_trials (id, module_id, from_version, to_version, to_digest, status) VALUES ($1, 'gitleaks', '8.30.0', '8.30.1', $2, 'running')`, [randomUUID(), D_NEW])
       const running = (await listTrials(db.pool, 'gitleaks')).find(x => x.status === 'running')!
-      const reqId = await abandonTrial(db.pool, { trial: running, actor: actor(), requester: requester(), requestsDir: requestsDir() })
+      const reqId = await abandonTrial(db.pool, { trial: running, installedVersion: '8.30.0', actor: actor(), requester: requester(), requestsDir: requestsDir() })
       expect((await db.pool.query('SELECT params FROM helper_requests WHERE id = $1', [reqId])).rows[0].params).toMatchObject({ action: 'abandon', trial_id: running.id })
       expect((await getTrial(db.pool, 'gitleaks', running.id))!.status).toBe('abandoned')
     })
@@ -276,16 +290,20 @@ describe.skipIf(!DATABASE_URL)('vigilance : essai, version figée, canaris, appl
         { module: 'gitleaks', version: '8.30.0', image_digest: D_OLD, ok: false, duration_ms: 1200, run_at: '2026-11-24T02:31:00Z',
           details: { expect: [{ rule: 'aws-access-token', category: 'secrets', min: 1, found: 0, ok: false }] } },
         { module: 'osv-scanner', version: '2.0.0', image_digest: null, ok: true, duration_ms: 800, run_at: '2026-11-24T02:32:00Z', details: { expect: [] } },
+        // Délai dépassé : erreur d'infrastructure (G12), jamais une détection perdue.
+        { module: 'trivy', version: '0.60.0', image_digest: null, ok: false, duration_ms: 0, run_at: '2026-11-24T02:32:30Z',
+          details: { expect: [], error: { code: 'E_TIMEOUT', message: 'no time left for this canary', class: 'infra' } } },
         { module: '../x', version: '1', ok: true },
       ]
       await db.pool.query(
         `INSERT INTO helper_requests (id, type, origin, file_name, params, status, code, output)
          VALUES ($1, 'run-canaries', 'timer', $2, '{}', 'error', 'E_CANARY_FAILED', $3)`,
         [randomUUID(), `canary-${randomUUID()}.json`, JSON.stringify({ canaries, at: '2026-11-24T02:33:00Z' })])
-      expect(await applyCanaryResults(db.pool)).toBe(2)
+      expect(await applyCanaryResults(db.pool)).toBe(3)
       expect(await applyCanaryResults(db.pool)).toBe(0)
       const latest = await latestCanaries(db.pool)
-      expect(latest.map(c => [c.module_id, c.ok])).toEqual([['gitleaks', false], ['osv-scanner', true]])
+      expect(latest.map(c => [c.module_id, c.ok])).toEqual([['gitleaks', false], ['osv-scanner', true], ['trivy', false]])
+      expect(latest.filter(isDetectionFailure).map(c => c.module_id)).toEqual(['gitleaks'])
       expect((await canaryHistory(db.pool, 'gitleaks'))[0]!.details.expect[0]).toMatchObject({ found: 0, min: 1 })
       const audit = (await db.pool.query(`SELECT target_id, outcome, details FROM audit_log WHERE action = 'module.canary-failed'`)).rows
       expect(audit).toEqual([{ target_id: 'gitleaks', outcome: 'failure', details: expect.objectContaining({ missing: [{ rule: 'aws-access-token', min: 1, found: 0 }] }) }])
@@ -321,9 +339,12 @@ describe.skipIf(!DATABASE_URL)('vigilance : essai, version figée, canaris, appl
       await writeFile(join(root, 'self', 'console', 'grype.sarif'), JSON.stringify(sarif(['CVE-2021-44906'])))
       expect(await ingestSelfStatus(db.pool, status('2026-11-26T05:00:00Z', true), ctx())).toMatchObject({ resolved: 1 })
       expect((await listSelfVulns(db.pool, 'console')).map(v => v.vuln_id)).toEqual(['CVE-2021-44906'])
-      // Sujet disparu (module désinstallé, console sans relevé) : résolu.
-      await ingestSelfStatus(db.pool, { version: 1, at: '2026-11-27T05:00:00Z', gaps: [], subjects: [] }, ctx())
-      expect(await listSelfVulns(db.pool, 'console')).toHaveLength(0)
+      // Relevé manqué (Syft absent, délai) : rien ne disparaît.
+      await db.pool.query(`INSERT INTO self_vulns (subject, vuln_id, purl, severity) VALUES ('module:retire', 'CVE-2024-0001', 'pkg:npm/x@1', 'high')`)
+      await ingestSelfStatus(db.pool, { version: 1, at: '2026-11-27T05:00:00Z', gaps: ['syft'], subjects: [] } as unknown as SelfStatus, ctx())
+      expect(await listSelfVulns(db.pool, 'console')).toHaveLength(1)
+      // Sujet d'un module désinstallé : résolu.
+      expect(await listSelfVulns(db.pool, 'module:retire')).toHaveLength(0)
     })
   })
 })

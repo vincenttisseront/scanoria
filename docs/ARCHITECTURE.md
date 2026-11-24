@@ -765,10 +765,18 @@ SHA-256 est gardée). `POST /api/projects/:id/scans {ref, profile?}` → `202
   concluant (G13). `modules.remove_image` ne retire jamais une image retenue.
 - **Versions figées** : la console publie `/var/lib/scanoria/console/pins.json`
   (`{version: 1, pins: [{module, version, image_digest}]}`), lu sans confiance
-  par le helper (fichier régulier, propriétaire `scanoria`, ≤ 256 Kio, JSON
+  par le helper (fichier régulier, propriétaire `scanoria`, ≤ 1 Mio, JSON
   strict). À la mise à jour d'un module, l'ancienne version figée est retenue.
-  Les versions plus figées et les essais de plus de 14 jours sont retirés lors
-  des passages `run-canaries` et `self-sbom`.
+  Les versions qu'aucun projet ne fige plus et les essais de plus de 14 jours
+  sont retirés lors des passages `run-canaries` et `self-sbom`. Si `pins.json`
+  est absent ou illisible, le helper échoue fermé : aucune version figée n'est
+  retirée et l'ancienne version d'un module mis à jour est gardée.
+- **Essais et versions figées au runner** : une candidate d'essai ne sert qu'une
+  tâche marquée `trial` (le rejeu d'une analyse d'essai est refusé par la
+  console), et toute version autre que l'installée exige son empreinte.
+- **Canaris** : un échec est classé `detection` (le module tourne sans trouver
+  le cas connu, alerte et audit `module.canary-failed`) ou `infra` (délai,
+  mémoire, image, runner resté occupé : gardé dans l'historique, sans alerte).
 - **État publié** : `/var/lib/scanoria/vigilance/state.json` (root:scanoria
   0640) : images retenues et dernier relevé `self-sbom` ; les SARIF des
   comparateurs sont sous `vigilance/self/<console|module-<id>>/`.

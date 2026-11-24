@@ -13,7 +13,7 @@ import type { AuditActor } from '../utils/audit'
 import type { Requester } from '../utils/requests'
 import type { CatalogContext } from '../utils/catalog-view'
 import { readVigilanceState, type VigilanceState } from './state'
-import { latestCanaries } from './canaries'
+import { isDetectionFailure, latestCanaries } from './canaries'
 import { selfVulnSummary } from './selfvulns'
 import { consoleUpdate } from './tick'
 import { loadPins, pinWarnings } from './pins'
@@ -50,7 +50,7 @@ export async function vigilanceSummary(db: Queryable, ctx: CatalogContext, vig?:
   const installedIds = new Set(ctx.installed.map(m => m.id))
   const trials = await db.query<{ id: string, module_id: string, to_version: string, status: string }>(
     `SELECT id::text, module_id, to_version, status FROM module_trials WHERE status IN ('running', 'done') ORDER BY started_at DESC LIMIT 20`)
-  const failing = canaries.filter(c => !c.ok && installedIds.has(c.module_id))
+  const failing = canaries.filter(c => isDetectionFailure(c) && installedIds.has(c.module_id))
   return {
     available: state.available,
     self_sbom: state.self_sbom

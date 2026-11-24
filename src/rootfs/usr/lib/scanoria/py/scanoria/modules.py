@@ -1094,13 +1094,18 @@ def act_update_module(c):
     if same_variant_change:
         refresh_dependents(reg, mid, log)
     # 0.6 (G6) : une version figée par un projet garde son image et son manifeste.
-    if not vigilance.keep_pinned(old):
-        remove_image(reg, old.get("image"))
-    # Essai adopté (F13) : la candidate est désormais la version installée.
-    trial = vigilance.retained_for(mid, new["version"])
-    if trial and trial["kind"] == "trial":
-        vigilance.release(reg, mid, new["version"], remove_image=False)
-        vigilance.publish_state()
+    # La mise à jour est déjà faite : un incident ici est journalisé sans la défaire,
+    # et l'ancienne image est gardée (le ménage nocturne la libère).
+    try:
+        if not vigilance.keep_pinned(old):
+            remove_image(reg, old.get("image"))
+        # Essai adopté (F13) : la candidate est désormais la version installée.
+        trial = vigilance.retained_for(mid, new["version"])
+        if trial and trial["kind"] == "trial":
+            vigilance.release(reg, mid, new["version"], remove_image=False)
+            vigilance.publish_state()
+    except (OSError, Fail) as exc:
+        common.log("update of %s: retained images not updated: %s" % (mid, exc))
     apply_sysctl(reg)
     if old["type"] == "service":
         op.step("route", 90)

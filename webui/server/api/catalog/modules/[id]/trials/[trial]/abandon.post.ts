@@ -15,14 +15,14 @@ import { UUID_V4_RE } from '#shared/schemas'
 
 export default defineEventHandler(async (event) => {
   const auth = requireRole(event, 'admin')
-  const { id } = await installedModuleParam(event)
+  const { id, installed } = await installedModuleParam(event)
   const trialId = getRouterParam(event, 'trial') ?? ''
   const pool = getPool()
   const trial = UUID_V4_RE.test(trialId) ? await getTrial(pool, id, trialId) : null
   if (!trial) throw apiError(404, 'E_NOT_FOUND')
   const { actor, requester } = actorOf(event, auth)
   try {
-    const requestId = await abandonTrial(pool, { trial, actor, requester, requestsDir: getConfig().requestsDir })
+    const requestId = await abandonTrial(pool, { trial, installedVersion: installed.version, actor, requester, requestsDir: getConfig().requestsDir })
     setResponseStatus(event, 202)
     return { request_id: requestId }
   }

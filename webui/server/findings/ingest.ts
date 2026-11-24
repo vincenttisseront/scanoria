@@ -268,7 +268,7 @@ export async function finalizeScanFindings(db: Db, scanId: string, opts: { compl
     const scan = await loadScan(q, scanId)
     const prev = await q.query<{ id: string }>(
       `SELECT id FROM scans
-        WHERE project_id = $1 AND ref = $2 AND id <> $3 AND status = 'done'
+        WHERE project_id = $1 AND ref = $2 AND id <> $3 AND status = 'done' AND trigger <> 'trial'
           AND queued_at <= (SELECT queued_at FROM scans WHERE id = $3)
         ORDER BY finished_at DESC NULLS LAST, queued_at DESC LIMIT 1`,
       [scan.project_id, scan.ref, scan.id],

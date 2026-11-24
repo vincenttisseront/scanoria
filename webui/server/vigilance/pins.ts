@@ -11,6 +11,7 @@
 //   jour du module garde alors l'image de l'ancienne version (vigilance.py).
 // - Avertissements : version retirée du catalogue, ou vulnérable (F19).
 
+import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { mkdir, open, rename } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -126,7 +127,7 @@ export async function publishPinsFile(db: Queryable, path: string, previous?: st
   const body = `${JSON.stringify(await pinsDocument(db))}\n`
   if (body === previous) return body
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-  const tmp = `${path}.${process.pid}.tmp`
+  const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`
   const fh = await open(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o640)
   try {
     await fh.writeFile(body)

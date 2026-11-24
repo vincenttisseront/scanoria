@@ -330,10 +330,21 @@ export async function getTrial(db: Queryable, moduleId: string, trialId: string)
 }
 
 /** Abandon : analyses d'essai encore en file annulées, image candidate retirée par le helper. */
-export async function abandonTrial(db: Queryable, input: { trial: TrialView, actor: AuditActor, requester: Requester, requestsDir: string }): Promise<string> {
-  if (!['running', 'done', 'error'].includes(input.trial.status)) throw new TrialError('E_TRIAL_STATE')
+/**
+ * Un essai « adopté » dont la mise à jour n'a pas abouti (version installée
+ * différente de la candidate) reste abandonnable : sa candidate est alors libérée.
+ */
+export function abandonableStatuses(trial: Pick<TrialView, 'to_version'>, installedVersion: string | null): TrialView['status'][] {
+  return installedVersion !== null && installedVersion !== trial.to_version
+    ? ['running', 'done', 'error', 'adopted']
+    : ['running', 'done', 'error']
+}
+
+export async function abandonTrial(db: Queryable, input: { trial: TrialView, installedVersion: string | null, actor: AuditActor, requester: Requester, requestsDir: string }): Promise<string> {
+  const allowed = abandonableStatuses(input.trial, input.installedVersion)
+  if (!allowed.includes(input.trial.status)) throw new TrialError('E_TRIAL_STATE')
   const r = await db.query(`UPDATE module_trials SET status = 'abandoned', finished_at = COALESCE(finished_at, now())
-                             WHERE id = $1 AND status IN ('running', 'done', 'error')`, [input.trial.id])
+                             WHERE id = $1 AND status = ANY($2::text[])`, [input.trial.id, allowed])
   if (!r.rowCount) throw new TrialError('E_TRIAL_STATE')
   await db.query(`UPDATE scans SET status = 'cancelled', finished_at = now() WHERE trial_id = $1 AND status = 'queued'`, [input.trial.id])
   const req = await submitRequest(db, input.requestsDir, 'start-trial',
