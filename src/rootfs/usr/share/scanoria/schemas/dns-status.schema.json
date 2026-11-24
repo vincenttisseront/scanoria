@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scanoria:schema:dns-status:1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront. Contrat 4 de l'itération 0.2 (chantier D).",
+  "title": "État DNS publié par le helper (/var/lib/scanoria/dns/status.json)",
+  "description": "Un enregistrement par nom et par type : name est le nom à créer (\"*.<fqdn>\" pour le joker, vérifié par un nom de sonde aléatoire), expected l'adresse de l'appliance (null si aucune), resolved les adresses publiées par le DNS, ok si expected en fait partie. fqdn est null tant que le nom de l'appliance n'est pas posé.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fqdn",
+    "checked_at",
+    "records"
+  ],
+  "properties": {
+    "fqdn": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 253,
+          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+        }
+      ]
+    },
+    "checked_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "records": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type",
+          "expected",
+          "resolved",
+          "ok"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^(\\*\\.)?[a-z0-9.-]+$"
+          },
+          "type": {
+            "enum": [
+              "A",
+              "AAAA"
+            ]
+          },
+          "expected": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 45
+              }
+            ]
+          },
+          "resolved": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 45
+            }
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Généré par scanoria.routing (module désactivé) : ne pas modifier.
+# scanoria-route: id=@ID@ mode=unavailable host=@HOST@ port=@PORT@ fqdn=@FQDN@
+server {
+	listen 443 ssl http2;
+	listen [::]:443 ssl http2;
+	server_name @HOST@;
+	server_tokens off;
+@TLS@
+	location / {
+		return 302 https://@FQDN@/modules/unavailable?m=@ID@;
+	}
+}

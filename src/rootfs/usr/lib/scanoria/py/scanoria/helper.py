@@ -28,6 +28,7 @@ import time
 import uuid
 
 from . import common, netutil, schema
+from . import dns as dnscheck
 from .common import Fail
 
 MAX_SIZE = 128 * 1024
@@ -36,6 +37,7 @@ TIMEOUTS = {
     "set-hostname": 300, "set-admin-networks": 60, "issue-certificate": 120,
     "import-certificate": 120, "check-update": 120, "apply-update": 3300,
     "rollback-update": 3300, "set-update-policy": 30, "run-selftest": 300,
+    "check-dns": 180,
 }
 # Marge laissée entre l'échéance passée à scanoria-selfupdate et l'arrêt forcé
 # du helper : selfupdate ne franchit le point de non-retour (arrêt de la
@@ -474,6 +476,7 @@ ACTIONS = {
     "rollback-update": act_rollback_update,
     "set-update-policy": act_set_update_policy,
     "run-selftest": act_run_selftest,
+    "check-dns": dnscheck.act_check_dns,
 }
 
 
