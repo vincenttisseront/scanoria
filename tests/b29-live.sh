@@ -157,7 +157,9 @@ if [[ -s "$SARIF" ]]; then
 	sev() { jq -r --arg p "$1" '[.runs[0].results[] | select(.locations[0].physicalLocation.artifactLocation.uri == $p) | .ruleId + "=" + .properties.severity] | unique | join(",")' "$SARIF"; }
 	expect "pickle piégé : critical" "$(sev models/trapped.pkl)" modelscan/pickle-unsafe-op=critical
 	expect "couche Lambda Keras : critical" "$(sev models/lambda.keras)" modelscan/keras-lambda=critical
-	expect "pickle dans les poids PyTorch : critical" "$(sev weights/model.pt)" modelscan/pytorch-unsafe-op=critical
+	# Poids PyTorch au format zip (format par défaut depuis torch 1.6) : ModelScan lit le
+	# pickle de l'archive avec son scanner pickle ; le scanner PyTorch ne voit que l'ancien format.
+	expect "pickle dans les poids PyTorch (zip) : critical" "$(sev weights/model.pt)" modelscan/pickle-unsafe-op=critical
 	expect "modèle sain : aucun résultat" "$(sev models/healthy.pkl)" ""
 	jq -c '[.runs[0].results[] | [.ruleId, .locations[0].physicalLocation.artifactLocation.uri, .properties.severity]]' "$SARIF"
 	jq -c '.runs[0].invocations[0].toolExecutionNotifications | map(.message.text)' "$SARIF"

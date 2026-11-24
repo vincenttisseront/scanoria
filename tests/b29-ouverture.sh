@@ -143,7 +143,9 @@ EOF
 	fi
 	[[ ! -e "$WITNESS" ]] && ok "aucun modèle chargé ni code exécuté" || ko "pickle chargé : code exécuté"
 else
-	ko "python3-numpy absent : analyse réelle impossible"
+	# Batterie de construction (conteneur sans python3-numpy) : l'analyse réelle est
+	# faite par la batterie sans root de la CI (numpy installé) et par b29-live.
+	printf 'skip %s\n' "python3-numpy absent : analyse réelle vérifiée par b29-live"
 fi
 
 # --- 5. Point d'entrée ----------------------------------------------------------------------------
