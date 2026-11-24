@@ -331,7 +331,7 @@ docs/                    # ARCHITECTURE, MODULES, SECURITE, TESTING, RELEASING, 
 - **Dépôt public, mais non annoncé** : rien dans le dépôt ne doit trahir une infrastructure réelle (principe 3), et aucun secret n'y entre jamais ; gitleaks bloque la CI au moindre doute.
 
 ## 13. Itérations
-Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I1–I26, J1–J10) est rattachée à une itération.
+Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I1–I26, J1–J14) est rattachée à une itération.
 
 | Version | Contenu |
 |---|---|
@@ -342,9 +342,9 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I
 | 0.5 | **SBOM** : Syft → Dependency-Track. **Politique de licences (F8)**, **recherche transverse CVE / composant avec re-corrélation (F3)**, **recoupement entre outils (F16)**, **priorisation EPSS + KEV (H3)**, **quarantaine des nouvelles versions (H5)**. IA : **regroupement sémantique (I7)**, **atteignabilité assistée (I11)**, **explication des licences (I18)** |
 | 0.6 | **Hors ligne et vigilance** : modules `feed`, lots signés, âge des bases. **Appliance miroir (F17)**, **mise à jour d'outil à l'essai (F13)**, **alertes sur l'appliance elle-même (F19)**, **canaris nocturnes (G14)**, **fraîcheur obligatoire (G16)**, **version de module figée par projet (G6)**. IA : **diagnostic de l'appliance (I16)**. **Résultats externes acceptés (J6)** |
 | 0.7 | **SAST/IaC étendus** (Semgrep/Opengrep, Checkov, KICS, Bandit), profils personnalisés, webhooks et statuts de commit. **Tri en masse (F4)**, **exceptions soumises à approbation (F5)**, **affectation `CODEOWNERS` (F6)**, **analyse incrémentale des PR (G18)**, **jeux de règles gérés dans la console (G4)**, **héritage et verrouillage des profils (G8)**, **profil par déclencheur (G9)**, **aperçu d'un profil (G10)**, **audit des workflows CI (H1)**, **posture des dépôts (H2)**, **revue des dépendances en PR (H6)**. IA : **recherche en langage naturel (I8)**, **rédaction des exceptions (I10)**, **générateur de règles (I12)**, **commentaires de PR expliqués (I25)**. Intégration : **application de forge en un clic (J1)**, **reprise de l'existant (J5)**, **annotations ligne à ligne dans la PR (J7)**, **configuration en code (J8)** |
-| 0.8 | **Gate de release** : profil `release`, modes tiré et poussé, rapport de release signé, `scanoria-verify`. **Comparaison entre releases (F2)**, **simulateur de quality gate (F9)**, **VEX (H7)**. Branchement sur Ipnoria. IA : **notes de sécurité de release (I6)**, **seuils de quality gate suggérés (I19)**. Intégration : **PR d'intégration automatique (J2)**, **modèles CI officiels (J3)**, **CI sans secret par OIDC (J4)**, **attestations pour le déploiement (J9)** |
+| 0.8 | **Gate de release** : profil `release`, modes tiré et poussé, rapport de release signé, `scanoria-verify`. **Comparaison entre releases (F2)**, **simulateur de quality gate (F9)**, **VEX (H7)**. Branchement sur Ipnoria. IA : **notes de sécurité de release (I6)**, **seuils de quality gate suggérés (I19)**. Intégration : **PR d'intégration automatique (J2)**, **modèles CI officiels (J3)**, **CI sans secret par OIDC (J4)**, **attestations pour le déploiement (J9)**. Déploiement après verdict favorable : **déclenchement de la CD existante (J11)**, **promotion GitOps (J12)**, **promotion dans le registre (J13)** |
 | 0.9 | **Runners CI** (Forgejo Actions, runner GitHub pour dépôts privés). **Notifications et rapport mensuel (F10)**, **kit développeur (F20)**, **remédiation automatique (H8)**, **tickets synchronisés (H9)**. IA : **correctif proposé et vérifié (I4)**, **évaluation des PR de remédiation (I13)**, **rapport mensuel commenté (I20)**, **assistant « Demander à Scanoria » (I21)**, **tickets rédigés et dédupliqués (I26)** |
-| 0.10 | **DAST** (ZAP, Nuclei) avec cibles autorisées ; DefectDojo optionnel. **Catalogue privé et SDK de scanner (F15)**, **surveillance du registre interne (H10)**. IA : **cartographie de la surface d'attaque (I22)** |
+| 0.10 | **DAST** (ZAP, Nuclei) avec cibles autorisées ; DefectDojo optionnel. **Catalogue privé et SDK de scanner (F15)**, **surveillance du registre interne (H10)**. IA : **cartographie de la surface d'attaque (I22)**. **Recette éphémère et DAST avant production (J14)** |
 | 1.0 | LDAP/AD, OIDC et connexion unique aux modules, sauvegardes distantes, durcissement, documentation complète. **Raccordement à la supervision (J10)** |
 
 ## 14. Décisions
@@ -352,7 +352,7 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I
 - **Accès aux applications par nom** : `<libellé>.<nom de l'appliance>`, avec un DNS générique et un certificat générique (section 3.4).
 - **Installation de base = console seule** : tout outil s'ajoute par le catalogue, et aucune image n'est embarquée dans l'ISO (section 5.3).
 - **Releases passées par tous les outils** installés, via la CI de chaque dépôt (section 7).
-- **Fonctionnalités F1 à F20, G1 à G20, H1 à H10, I1 à I26 et J1 à J10 retenues** (section 15), réparties dans les itérations (section 13).
+- **Fonctionnalités F1 à F20, G1 à G20, H1 à H10, I1 à I26 et J1 à J14 retenues** (section 15), réparties dans les itérations (section 13).
 - **Dépôt GitHub public, sans aucune communication** (« non publié ») : CI, CodeQL, SonarQube Cloud, protection de `main` et environments gratuits ; mises à jour des appliances sans jeton. Conséquences : sections 10 et 12.
 - **Claude gère tout le cycle Git** : branches, commits, push, PR, merges, versions et suivi des publications, selon les règles de la section 16.
 - **Mises à jour de la console par les releases GitHub** dès la 0.1 (section 10, F18).
@@ -372,7 +372,7 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I
 **Ouvertes**
 - Aucune à ce jour.
 
-## 15. Fonctionnalités retenues (F1–F20, G1–G20, H1–H10, I1–I26, J1–J10)
+## 15. Fonctionnalités retenues (F1–F20, G1–G20, H1–H10, I1–I26, J1–J14)
 
 ### Console
 | # | Fonctionnalité | Ce qu'elle doit faire |
@@ -487,7 +487,7 @@ Toutes passent par le connecteur de la section 3.5 et en respectent les garde-fo
 | I25 | Commentaires de PR expliqués | Les nouveaux résultats d'une PR (G18) sont publiés dans le commentaire de forge avec leur explication courte (I2) et, dès la 0.9, le correctif vérifié s'il existe (I4), à côté de la revue des dépendances H6 | Automatique |
 | I26 | Tickets rédigés et dédupliqués | Extension de H9 : les tickets de H9 reçoivent un titre et une description clairs (contexte, risque, correction) ; avant création, un ticket semblable déjà ouvert est cherché par similarité et le résultat y est rattaché plutôt que dupliqué | Automatique |
 
-### Intégration aux forges, CI et outils existants (J1–J10)
+### Intégration aux forges, CI et outils existants (J1–J14)
 Retenues le 2026-11-24 (demande de Vincent). Même principe que H1–H10 : **actives par défaut**, réglage minimal (principe 8) ; toute écriture dans une forge ou un réglage de dépôt reste soumise aux règles habituelles (confirmation pour ce qui est à risque).
 
 | # | Fonctionnalité | Ce qu'elle doit faire |
@@ -502,6 +502,15 @@ Retenues le 2026-11-24 (demande de Vincent). Même principe que H1–H10 : **act
 | J8 | Configuration en code | Fichier `.scanoria.yml` facultatif dans le dépôt : profil, exceptions (motif et date de fin obligatoires), chemins ignorés, dans les limites des verrous (G8) ; et export / import de toute la configuration de l'appliance (projets, profils, gates, jeux de règles) en YAML versionné, avec aperçu des écarts avant application. Les secrets n'y figurent jamais |
 | J9 | Attestations pour le déploiement | Le verdict favorable est attaché à l'image OCI ou à l'artefact dans le registre comme **attestation signée** (in-toto, compatible cosign), avec l'empreinte du commit et le rapport de release ; une politique d'admission Kubernetes d'exemple (Kyverno) refuse toute image sans attestation valide ; `scanoria-verify` vérifie aussi les attestations |
 | J10 | Raccordement à la supervision | Point `/metrics` Prometheus (santé, file d'analyses, âge des bases, verdicts), journal d'audit et alertes en **syslog RFC 5424** vers un SIEM, notifications natives Mattermost, Microsoft Teams et Matrix en plus du webhook signé de F10 |
+
+**Déploiement en fin de CI (J11–J14)** : une fois le verdict favorable, la livraison passe par les outils de l'entreprise. **L'appliance ne détient jamais d'accès à la production** et ne déploie jamais elle-même (ni SSH, ni Ansible, ni `kubectl`) : elle déclenche, propose ou promeut. Retenues le 2026-11-24 ; J11 est le mode par défaut, les autres se choisissent par projet.
+
+| # | Fonctionnalité | Ce qu'elle doit faire |
+|---|---|---|
+| J11 | Déclenchement de la CD existante | Après un verdict favorable (release ou branche configurée), l'appliance déclenche le déploiement déjà en place : `workflow_dispatch` GitHub ou Forgejo, déclencheur de pipeline GitLab, job Jenkins ; elle passe l'empreinte du commit et le lien du rapport, suit le résultat et le rattache à l'analyse. Mode par défaut, sans réglage au-delà de J1 ; aucune exécution si le verdict est défavorable ou non concluant |
+| J12 | Promotion GitOps | L'appliance ouvre une PR dans le dépôt de déploiement (Argo CD, Flux) qui porte la nouvelle empreinte d'image (`@sha256:`) ; Argo CD ou Flux applique. Retour arrière par revert. Fusion humaine par défaut, automatique seulement si un administrateur l'autorise pour ce projet et cet environnement |
+| J13 | Promotion dans le registre | L'image validée est copiée **par empreinte** d'un dépôt « candidat » vers un dépôt « validé » (Harbor, registre OCI), avec l'attestation J9 ; la politique d'admission n'accepte que les images validées. Indépendant de l'outil de déploiement, combinable avec J11 ou J12 |
+| J14 | Recette éphémère et DAST avant production | La CD (J11) déploie d'abord dans un environnement de recette temporaire chez l'entreprise, déclaré comme cible autorisée (section 6.5) ; l'appliance y lance le DAST, puis ne déclenche la production que si le verdict reste favorable ; l'environnement est ensuite détruit par la CD |
 
 ## 16. Consignes pour Claude Code dans ce dépôt
 - Session principale : Sonnet 5.5 ; conseiller : Opus 5.5.
