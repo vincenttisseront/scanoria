@@ -54,11 +54,19 @@ Correctif : la console et le worker joignent de nouveau les forges.
   projet, F8), et **quarantaine** des versions de moins de 7 jours (H5). Ces
   fonctions s'appuient sur les SBOM : elles restent vides tant que le module
   Syft de la 0.5 n'est pas installé.
+- **Priorisation EPSS + KEV** (H3) : bases EPSS (FIRST.org) et catalogue
+  KEV (CISA) téléchargées chaque jour. Une CVE exploitée activement bloque,
+  quelle que soit sa gravité, et un EPSS au-dessus du seuil (0,1 par défaut)
+  bloque aussi. Les Résultats gagnent une colonne EPSS, un badge KEV, des
+  filtres et un tri par exploitabilité.
+- **Recoupement entre outils** (F16) : un même problème vu par plusieurs
+  outils forme un groupe « confirmé par N outils », compté une seule fois par
+  le quality gate et trié en une fois (une ligne d'audit par résultat).
 - Schéma de la 0.5 en base (SBOM, licences, EPSS et KEV, recoupement) et
   nouvelles règles du quality gate. Les règles restent sans effet tant
   qu'aucun module ne les alimente. Un plan figé avant cette version les
   garde désactivées quand il est rejoué.
-- Catalogue n° 8.
+- Catalogue n° 9.
 
 ### Après la mise à jour
 - Si vous aviez posé le contournement
