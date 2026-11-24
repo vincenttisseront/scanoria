@@ -40,6 +40,11 @@ Correctif : la console et le worker joignent de nouveau les forges.
   opérations sont retirés. Seules les opérations en cours restent
   affichées, et un échec est signalé par une notification. L'historique
   reste dans le journal d'audit.
+- Système > IA : le modèle se choisit dans des listes déroulantes alimentées
+  par le serveur Ollama (rédaction pour toutes les tâches, et embedding). La
+  découverte affiche un indicateur d'attente, donne une cause claire si le
+  serveur est injoignable ou refuse le jeton, et une saisie libre reste
+  possible en secours.
 
 ### Ajouté (avance de la 0.5)
 - IA, avec le connecteur Ollama : **résultats semblables** regroupés par embeddings dans un même projet. Le
