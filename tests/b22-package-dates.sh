@@ -92,8 +92,8 @@ for p in geant casse ailleurs datebizarre inconnu; do
 	expect "piège npm « $p » : null" "$(date_of "pkg:npm/$p@1.0.0")" null
 done
 expect "redirection jamais suivie (aucune requête vers l'autre hôte)" "$(grep -c '192.0.2.1' "$TMP/curl.log" || true)" 0
-grep -q -- '--max-redirs 0' "$TMP/curl.log" && ok "curl : --max-redirs 0" || ko "curl : redirections permises"
-grep -q -- '--proto =https' "$TMP/curl.log" && ok "curl : HTTPS seul" || ko "curl : protocole non restreint"
+if grep -q -- '--max-redirs 0' "$TMP/curl.log"; then ok "curl : --max-redirs 0"; else ko "curl : redirections permises"; fi
+if grep -q -- '--proto =https' "$TMP/curl.log"; then ok "curl : HTTPS seul"; else ko "curl : protocole non restreint"; fi
 R=$(lookup "pkg:npm/lent@1.0.0")
 expect "délai dépassé : null" "$(date_of pkg:npm/lent@1.0.0)" null
 
@@ -111,8 +111,8 @@ R=$(lookup "pkg:npm/bon@1.0.0" "pkg:npm/inconnu@1.0.0")
 expect "cache : date et absence servies sans requête" "$(wc -l < "$TMP/requests.log" | tr -d ' ')/$(jq -r .stats.cached <<< "$R")" 0/2
 expect "cache : date gardée" "$(date_of pkg:npm/bon@1.0.0)" 2026-11-20T08:00:00Z
 expect "cache : répertoire 0700" "$(stat -c %a "$T/var/lib/scanoria/cache/package-dates")" 700
-f=$(ls "$T/var/lib/scanoria/cache/package-dates" | head -1)
-expect "cache : fichiers 0600" "$(stat -c %a "$T/var/lib/scanoria/cache/package-dates/$f")" 600
+f=$(find "$T/var/lib/scanoria/cache/package-dates" -type f | head -1)
+expect "cache : fichiers 0600" "$(stat -c %a "$f")" 600
 # Une absence de plus d'un jour est cherchée de nouveau ; une date ne l'est jamais.
 python3 -I -B - "$PYLIB" <<-'EOF'
 import json, os, sys
