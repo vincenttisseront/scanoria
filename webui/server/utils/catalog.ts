@@ -107,6 +107,13 @@ const installedSchema = z.object({
   testbed: testbedSchema,
   route: z.object({ hostname: text(253).nullable(), url: httpsUrl.nullable() }).nullable().optional(),
   last_error: z.union([text(2000), z.object({ code: text(64).optional(), message: text(2000).optional() })]).nullable().optional(),
+  // Fonctions optionnelles d'un service (variantes : plugin de branches de SonarQube).
+  features: z.record(z.string().regex(/^[a-z][a-z0-9_]{0,30}$/), z.object({
+    active: z.boolean(),
+    version: text(64).nullable(),
+    code: z.enum(['disabled', 'incompatible', 'unavailable']).nullable().optional(),
+    reason: text(500).nullable(),
+  })).optional(),
   // Modules permanents (0.4) : sauvegardes complètes, la plus récente en premier.
   backups: z.array(z.object({
     id: z.string().regex(BACKUP_ID_RE),

@@ -28,7 +28,7 @@ import shutil
 import time
 import uuid
 
-from . import backup, catalogverify, common, feeds, pgadmin, quadlet, schema, services, testbed
+from . import backup, catalogverify, common, feeds, pgadmin, quadlet, schema, services, testbed, variants
 from .common import Fail
 
 MODULES_DIR = common.VARLIB + "/modules"
@@ -110,6 +110,14 @@ def public_entry(mid, e):
            "testbed": e.get("testbed"), "route": e.get("route"), "last_error": e.get("last_error")}
     if m["type"] in ("service", "runner"):
         out["backups"] = backup.list_backups(mid)
+    if m["type"] == "service":
+        # Fonctions optionnelles (variantes) : active ou non, et pourquoi.
+        try:
+            feats = variants.features(m, e["options"])
+        except Fail:
+            feats = {}
+        if feats:
+            out["features"] = feats
     return out
 
 
@@ -499,6 +507,9 @@ def write_units(m, entry, options):
     if tpl:
         quadlet.write_env(mid, quadlet.render_env(tpl, env_values(m, entry, options)))
         has_env = True
+    if m["type"] == "service":
+        # Fichiers d'une variante inactive (plugin sans son agent Java) retirés avant le démarrage.
+        variants.remove_leaves(m)
     _, ulimits = services.requirements(m)
     sub = services.subnet(entry["subnet"]) if isinstance(entry.get("subnet"), int) else None
     quadlet.write(mid, quadlet.render(m, entry["host_port"], entry["enabled"], has_env, subnet=sub,
@@ -519,6 +530,7 @@ def check_permanent(m):
     secrets, volumes, sauvegarde, limites, gabarits d'environnement (aucun secret)."""
     services.secrets_of(m)
     quadlet.volumes(m)
+    variants.declared(m)
     backup.backup_volumes(m)
     services.requirements(m)
     tpl = (m.get("service") or {}).get("env")
@@ -602,6 +614,8 @@ def plan_install(reg, mods, wanted, accepted):
 def install_one(c, reg, op, m, options, frac):
     """Installe un module ; laisse dans reg une entrée « installing » tant qu'il n'est pas sain."""
     mid = m["id"]
+    # Manifeste effectif : image de la variante retenue par les options (plugin de branches…).
+    m = variants.effective(m, options)
     entry = {"manifest": m, "status": "installing", "enabled": True, "installed_at": common.iso(common.now()),
              "options": options, "testbed": None, "route": None, "last_error": None,
              "accepted": m["license"]["restrictions"], "host_port": None, "created_db": False,
@@ -937,6 +951,28 @@ def act_restore_module(c):
 # update-module
 # --------------------------------------------------------------------------
 
+def refresh_dependents(reg, mid, log):
+    """Scanners installés qui dépendent du service : manifeste du catalogue repris
+    à version et image égales (ex. sonar-scanner et scan.refs_feature, ajouté
+    après son installation), pour que la fonction devenue active serve."""
+    try:
+        mods = catalog()
+    except Fail:
+        return
+    for k, other in reg["modules"].items():
+        om = other.get("manifest") or {}
+        if k == mid or om.get("type") != "scanner" or mid not in requires_of(om):
+            continue
+        try:
+            cand = lookup(mods, k, om.get("version"))
+            catalogverify.check_module(cand)
+        except Fail:
+            continue
+        if cand.get("image") == om.get("image") and cand != om:
+            other["manifest"] = cand
+            log.append("refreshed %s %s" % (k, cand["version"]))
+
+
 def act_update_module(c):
     reg = load_registry()
     mid, version = c.params["id"], c.params["version"]
@@ -945,7 +981,15 @@ def act_update_module(c):
         raise Fail("E_PRECONDITION", "module %s is %s" % (mid, e["status"]))
     old = e["manifest"]
     new = lookup(catalog(), mid, version)
-    if vkey(new["version"]) <= vkey(old["version"]):
+    props = (new.get("options") or {}).get("properties") or {}
+    options = resolve_options(new, {k: v for k, v in e["options"].items() if k in props})
+    new = variants.effective(new, options)
+    # Même version : seule une variante devenue compatible (plugin publié après
+    # SonarQube) s'applique, comme une mise à jour, sauvegarde comprise. Jamais
+    # l'inverse ni un simple changement d'empreinte à version égale.
+    same_variant_change = new["version"] == old["version"] and new.get("image") != old.get("image") \
+        and not old.get("active_variant") and bool(new.get("active_variant"))
+    if vkey(new["version"]) <= vkey(old["version"]) and not same_variant_change:
         raise Fail("E_VERSION", "%s %s is not newer than the installed %s" % (mid, version, old["version"]))
     if new["type"] != old["type"]:
         raise Fail("E_PRECONDITION", "module type changed: reinstall the module")
@@ -967,8 +1011,6 @@ def act_update_module(c):
         raise Fail("E_DEPENDENCY", "%s %s requires appliance %s" % (mid, version, new["requires"]["appliance"]))
     if uses_db(new) != uses_db(old):
         raise Fail("E_PRECONDITION", "database requirement changed: reinstall the module")
-    props = (new.get("options") or {}).get("properties") or {}
-    options = resolve_options(new, {k: v for k, v in e["options"].items() if k in props})
     check_resources([x["manifest"] for x in reg["modules"].values()], [new], freed=[old])
     is_svc = is_permanent(old)
     if is_svc:
@@ -995,6 +1037,9 @@ def act_update_module(c):
         elif is_svc:
             op.step("units", 40)
             stop_service(mid)
+            # Plugin d'une variante qui ne s'applique plus (nouvelle version sans
+            # plugin compatible) : retiré avant que l'image d'origine démarre.
+            variants.remove_leaves(new, previous=old)
             services.ensure_secrets(new)
             apply_sysctl(reg, [new])
             write_units(new, e, options)
@@ -1043,6 +1088,8 @@ def act_update_module(c):
         raise Fail(code, "update of %s to %s failed, previous version kept: %s" % (mid, version, err.message),
                    dict(err.output, backup=stamp, log=log))
     e.update(manifest=new, options=options, testbed=tb, last_error=None)
+    if same_variant_change:
+        refresh_dependents(reg, mid, log)
     remove_image(reg, old.get("image"))
     apply_sysctl(reg)
     if old["type"] == "service":

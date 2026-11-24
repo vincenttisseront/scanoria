@@ -79,8 +79,34 @@ export function compatibility(ctx: CatalogContext, ids: string[]): InstallPlan {
   return buildInstallPlan(ids.map(id => ({ id })), { ...ctx, acceptLicenses: (ctx.index?.modules ?? []).map(m => m.id) })
 }
 
+const majorMinor = (v: unknown) => typeof v === 'string' ? v.split('.').slice(0, 2).join('.') : null
+
+/**
+ * Variante devenue compatible à la même version (ex. plugin de branches publié
+ * après SonarQube) pour une fonction voulue mais inactive : elle s'applique
+ * comme une mise à jour, sauvegarde comprise (helper, update-module).
+ */
+export function variantPending(installed: InstalledModule | undefined, latest: CatalogModule | undefined): boolean {
+  if (!installed || !latest || latest.version !== installed.version) return false
+  const variants = latest.service?.variants
+  const declared = latest.service?.features
+  if (!Array.isArray(variants)) return false
+  // Installation antérieure à l'option : pas d'état publié, l'option vaut son défaut (vrai).
+  const states: [string, { active: boolean, code?: string | null }][] = Object.entries(installed.features ?? {})
+  for (const f of Array.isArray(declared) ? declared : []) {
+    if (typeof f === 'string' && !installed.features?.[f]) states.push([f, { active: false, code: installed.options[f] === false ? 'disabled' : 'unavailable' }])
+  }
+  return states.some(([feature, st]) => !st.active && st.code !== 'disabled'
+    && variants.some((v: unknown) => {
+      if (!v || typeof v !== 'object') return false
+      const x = v as Record<string, unknown>
+      return x.feature === feature && x.base_version === latest.version && majorMinor(x.version) === majorMinor(latest.version)
+    }))
+}
+
 export function updateAvailable(installed: InstalledModule | undefined, latest: CatalogModule | undefined): string | null {
   if (!installed || !latest) return null
+  if (variantPending(installed, latest)) return latest.version
   return compareVersions(latest.version, installed.version) > 0 ? latest.version : null
 }
 

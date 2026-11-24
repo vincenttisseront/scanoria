@@ -247,6 +247,12 @@ def check_module(m):
                 not isinstance(x, int) or isinstance(x, bool) or not 0 <= x <= 255 or x in (125, 126, 127)
                 for x in codes):
             raise Fail("E_CHECKSUM", "%s: invalid scan.exit_codes_ok" % what)
+    if m["type"] == "service" and (m.get("service") or {}).get("variants"):
+        from . import variants
+        try:
+            variants.declared(m)
+        except Fail as f:
+            raise Fail("E_CHECKSUM", "%s: %s" % (what, f.message))
     h = m.get("health")
     if isinstance(h, dict) and "command" in h:
         _check_command(h["command"], what)

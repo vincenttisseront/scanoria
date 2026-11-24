@@ -12,6 +12,14 @@ sonar-scanner-cli), rattaché au seul réseau interne du service SonarQube :
      paginés et bornés, puis écrit le SARIF demandé en argument, par défaut
      /out/result.sarif (sonar_sarif.py).
 
+Branches et PR (option « branches » du module sonarqube, plugin
+sonarqube-community-branch-plugin) : le runner ne transmet SCANORIA_BRANCH
+que pour une référence autre que la branche par défaut, et seulement si le
+service a la fonction active ; SCANORIA_PR_KEY, SCANORIA_PR_BRANCH et
+SCANORIA_PR_BASE décrivent une PR (prêts pour l'analyse des PR, G18 : le
+runner ne les fournit pas encore). L'analyse et la
+lecture des résultats portent alors sur cette branche ou cette PR seulement.
+
 Le jeton d'analyse arrive par un secret Podman monté en fichier : il n'est
 jamais passé en argument et n'est transmis à sonar-scanner que par la
 variable SONAR_TOKEN de son propre processus. Codes de sortie : 0 succès,
@@ -37,6 +45,10 @@ TOKEN_FILE = os.environ.get("SCANORIA_TOKEN_FILE", "/run/secrets/scan-token")
 HOST_RE = re.compile(r"http:/{2}[a-z0-9][a-z0-9._-]{0,100}(:[0-9]{1,5})?\Z")
 PROJECT_KEY_RE = re.compile(r"scanoria-([0-9a-f]{12}|testbed)\Z")
 TASK_RE = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
+# Noms de branche transmis par le runner (déjà validés) : revalidés ici, sans
+# tiret initial, sans « .. », sans espace ni caractère de contrôle.
+BRANCH_RE = re.compile(r"(?!-)(?!.*\.\.)(?!.*//)[A-Za-z0-9._/+-]{1,200}(?<![/.])\Z")
+PR_KEY_RE = re.compile(r"[1-9][0-9]{0,9}\Z")
 PAGE_SIZE = 500
 MAX_PAGES = 20         # 20 × 500 = 10 000, plafond de api/issues/search
 HTTP_TIMEOUT = 30
@@ -99,7 +111,46 @@ def wait_up(api, deadline):
         time.sleep(3)
 
 
-def run_scanner(host, token, key, work, cache, deadline):
+def target_from_env(environ):
+    """Branche ou PR analysée : {} (branche principale), {"branch": nom} ou
+    {"pr": clé, "pr_branch": nom, "pr_base": nom}. Lève Failure(2) si invalide."""
+    branch = environ.get("SCANORIA_BRANCH", "")
+    pr = environ.get("SCANORIA_PR_KEY", "")
+    if branch and pr:
+        raise Failure(2, "SCANORIA_BRANCH and SCANORIA_PR_KEY are exclusive")
+    if pr:
+        head, base = environ.get("SCANORIA_PR_BRANCH", ""), environ.get("SCANORIA_PR_BASE", "")
+        if not PR_KEY_RE.match(pr) or not BRANCH_RE.match(head) or not BRANCH_RE.match(base):
+            raise Failure(2, "invalid pull request description")
+        return {"pr": pr, "pr_branch": head, "pr_base": base}
+    if branch:
+        if not BRANCH_RE.match(branch):
+            raise Failure(2, "invalid SCANORIA_BRANCH")
+        return {"branch": branch}
+    return {}
+
+
+def target_args(target):
+    """Paramètres sonar-scanner de la branche ou de la PR (vide : branche principale)."""
+    if "pr" in target:
+        return ["-Dsonar.pullrequest.key=" + target["pr"],
+                "-Dsonar.pullrequest.branch=" + target["pr_branch"],
+                "-Dsonar.pullrequest.base=" + target["pr_base"]]
+    if "branch" in target:
+        return ["-Dsonar.branch.name=" + target["branch"]]
+    return []
+
+
+def target_params(target):
+    """Filtre des API web sur la branche ou la PR analysée."""
+    if "pr" in target:
+        return {"pullRequest": target["pr"]}
+    if "branch" in target:
+        return {"branch": target["branch"]}
+    return {}
+
+
+def run_scanner(host, token, key, work, cache, deadline, target=None):
     os.makedirs(work, exist_ok=True)
     os.makedirs(cache, exist_ok=True)
     binaries = os.path.join(work, "empty-binaries")
@@ -121,7 +172,7 @@ def run_scanner(host, token, key, work, cache, deadline):
             "-Dsonar.scm.disabled=true",
             "-Dsonar.scanner.skipJreProvisioning=true",
             "-Dsonar.java.binaries=" + binaries,
-            "-Dsonar.qualitygate.wait=false"]
+            "-Dsonar.qualitygate.wait=false"] + target_args(target or {})
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "JAVA_HOME", "NODE_OPTIONS")}
     env.update(HOME=work, SONAR_USER_HOME=cache, SONAR_TOKEN=token, SONAR_SCANNER_OPTS="-Xmx1024m")
     left = max(30, int(deadline - time.monotonic()))
@@ -182,10 +233,12 @@ def pages(api, path, params, items_key):
     return out, announced
 
 
-def export(api, key, version):
-    issues, n_issues = pages(api, "api/issues/search", {"components": key, "resolved": "false",
-                                                        "additionalFields": "_all"}, "issues")
-    hotspots, n_hotspots = pages(api, "api/hotspots/search", {"project": key, "status": "TO_REVIEW"}, "hotspots")
+def export(api, key, version, target=None):
+    where = target_params(target or {})
+    issues, n_issues = pages(api, "api/issues/search", dict(where, components=key, resolved="false",
+                                                            additionalFields="_all"), "issues")
+    hotspots, n_hotspots = pages(api, "api/hotspots/search", dict(where, project=key, status="TO_REVIEW"),
+                                 "hotspots")
     conv = sonar_sarif.Converter(key, version)
     # Au-delà de ce que l'API rend (10 000), le document est marqué tronqué :
     # trou de couverture signalé par la console, jamais « tout a été lu ».
@@ -230,14 +283,21 @@ def main(argv):
     except ValueError:
         budget = 1700
     deadline = time.monotonic() + max(60, budget)
+    try:
+        target = target_from_env(os.environ)
+    except Failure as f:
+        log(str(f))
+        return f.code
     work = os.path.join(OUT_DIR, ".work")
     try:
         api = Api(host, token)
         version = wait_up(api, min(deadline, time.monotonic() + 300))
-        log("SonarQube %s is UP, analysing as %s" % (version or "?", key))
-        task = run_scanner(host, token, key, work, os.path.join(work, "cache"), deadline)
+        where = (" pull request %s" % target["pr"]) if "pr" in target else \
+            (" branch %s" % target["branch"]) if "branch" in target else " main branch"
+        log("SonarQube %s is UP, analysing as %s,%s" % (version or "?", key, where))
+        task = run_scanner(host, token, key, work, os.path.join(work, "cache"), deadline, target)
         wait_task(api, task, deadline)
-        doc = export(api, key, version)
+        doc = export(api, key, version, target)
         tmp = os.path.join(OUT_DIR, ".result.sarif.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(doc, f, ensure_ascii=False)

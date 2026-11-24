@@ -397,7 +397,7 @@ jobs:
     # machine est mesurée et affichée dans le journal.
     name: sonarqube-live (SonarQube réel, b17-live)
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 55
     permissions:
       contents: read
     steps:

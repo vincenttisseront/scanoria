@@ -10,7 +10,74 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.4.0 — non publiée
+## 0.4.1 — non publiée
+
+Correctif : la console et le worker joignent de nouveau les forges.
+
+### Corrigé
+- Les appels aux API des forges (détection à l'ajout d'un dépôt,
+  découverte, commits) échouaient tous, avec le message « Forge
+  injoignable » : les services de la console et du worker interdisaient
+  toute sortie réseau. Ils n'interdisent plus que les adresses de lien
+  local et de multidiffusion. Le transport des forges résout lui-même les
+  noms et refuse le bouclage et le lien local. Une cause précise est
+  maintenant affichée : DNS (`E_FORGE_DNS`), adresse refusée
+  (`E_FORGE_BLOCKED`) ou certificat (`E_FORGE_TLS`).
+- Un test de signature du catalogue pouvait échouer à tort une fois sur 256.
+- OSV-Scanner échouait à son banc d'essai (code 137) quand l'appliance avait
+  gardé en cache un ancien catalogue, où la mémoire allouée était trop
+  faible. L'installation d'un module actualise désormais d'abord le
+  catalogue s'il a plus d'une heure. Sans réseau, l'index en place sert. Un
+  banc d'essai tué avant son délai signale maintenant un manque de mémoire,
+  avec la limite appliquée.
+- Le catalogue n'était plus publié depuis le n° 3 : l'attente de la CI ne
+  reconnaissait pas un contrôle terminé que GitHub disait encore en cours.
+- Supprimer une analyse qui avait servi de source à une re-corrélation
+  échouait. La re-corrélation est maintenant supprimée avec sa source.
+
+### Modifié
+- Page Catalogue allégée : le numéro de l'index et l'historique des
+  opérations sont retirés. Seules les opérations en cours restent
+  affichées, et un échec est signalé par une notification. L'historique
+  reste dans le journal d'audit.
+- Système > IA : le modèle se choisit dans des listes déroulantes alimentées
+  par le serveur Ollama (rédaction pour toutes les tâches, et embedding). La
+  découverte affiche un indicateur d'attente, donne une cause claire si le
+  serveur est injoignable ou refuse le jeton, et une saisie libre reste
+  possible en secours.
+
+### Ajouté (avance de la 0.5)
+- IA, avec le connecteur Ollama : **résultats semblables** regroupés par embeddings dans un même projet. Le
+  tri commun reste confirmé par une personne (I7).
+- IA : **atteignabilité assistée** des vulnérabilités de dépendances : avis
+  appuyé sur un index des imports et des appels relevé sans rien exécuter
+  par le nouveau module d'appoint `reach-index`. L'avis ne lève jamais un
+  blocage (I11).
+- Pages **Composants** (recherche transverse par composant, version ou CVE,
+  re-corrélation sans réanalyse, F3) et **Licences** (politique par défaut :
+  permissives autorisées, le reste à revoir ; décisions globales et par
+  projet, F8), et **quarantaine** des versions de moins de 7 jours (H5). Ces
+  fonctions s'appuient sur les SBOM : elles restent vides tant que le module
+  Syft de la 0.5 n'est pas installé.
+- **Priorisation EPSS + KEV** (H3) : bases EPSS (FIRST.org) et catalogue
+  KEV (CISA) téléchargées chaque jour. Une CVE exploitée activement bloque,
+  quelle que soit sa gravité, et un EPSS au-dessus du seuil (0,1 par défaut)
+  bloque aussi. Les Résultats gagnent une colonne EPSS, un badge KEV, des
+  filtres et un tri par exploitabilité.
+- **Recoupement entre outils** (F16) : un même problème vu par plusieurs
+  outils forme un groupe « confirmé par N outils », compté une seule fois par
+  le quality gate et trié en une fois (une ligne d'audit par résultat).
+- Nouvelles règles du quality gate (licences, KEV, EPSS, quarantaine),
+  actives par défaut. Un plan figé avant cette version les garde
+  désactivées quand il est rejoué.
+- Catalogue n° 9.
+
+### Après la mise à jour
+- Si vous aviez posé le contournement
+  `/etc/systemd/system/scanoria-{console,worker}.service.d/forges.conf`,
+  supprimez ces deux fichiers, puis lancez `systemctl daemon-reload`.
+
+## 0.4.0 — 2026-11-24
 
 Applications permanentes : SonarQube s'installe depuis le catalogue. La
 consommation, la santé des analyses et les fonctions IA de la 0.4 sont

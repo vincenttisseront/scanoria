@@ -539,7 +539,11 @@ export class AiService {
       const outcome = err instanceof OllamaError && err.kind === 'timeout' ? 'timeout' : 'error'
       await this.callLog(task, 'probe', null, 0, null, outcome)
       if (this.circuit.failure(this.now())) await this.callLog(task, 'probe', null, 0, null, 'circuit-open')
-      await this.finish(task.id, 'error', { error: err instanceof OllamaError ? err.kind : 'internal' })
+      // 401/403 : jeton porteur refusé par le proxy placé devant Ollama, cause affichée telle quelle.
+      const cause = err instanceof OllamaError
+        ? (err.kind === 'http' && (err.status === 401 || err.status === 403) ? 'unauthorized' : err.kind)
+        : 'internal'
+      await this.finish(task.id, 'error', { error: cause })
       return { state: 'worked', taskId: task.id }
     }
   }

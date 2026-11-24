@@ -188,6 +188,47 @@
             ],
             "maxLength": 2000
           },
+          "features": {
+            "description": "Fonctions optionnelles d'un service (service.features), fournies par une variante d'image : active, version de l'extension, ou code et raison de l'indisponibilité.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "active",
+                "version",
+                "code",
+                "reason"
+              ],
+              "properties": {
+                "active": {
+                  "type": "boolean"
+                },
+                "version": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 64
+                },
+                "code": {
+                  "enum": [
+                    null,
+                    "disabled",
+                    "incompatible",
+                    "unavailable"
+                  ]
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 500
+                }
+              }
+            }
+          },
           "backups": {
             "description": "Sauvegardes complètes du module (0.4, chantier A), la plus récente en premier.",
             "type": "array",

@@ -293,7 +293,62 @@ Le service root prend tout en charge ; le manifeste ne déclare que le besoin.
 - **Désinstallation** sans conservation des données : base, rôle, secrets,
   volumes, réglages noyau et sauvegardes sont supprimés.
 
-### 4.4 SBOM : Syft, Grype, Dependency-Track (0.5, contrat 14)
+### 4.4 Fonctions optionnelles et variantes d'image (plugin de branches)
+
+Un service peut offrir une **fonction optionnelle** fournie par une extension
+tierce, par exemple l'analyse des branches et des PR de SonarQube Community
+Build par le plugin libre
+[sonarqube-community-branch-plugin](https://github.com/mc1arke/sonarqube-community-branch-plugin)
+(LGPL-3.0, non maintenu par SonarSource). Une variante doit être libre et
+sans restriction (`license.restrictions: none`, principe 1).
+
+- `service.features: [branches]` déclare la fonction ; l'option booléenne du
+  même nom (`options.properties.branches`, **vraie par défaut**, principe 8)
+  la porte.
+- `service.variants[]` la fournit : `image` (épinglée par empreinte, même
+  application avec l'extension), `version` (de l'extension), `base_version`
+  (doit égaler `version` du module), `license`, `upstream`, et `leaves`
+  (fichiers que la variante dépose dans un volume, par préfixe dans un
+  répertoire : `{volume: extensions, dir: plugins, prefix: sonarqube-community-branch-plugin}`).
+- **Compatibilité** : une variante n'est retenue que si sa `version` partage
+  la version majeure.mineure du module (règle du plugin) et si `base_version`
+  est la version du module. `catalog/build.py` refuse une variante
+  incompatible ; le helper la revérifie.
+- Le helper stocke un **manifeste effectif** : l'image de la variante retenue
+  et `active_variant`. Sans variante compatible, l'image d'origine est gardée
+  et l'état publié dit pourquoi (`features.<nom>.code` : `disabled`,
+  `incompatible`, `unavailable`), affiché sur la fiche du module.
+- Une variante publiée **après** la version du module (plugin sorti après
+  SonarQube) s'applique comme une mise à jour à la même version, sauvegarde
+  comprise ; la console la propose d'elle-même.
+- Avant de démarrer une image sans la variante (option coupée, nouvelle
+  version sans plugin compatible), les `leaves` des variantes de l'ancien et
+  du nouveau manifeste sont retirés du volume, par descripteurs et sans suivre
+  aucun lien : un plugin laissé sans son agent Java empêcherait SonarQube de
+  démarrer.
+- Côté scanner, `scan.refs: default-branch` + `scan.refs_feature: branches` :
+  sur une autre branche, le module n'est lancé que si le service a la fonction
+  active ; le runner passe alors `SCANORIA_BRANCH` (référence raccourcie :
+  `refs/heads/` et `refs/tags/` retirés), et `sonar_scan.py` ajoute
+  `sonar.branch.name` puis lit issues et hotspots sur cette branche.
+  Une étiquette (`refs/tags/v1.2`) est analysée comme une branche du même nom.
+  `sonar_scan.py` sait déjà passer `sonar.pullrequest.*` depuis
+  `SCANORIA_PR_KEY`, `SCANORIA_PR_BRANCH` et `SCANORIA_PR_BASE`, mais le runner
+  ne les fournit pas encore : les PR arrivent avec leur analyse incrémentale
+  (G18, 0.7). Les appliances antérieures ignorent `refs_feature` et restent
+  sur la branche par défaut.
+- Une installation antérieure à l'option (sans état publié) prend le défaut
+  de l'option : la variante devenue compatible est proposée en mise à jour,
+  et les scanners qui dépendent du service (sonar-scanner) reprennent alors le
+  manifeste du catalogue à version et image égales (`refresh_dependents`).
+
+**Épingler une nouvelle version du plugin** : relever l'empreinte de
+`docker.io/mc1arke/sonarqube-with-community-branch-plugin:<version SonarQube>-community`,
+revérifier la licence, remplir le gabarit commenté de
+`modules/sonarqube/module.yaml`, incrémenter `catalog/VERSION`. `b17-live`
+éprouve alors la variante déclarée (sinon la dernière image publiée du plugin).
+
+### 4.5 SBOM : Syft, Grype, Dependency-Track (0.5, contrat 14)
 
 - **Enchaînement dans une analyse** (`sbom.py`). Les producteurs de SBOM
   (sortie `cyclonedx`) passent en premier ; le premier SBOM obtenu est copié

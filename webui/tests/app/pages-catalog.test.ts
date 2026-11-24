@@ -396,6 +396,12 @@ describe('détail d’un module', () => {
         options: { edition: 'community' }, testbed: { passed: true, at: '2026-11-20T10:05:00Z', details: [{ rule: null, category: 'secrets', min: 1, found: 3, ok: true }, { rule: 'r1', category: null, min: 2, found: 0, ok: false }, 'x'] },
         route: { hostname: 'sonarqube.analyse.exemple.test', url: 'https://sonarqube.analyse.exemple.test' },
         last_error: { code: 'E_TIMEOUT', message: 'lent' },
+        features: {
+          branches: { active: true, version: '26.11.0', code: null, reason: null },
+          pr: { active: false, version: null, code: 'disabled', reason: 'x' },
+          autre: { active: false, version: null, code: 'incompatible', reason: 'plugin 26.10.0' },
+          futur: { active: false, version: null, code: 'unavailable', reason: 'x' },
+        },
       },
       operations: [{ id: 'o', kind: 'update', module: 'sonarqube', step: 'backup', progress: null, started_at: '2026-11-23T08:00:00Z', finished_at: null }],
       dns: { fqdn: 'analyse.exemple.test', records: [{ name: 'sonarqube.analyse.exemple.test', type: 'A', expected: '192.0.2.10', resolved: ['192.0.2.10'], ok: true }] },
@@ -416,6 +422,11 @@ describe('détail d’un module', () => {
     expect(text).toContain('Utilisé par : dtrack')
     expect(text).toContain('Mise à jour : sonarqube')
     expect(text).toContain('Options appliquées à l’installation.')
+    // Fonctions optionnelles du service (variantes) : nom traduit, sinon identifiant.
+    expect(text).toContain('Analyse des branches : active (plugin 26.11.0)')
+    expect(text).toContain('pr : désactivée par l’option du module')
+    expect(text).toContain('autre : plugin incompatible (plugin 26.10.0)')
+    expect(text).toContain('futur : en attente d’une version du plugin compatible')
     expect(button('Désinstaller').disabled).toBe(true)
     await click(button('Désactiver'))
     expect(bodyText()).toContain('Ces modules en dépendent et pourraient ne plus fonctionner : dtrack.')

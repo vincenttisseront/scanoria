@@ -27,6 +27,15 @@ export interface InstalledModule {
   last_error?: string | { code?: string, message?: string } | null
   /** Modules permanents (0.4) : sauvegardes complètes, la plus récente en premier. */
   backups?: ModuleBackup[]
+  /** Fonctions optionnelles d'un service (variantes : plugin de branches de SonarQube). */
+  features?: Record<string, ModuleFeature>
+}
+
+export interface ModuleFeature {
+  active: boolean
+  version: string | null
+  code?: 'disabled' | 'incompatible' | 'unavailable' | null
+  reason: string | null
 }
 
 export interface ModuleBackup {
