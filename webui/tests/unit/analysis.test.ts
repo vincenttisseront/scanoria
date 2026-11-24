@@ -31,9 +31,14 @@ describe('contrats des analyses', () => {
     ['severity', SEVERITIES], ['status', SCAN_STATUSES], ['trigger', SCAN_TRIGGERS],
     ['verdict', VERDICTS], ['finding status', FINDING_STATUSES], ['secret_state', SECRET_STATES],
     ['exception kind', EXCEPTION_KINDS], ['forge kind', FORGE_KINDS], ['schedule', SCHEDULES],
-    ['module status', SCAN_MODULE_STATUSES], ['error_class', ERROR_CLASSES],
+    ['error_class', ERROR_CLASSES],
   ] as const)('énumération %s identique dans 003_analyses.sql', (_name, values) => {
     expect(SQL.replace(/\s+/g, ' ').replace(/\( /g, '(')).toContain(`IN (${quoted(values)})`)
+  })
+
+  it('statuts de module identiques à la dernière contrainte (012_offline.sql, not-applicable)', () => {
+    const sql012 = readFileSync(root('webui/server/db/migrations/012_offline.sql'), 'utf8').replace(/\s+/g, ' ').replace(/\( /g, '(')
+    expect(sql012).toContain(`status IN (${quoted(SCAN_MODULE_STATUSES)})`)
   })
 
   it('sujets des tâches IA identiques à la dernière contrainte (012_offline.sql)', () => {

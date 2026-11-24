@@ -30,6 +30,8 @@ import { aiLogContext } from '../ai/context'
 import type { WorkerConfig } from './config'
 import { awaitPackageDates, recordDatesGap } from '../sbom/dates'
 import { isRecorrelation, recorrelationPlan, recorrelationSource, reportRecorrelation } from './recorrelate'
+import { loadDurations, orderModules } from './order'
+import { recordOrchestration } from './orchestration'
 
 export interface WorkerPaths {
   modulesStateFile: string
@@ -261,7 +263,7 @@ export class ScanWorker {
     if (catalog.size === 0 && state.modules.length > 0) throw new Deferred(err('E_CATALOG', 'infra', 'catalog index is unavailable'))
     // 0.5 (B, contrat 16) : une re-corrélation ne lance que les modules SCA qui lisent un SBOM.
     const recorrelate = scan.trigger === 'recorrelate'
-    const { modules, gaps } = recorrelate
+    const resolved = recorrelate
       ? recorrelationPlan({ installed: state.modules, catalog })
       : resolveProfile({
           profile: prof.rows[0]!,
@@ -271,6 +273,9 @@ export class ScanWorker {
           catalog,
           timeoutOverrides: await loadTimeoutOverrides(client),
         })
+    // 0.6 (V3, V5) : graphe SBOM et ordre par durée mesurée.
+    const modules = orderModules(resolved.modules, catalog, await loadDurations(client, scan.project_id, resolved.modules.map(m => m.id)))
+    const gaps = resolved.gaps
     const plan: ScanPlan = {
       version: PLAN_VERSION,
       created_at: new Date().toISOString(),
@@ -319,7 +324,9 @@ export class ScanWorker {
       project_id: scan.project_id,
       created_at: new Date().toISOString(),
       source,
-      modules: modules.map(m => ({ id: m.id, version: m.version, options: m.options })),
+      // 0.6 : graphe limité aux modules de la tâche (V3) ; une analyse d'essai ne lit pas le cache (V4, contrat 21).
+      modules: modules.map(m => ({ id: m.id, version: m.version, options: m.options, ...jobAfter(m, modules) })),
+      cache: scan.trigger !== 'trial',
     }
     const parsed = scanJobSchema.safeParse(job)
     // Message générique : la tâche peut contenir un secret, jamais recopié.
@@ -445,6 +452,8 @@ export class ScanWorker {
     }
     const complete = await this.recordModules(scan, result, plan, redact)
     await this.mergeSourceCoverage(scan.id, result)
+    await recordOrchestration(this.pool, result, { scanId: scan.id, jobId: scan.job_id, scansDir: this.cfg.scansDir, log: this.log })
+      .catch((e: unknown) => this.log(`scan ${scan.id}: orchestration: ${(e as Error).message}`))
     await this.conclude(scan.id, {
       status: result.status === 'ok' ? 'done' : 'error',
       error: result.status === 'ok' ? null : (result.error ?? err('E_RUNNER', 'infra', 'runner reported an error')),
@@ -500,7 +509,7 @@ export class ScanWorker {
           errorClass = 'tool'
         }
       }
-      if (status !== 'ok' && status !== 'skipped') complete = false
+      if (status !== 'ok' && status !== 'skipped' && status !== 'not-applicable') complete = false
       let logPath: string | null = null
       if (m.log) {
         try {
@@ -746,6 +755,12 @@ export async function cancelScan(db: Pick<pg.Pool, 'query'>, scanId: string): Pr
   if (!r.rowCount) return false
   await db.query(`UPDATE scan_modules SET status = 'skipped' WHERE scan_id = $1 AND status IN ('pending', 'running')`, [scanId])
   return true
+}
+
+/** Graphe d'un module dans la tâche (V3) : seulement les modules lancés par cette tâche. */
+function jobAfter(m: PlannedModule, modules: PlannedModule[]): { after?: string[] } {
+  const after = (m.after ?? []).filter(id => id !== m.id && modules.some(x => x.id === id))
+  return after.length ? { after } : {}
 }
 
 /** Copie du résultat dont les messages d'erreur sont masqués. */

@@ -1111,6 +1111,8 @@ export default {
     gaps: {
       category: 'Category {category} not covered: {reason}.',
       module: 'Module {module} not used: {reason}.',
+      notApplicable: 'Module {module} not run: no file of the repository concerns it (decided automatically, never counted as missing).',
+      sbomFallback: 'Module {module}: the SBOM of the scan is missing or invalid, the repository was scanned directly.',
     },
     gapKind: {
       'skipped-files': 'Skipped files',
@@ -1118,6 +1120,8 @@ export default {
       'lockfile-missing': 'Missing lockfile',
       'output-truncated': 'Truncated output',
       'package-dates-unknown': 'Unknown publication dates (quarantine not checked)',
+      'not-applicable': 'Not applicable',
+      'sbom-fallback': 'SBOM missing, repository scanned',
     },
     gapReason: {
       'no-module': 'no installed and enabled module',
@@ -1160,7 +1164,10 @@ export default {
       'invalid-output': 'Invalid output',
       'missing': 'Missing',
       'skipped': 'Skipped',
+      'not-applicable': 'Not applicable',
     },
+    reused: 'Result reused',
+    reusedFrom: 'Reused from scan no. {number}',
     verdicts: {
       passed: 'Passed',
       failed: 'Failed',

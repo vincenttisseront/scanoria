@@ -34,6 +34,8 @@ export const SCAN_STATUSES = ['queued', 'dispatched', 'running', 'ingesting', 'd
 export type ScanStatus = (typeof SCAN_STATUSES)[number]
 export const SCAN_MODULE_STATUSES = [
   'pending', 'running', 'ok', 'error', 'timeout', 'oom', 'invalid-output', 'missing', 'skipped',
+  // 0.6 (V6, contrat 23) : aucun fichier ne concerne le module ; jamais compté comme absent (G13).
+  'not-applicable',
 ] as const
 export type ScanModuleStatus = (typeof SCAN_MODULE_STATUSES)[number]
 /** G12 : infra = relancée automatiquement ; tool / input = non concluant. */
