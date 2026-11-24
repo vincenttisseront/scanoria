@@ -36,6 +36,17 @@ function fakeDb(pending: number, projects: string[] = []): Queryable & { calls: 
   } as unknown as Queryable & { calls: Call[] }
 }
 
+/** Droits et contenu lus par un seul descripteur. */
+async function readOnce(file: string): Promise<{ mode: number, text: string }> {
+  const fh = await open(file, 'r')
+  try {
+    return { mode: (await fh.stat()).mode & 0o777, text: await fh.readFile('utf8') }
+  }
+  finally {
+    await fh.close()
+  }
+}
+
 const err = (code: string) => ({ code, class: 'infra' as const, message: 'x' })
 
 describe('V1 : préchargement des images', () => {
@@ -77,18 +88,12 @@ describe('liste des projets pour le runner', () => {
     const n = await publishLiveProjects(fakeDb(0, ids), join(dir, 'scans'), new Date('2026-11-24T10:00:00Z'))
     expect(n).toBe(2)
     const file = join(dir, 'scans', 'jobs', 'tmp', LIVE_PROJECTS_FILE)
-    // Un seul descripteur pour les droits et le contenu.
-    const fh = await open(file, 'r')
-    try {
-      expect((await fh.stat()).mode & 0o777).toBe(0o600)
-      expect(JSON.parse(await fh.readFile('utf8'))).toEqual({ schema: 1, at: '2026-11-24T10:00:00.000Z', projects: ids })
-    }
-    finally {
-      await fh.close()
-    }
+    const first = await readOnce(file)
+    expect(first.mode).toBe(0o600)
+    expect(JSON.parse(first.text)).toEqual({ schema: 1, at: '2026-11-24T10:00:00.000Z', projects: ids })
     expect((await readdir(join(dir, 'scans', 'jobs', 'tmp'))).filter(f => f.endsWith('.part'))).toEqual([])
     // Republication : le fichier est remplacé, jamais complété.
     await publishLiveProjects(fakeDb(0, []), join(dir, 'scans'))
-    expect(JSON.parse(await readFile(file, 'utf8')).projects).toEqual([])
+    expect(JSON.parse((await readOnce(file)).text).projects).toEqual([])
   })
 })
