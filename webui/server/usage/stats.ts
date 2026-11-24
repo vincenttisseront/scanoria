@@ -160,6 +160,7 @@ export function requiredBy(installed: InstalledModule[], index: CatalogIndex | n
   const latest = latestModules(index)
   const out = new Map<string, string[]>()
   for (const inst of installed) {
+    if (inst.status === 'removing') continue
     const def = findModule(index, inst.id, inst.version) ?? latest.get(inst.id)
     if (!def) continue
     const deps = new Set([...(def.requires?.modules ?? []), ...(def.requires?.feeds ?? []), ...(def.needs?.feeds ?? [])])
@@ -249,7 +250,9 @@ export async function moduleUsageDetail(db: Queryable, ctx: UsageContext, id: st
   const inst = ctx.installed.find(m => m.id === id)
   if (!inst) return null
   const [scanners, services, runs] = await Promise.all([scannerStats(db, USAGE_WINDOW_DAYS, id), serviceStats(db, USAGE_WINDOW_DAYS, id), lastRuns(db)])
-  const usage = buildUsage({ ...ctx, scanners, services, lastRuns: runs, unusedDays }).find(m => m.id === id)!
+  const usage = buildUsage({ ...ctx, scanners, services, lastRuns: runs, unusedDays }).find(m => m.id === id)
+  // Module en cours de désinstallation : plus de consommation à montrer.
+  if (!usage) return null
   const series = inst.type === 'scanner'
     ? null
     : { 7: await serviceSeries(db, id, 7), 30: await serviceSeries(db, id, 30) }

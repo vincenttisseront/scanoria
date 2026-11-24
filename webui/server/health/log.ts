@@ -25,23 +25,43 @@ const shapes = makeRedactor([])
 // Morceaux traités par le masquage commun, sous sa limite (MAX_REDACT).
 const CHUNK = Math.min(4000, MAX_REDACT - 100)
 
+/** Délimiteurs où couper une ligne trop longue sans couper un secret (qui n'en contient pas). */
+const CUT_RE = /[\s,;"'`{}[\]()<>|]/
+
+/** Position de coupe d'une ligne longue : dernier délimiteur dans les 1000 derniers caractères, sinon coupe nette. */
+function cutAt(line: string, from: number): number {
+  const end = from + CHUNK
+  if (end >= line.length) return line.length
+  for (let i = end; i > end - 1000 && i > from; i--) {
+    if (CUT_RE.test(line[i - 1]!)) return i
+  }
+  return end
+}
+
 /**
  * Masquage d'un journal entier : formes multi-lignes d'abord, puis le masquage
- * commun morceau par morceau (coupé aux fins de ligne, une ligne trop longue
- * est découpée).
+ * commun morceau par morceau (coupé aux fins de ligne ; une ligne trop longue
+ * est coupée sur un délimiteur, pour ne pas partager un secret entre deux
+ * morceaux). `aggressive` masque aussi toute chaîne longue et aléatoire sans
+ * type connu : imposé pour tout ce qui part vers l'IA (§ 3.5).
  */
-export function maskLog(text: string): string {
+export function maskLog(text: string, opts: { aggressive?: boolean } = {}): string {
+  const mask = (t: string) => redact(t, { aggressive: opts.aggressive })
   const pre = shapes(text)
   const out: string[] = []
   let buf = ''
   const flush = () => {
-    if (buf) out.push(redact(buf))
+    if (buf) out.push(mask(buf))
     buf = ''
   }
   for (const line of pre.split(/(?<=\n)/)) {
     if (buf.length + line.length > CHUNK) flush()
     if (line.length > CHUNK) {
-      for (let i = 0; i < line.length; i += CHUNK) out.push(redact(line.slice(i, i + CHUNK)))
+      for (let i = 0; i < line.length;) {
+        const j = cutAt(line, i)
+        out.push(mask(line.slice(i, j)))
+        i = j
+      }
       continue
     }
     buf += line
@@ -52,12 +72,18 @@ export function maskLog(text: string): string {
 
 export interface ModuleLog {
   text: string
-  /** Le journal dépassait la borne : seul le début est rendu. */
+  /** Le journal dépassait la borne : le début et la fin sont rendus, le milieu est omis. */
   truncated: boolean
 }
 
-/** Lit un journal copié par le worker (chemin relatif validé), borné puis masqué ; null s'il n'existe pas. */
-export async function readModuleLog(logsDir: string, rel: string | null, opts: { maxBytes?: number, tail?: boolean } = {}): Promise<ModuleLog | null> {
+const OMITTED = '\n[…]\n'
+
+/**
+ * Lit un journal copié par le worker (chemin relatif validé), borné puis masqué ;
+ * null s'il n'existe pas. Au-delà de la borne : début et fin (l'erreur est
+ * souvent à la fin), ou la fin seule avec `tail`.
+ */
+export async function readModuleLog(logsDir: string, rel: string | null, opts: { maxBytes?: number, tail?: boolean, aggressive?: boolean } = {}): Promise<ModuleLog | null> {
   if (!rel || !LOG_PATH_RE.test(rel)) return null
   const max = opts.maxBytes ?? MAX_LOG_DOWNLOAD
   let fh
@@ -70,23 +96,38 @@ export async function readModuleLog(logsDir: string, rel: string | null, opts: {
   try {
     const st = await fh.stat()
     if (!st.isFile()) return null
-    const size = Math.min(st.size, max)
-    const buf = Buffer.alloc(size)
-    const { bytesRead } = await fh.read(buf, 0, size, opts.tail ? st.size - size : 0)
-    let text = buf.subarray(0, bytesRead).toString('utf8')
-    // Fin de journal : la première ligne, sans doute coupée, est retirée.
-    if (opts.tail && st.size > size) text = text.slice(text.indexOf('\n') + 1)
-    // La copie du worker est déjà bornée à cette taille : l'atteindre signale une troncature.
-    return { text: maskLog(text), truncated: st.size > size || st.size >= MAX_LOG_DOWNLOAD }
+    const read = async (pos: number, len: number) => {
+      const buf = Buffer.alloc(len)
+      const { bytesRead } = await fh.read(buf, 0, len, pos)
+      return buf.subarray(0, bytesRead).toString('utf8')
+    }
+    // La copie du worker est déjà bornée à MAX_LOG_DOWNLOAD : l'atteindre signale une troncature.
+    const truncated = st.size > max || st.size >= MAX_LOG_DOWNLOAD
+    let text: string
+    if (st.size <= max) {
+      text = await read(0, st.size)
+    }
+    else if (opts.tail) {
+      // Fin de journal : la première ligne, sans doute coupée, est retirée.
+      text = await read(st.size - max, max)
+      text = text.slice(text.indexOf('\n') + 1)
+    }
+    else {
+      const half = Math.floor(max / 2)
+      const head = await read(0, half)
+      const tail = await read(st.size - half, half)
+      text = head.slice(0, head.lastIndexOf('\n') + 1) + OMITTED + tail.slice(tail.indexOf('\n') + 1)
+    }
+    return { text: maskLog(text, { aggressive: opts.aggressive }), truncated }
   }
   finally {
     await fh.close()
   }
 }
 
-/** Fin du journal masquée, en caractères bornés, pour le diagnostic IA (I15). */
+/** Fin du journal masquée (mode agressif), bornée en octets, pour le diagnostic IA (I15). */
 export async function logExcerpt(logsDir: string, rel: string | null, maxBytes = MAX_AI_EXCERPT): Promise<string | null> {
-  const log = await readModuleLog(logsDir, rel, { maxBytes, tail: true })
+  const log = await readModuleLog(logsDir, rel, { maxBytes, tail: true, aggressive: true })
   if (!log) return null
   // Le masquage peut allonger le texte : on garde la fin, sous la borne en octets.
   const buf = Buffer.from(log.text, 'utf8')

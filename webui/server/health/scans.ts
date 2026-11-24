@@ -92,7 +92,7 @@ export async function recentFailures(db: Queryable, limit = 50): Promise<FailedS
             jsonb_agg(jsonb_build_object('module_id', m.module_id, 'status', m.status, 'error_class', m.error_class,
                                          'has_log', m.log_path IS NOT NULL) ORDER BY m.module_id) AS modules
        FROM scans s
-       JOIN projects p ON p.id = s.project_id
+       JOIN projects p ON p.id = s.project_id AND p.archived_at IS NULL
        JOIN scan_modules m ON m.scan_id = s.id AND m.status IN ('error', 'timeout', 'oom', 'invalid-output')
       WHERE s.status IN ('done', 'error') AND s.finished_at >= now() - interval '30 days'
       GROUP BY s.id, p.name

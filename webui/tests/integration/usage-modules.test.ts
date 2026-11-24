@@ -290,6 +290,9 @@ describe.skipIf(!DATABASE_URL)('consommation des modules (F14, PostgreSQL réel)
       const scanner = await get('/api/usage/modules/trivy')
       expect(scanner.data).toMatchObject({ series: null, usage: { id: 'trivy', scanner: { runs: 6 } } })
       expect((await get('/api/usage/modules/absent')).status).toBe(404)
+      // module en cours de désinstallation : 404, jamais une réponse sans consommation
+      await writeFile(join(root, 'modules.json'), JSON.stringify({ version: 1, updated_at: '2026-11-24T08:00:00Z', operations: [], modules: [...INSTALLED, { ...installed('gone', 'scanner', old), status: 'removing' }] }))
+      expect((await get('/api/usage/modules/gone')).status).toBe(404)
       expect((await get('/api/usage/modules/BAD!')).status).toBe(404)
       expect((await get(`/api/usage/modules/${randomUUID().slice(0, 8)}`)).data.data?.code).toBe('E_NOT_FOUND')
       auth = false

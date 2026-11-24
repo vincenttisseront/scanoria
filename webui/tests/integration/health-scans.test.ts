@@ -27,6 +27,7 @@ const DAY = 86_400_000
 // Faux secrets générés à l'exécution : aucun motif de secret dans le dépôt.
 const FAKE_PASSWORD = randomBytes(12).toString('hex')
 const FAKE_GH = `gh${'p'}_${randomBytes(24).toString('hex').slice(0, 36)}`
+const RANDOM_VALUE = `${randomBytes(18).toString('base64url').replace(/[-_]/g, 'B')}xY7`
 const PEM = [`-----BEGIN ${'OPENSSH'} PRIVATE KEY-----`, randomBytes(30).toString('base64'), randomBytes(30).toString('base64'), `-----END ${'OPENSSH'} PRIVATE KEY-----`].join('\n')
 
 describe.skipIf(!DATABASE_URL)('santé des analyses (G20, PostgreSQL réel)', () => {
@@ -127,6 +128,17 @@ describe.skipIf(!DATABASE_URL)('santé des analyses (G20, PostgreSQL réel)', ()
     expect(out).toContain('fin normale')
     expect(out).toContain('forge.exemple.test')
     expect(maskLog('')).toBe('')
+    // secret à cheval sur la limite d'un morceau, dans une très longue ligne (JSON minifié)
+    for (const pad of [3990, 3995, 3999, 4000, 4005]) {
+      const json = `{"a":"${'y'.repeat(pad)}","token":"${FAKE_GH}","password":"${FAKE_PASSWORD}","b":"${'z'.repeat(5000)}"}`
+      const masked = maskLog(json)
+      expect(masked).not.toContain(FAKE_GH)
+      expect(masked).not.toContain(FAKE_PASSWORD)
+    }
+    // valeur aléatoire sans étiquette : masquée seulement en mode agressif (envoi à l'IA)
+    const random = randomBytes(18).toString('base64url').replace(/[-_]/g, 'A') + 'aZ9'
+    expect(maskLog(`candidat ${random}`)).toContain(random)
+    expect(maskLog(`candidat ${random}`, { aggressive: true })).not.toContain(random)
   })
 
   it('lecture bornée : troncature signalée, fin de journal, extrait IA ≤ 16 Ko, chemins refusés', async () => {
@@ -137,6 +149,11 @@ describe.skipIf(!DATABASE_URL)('santé des analyses (G20, PostgreSQL réel)', ()
     const full = await readModuleLog(logsDir, rel)
     expect(full!.truncated).toBe(true)
     expect(full!.text.startsWith('début')).toBe(true)
+    // début et fin : l'erreur finale n'est pas perdue, toujours masquée
+    expect(full!.text).toContain('[…]')
+    expect(full!.text).toContain('derniere ligne')
+    expect(full!.text).not.toContain(FAKE_GH)
+    expect(Buffer.byteLength(full!.text)).toBeLessThan(MAX_LOG_DOWNLOAD + 200)
     const tail = await readModuleLog(logsDir, rel, { maxBytes: 100, tail: true })
     expect(tail!.text).toContain('derniere ligne')
     expect(tail!.text).not.toContain(FAKE_GH)
@@ -173,6 +190,7 @@ describe.skipIf(!DATABASE_URL)('santé des analyses (G20, PostgreSQL réel)', ()
       { id: 'gitleaks', status: 'ok', log: 'ok\n' },
       { id: 'osv-scanner', status: 'invalid-output', cls: 'tool' },
     ], 'ingesting')
+    await writeFile(join(logsDir, failed, 'trivy.log'), `démarrage\nmot de passe password=${FAKE_PASSWORD}\nvaleur ${RANDOM_VALUE}\nkilled\n`)
     await w.conclude(failed, { status: 'done', error: null, complete: false })
     const diag = calls.filter(c => c.kind === 'diagnose-scan')
     expect(diag).toHaveLength(1)
@@ -182,6 +200,8 @@ describe.skipIf(!DATABASE_URL)('santé des analyses (G20, PostgreSQL réel)', ()
     expect(ctx.logs.map(l => l.module)).toEqual(['trivy'])
     expect(ctx.logs[0]!.excerpt).toContain('killed')
     expect(ctx.logs[0]!.excerpt).not.toContain(FAKE_PASSWORD)
+    // extrait IA : mode agressif, une valeur aléatoire sans étiquette ne part pas
+    expect(ctx.logs[0]!.excerpt).not.toContain(RANDOM_VALUE)
 
     // analyse réussie : aucune demande de diagnostic
     calls.length = 0

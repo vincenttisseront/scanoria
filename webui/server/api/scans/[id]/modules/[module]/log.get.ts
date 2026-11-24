@@ -26,6 +26,6 @@ export default defineEventHandler(async (event) => {
   setHeader(event, 'content-disposition', `attachment; filename="scan-${id.slice(0, 8)}-${moduleId}.log"`)
   setHeader(event, 'cache-control', 'no-store')
   return log.truncated
-    ? `${log.text}\n[journal tronqué à ${MAX_LOG_DOWNLOAD} octets / log truncated at ${MAX_LOG_DOWNLOAD} bytes]\n`
+    ? `[journal tronqué : début et fin, ${MAX_LOG_DOWNLOAD} octets au plus / log truncated: head and tail, at most ${MAX_LOG_DOWNLOAD} bytes]\n${log.text}`
     : log.text
 })
