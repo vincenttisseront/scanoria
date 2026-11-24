@@ -183,7 +183,7 @@ describe('plan figé (G11)', () => {
     created_at: '2026-11-24T10:00:00.000Z',
     source: { kind: 'git', ref: 'main', commit: 'a'.repeat(40), history: 'shallow' },
     profile: profile(['secrets']),
-    gate: { id: '3f1c2a9e-7b4d-4e2a-9c1f-0a1b2c3d4e5f', slug: 'defaut', rules: { new_code_only: true, max_secrets: 0, vuln_block_from: 'high', sast_block_from: 'high', iac_block_from: 'high', block_malicious: true, inconclusive_blocks: true } },
+    gate: { id: '3f1c2a9e-7b4d-4e2a-9c1f-0a1b2c3d4e5f', slug: 'defaut', rules: { new_code_only: true, max_secrets: 0, vuln_block_from: 'high', sast_block_from: 'high', iac_block_from: 'high', block_malicious: true, inconclusive_blocks: true, license_denied_blocks: true, kev_blocks: true, epss_block_from: 0.1, quarantine_days: 7 } },
     modules: [
       { id: 'gitleaks', version: '8.30.1', image: null, image_digest: null, categories: ['secrets'], options: {}, feeds: [], timeout_s: 900, history: 'full', outputs: ['sarif'], reason: 'category' },
       { id: 'trivy', version: '0.76.2', image: null, image_digest: null, categories: ['secrets'], options: {}, feeds: [], timeout_s: 600, history: 'shallow', outputs: ['sarif'], reason: 'category' },

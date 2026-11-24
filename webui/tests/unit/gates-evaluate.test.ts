@@ -291,6 +291,15 @@ describe('aides', () => {
     expect(rulesFromPlan({ gate: { rules: { block_malicious: false } } })).toBeNull()
   })
 
+  it('rulesFromPlan : un plan d’avant la 0.5 garde F8, H3 et H5 désactivées (G11)', () => {
+    expect(rulesFromPlan({ gate: { rules: { max_secrets: 0 } } })).toMatchObject({
+      license_denied_blocks: false, kev_blocks: false, epss_block_from: null, quarantine_days: 0,
+    })
+    expect(rulesFromPlan({ gate: { rules: { quarantine_days: 3 } } })).toMatchObject({
+      license_denied_blocks: true, kev_blocks: true, epss_block_from: 0.1, quarantine_days: 3,
+    })
+  })
+
   it('références Git et corps des requêtes', () => {
     for (const r of ['main', 'v1.2.3', 'feat/x', 'refs/tags/v1', 'a'.repeat(40)]) expect(validRef(r), r).toBe(true)
     for (const r of ['-x', '--upload-pack=x', 'a..b', 'a b', 'a~1', 'a^', 'a:b', 'x.lock', '/a', 'a/', 'a@{1}', 'a\u0001', 'a\\b', 'a*']) expect(validRef(r), r).toBe(false)

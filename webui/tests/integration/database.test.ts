@@ -40,13 +40,13 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
         `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1`,
       )
       expect(rows.map(r => r.table_name)).toEqual([
-        'ai_cache', 'ai_calls', 'ai_feedback', 'ai_tasks', 'api_tokens', 'appliance_settings', 'audit_log', 'credentials', 'exceptions',
-        'findings', 'forges', 'gates', 'helper_requests', 'module_samples', 'profiles', 'projects', 'roles', 'scan_findings', 'scan_modules',
-        'scans', 'schema_migrations', 'sessions', 'severity_maps', 'update_history', 'users',
+        'ai_cache', 'ai_calls', 'ai_embeddings', 'ai_feedback', 'ai_tasks', 'api_tokens', 'appliance_settings', 'audit_log', 'credentials', 'exceptions',
+        'findings', 'forges', 'gates', 'helper_requests', 'license_policies', 'module_samples', 'profiles', 'projects', 'roles', 'sbom_components', 'scan_findings', 'scan_modules',
+        'scans', 'schema_migrations', 'sessions', 'severity_maps', 'update_history', 'users', 'vuln_intel',
       ])
       const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       const files = loadMigrationsFromDir(MIGRATIONS_DIR)
-      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql'])
+      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql'])
       expect(mig.rows).toEqual(files.map((f, i) => ({ version: i + 1, name: f.name, checksum: f.checksum })))
     })
 

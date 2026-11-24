@@ -66,6 +66,11 @@ export const GateRules = z.object({
   iac_block_from: severity.nullable().default('high'),
   block_malicious: z.literal(true).default(true), // H4 : jamais désactivable
   inconclusive_blocks: z.literal(true).default(true), // G13 : non concluant = bloquant
+  // 0.5 (contrat 15, figé par l'intégrateur)
+  license_denied_blocks: z.boolean().default(true), // F8 : licence « interdite » bloquante
+  kev_blocks: z.boolean().default(true), // H3 : CVE du catalogue KEV bloquante, quelle que soit sa gravité
+  epss_block_from: z.number().min(0).max(1).nullable().default(0.1), // H3 : EPSS au-dessus du seuil bloquant ; null = ignoré
+  quarantine_days: z.number().int().min(0).max(90).default(7), // H5 : 0 = pas de quarantaine
 }).strict()
 export type GateRules = z.infer<typeof GateRules>
 
@@ -74,6 +79,7 @@ export const VerdictReason = z.object({
   code: z.enum([
     'malicious-package', 'secret', 'vuln', 'sast', 'iac', 'other',
     'module-error', 'module-missing', 'output-invalid', 'coverage-gap', 'feed-stale',
+    'license-denied', 'license-review', 'kev', 'epss', 'quarantine',
   ]),
   blocking: z.boolean(),
   count: z.number().int().min(0),
@@ -81,7 +87,7 @@ export const VerdictReason = z.object({
   module: z.string().regex(MODULE_ID_RE).nullable(),
   finding_ids: z.array(z.string().uuid()).max(50),
   /** Actions qui débloqueraient : corriger, demander une exception, rafraîchir une base, relancer. */
-  actions: z.array(z.enum(['fix', 'request-exception', 'refresh-feed', 'install-module', 'rerun'])),
+  actions: z.array(z.enum(['fix', 'request-exception', 'refresh-feed', 'install-module', 'rerun', 'wait'])),
 }).strict()
 export const VerdictDetails = z.object({
   verdict: z.enum(VERDICTS),
