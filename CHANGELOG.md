@@ -35,6 +35,12 @@ Correctif : la console et le worker joignent de nouveau les forges.
 - Supprimer une analyse qui avait servi de source à une re-corrélation
   échouait. La re-corrélation est maintenant supprimée avec sa source.
 
+### Modifié
+- Page Catalogue allégée : le numéro de l'index et l'historique des
+  opérations sont retirés. Seules les opérations en cours restent
+  affichées, et un échec est signalé par une notification. L'historique
+  reste dans le journal d'audit.
+
 ### Ajouté (avance de la 0.5, actif avec le connecteur IA)
 - **Résultats semblables** regroupés par embeddings dans un même projet. Le
   tri commun reste confirmé par une personne (I7).
