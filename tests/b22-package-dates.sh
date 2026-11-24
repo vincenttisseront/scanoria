@@ -96,6 +96,10 @@ if grep -q -- '--max-redirs 0' "$TMP/curl.log"; then ok "curl : --max-redirs 0";
 if grep -q -- '--proto =https' "$TMP/curl.log"; then ok "curl : HTTPS seul"; else ko "curl : protocole non restreint"; fi
 R=$(lookup "pkg:npm/lent@1.0.0")
 expect "délai dépassé : null" "$(date_of pkg:npm/lent@1.0.0)" null
+R=$(lookup "pkg:npm/surcharge@1.0.0")
+expect "429 : null, compté à reprendre" "$(date_of pkg:npm/surcharge@1.0.0)/$(jq -r .stats.unfinished <<< "$R")" null/1
+expect "429 : jamais mis en cache" "$(python3 -I -B -c 'import os,sys; sys.path.insert(0, sys.argv[1]); from scanoria import pkgdates; print(os.path.exists(pkgdates._cache_path("pkg:npm/surcharge@1.0.0")))' "$PYLIB")" False
+if grep -q -- '--disable' "$TMP/curl.log"; then ok "curl : .curlrc ignoré (--disable)"; else ko "curl : .curlrc lu"; fi
 
 # --- 3. purl hostiles ------------------------------------------------------------------------
 : > "$TMP/requests.log"

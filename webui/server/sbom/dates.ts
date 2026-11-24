@@ -115,10 +115,13 @@ export async function recordDatesGap(db: Queryable, scanId: string, offline = fa
       WHERE id = $1`, [scanId, DATES_GAP_KIND, n, offline])
 }
 
+/** Nouvelles tentatives au plus pour les purl restés sans réponse (échéance, 429, 5xx). */
+export const MAX_DATE_RETRIES = 2
+
 /** Applique les demandes terminées pas encore recopiées ; renvoie le nombre de demandes traitées. */
-export async function applyDateResults(db: Queryable): Promise<number> {
-  const r = await db.query<{ id: string, scan_id: string | null, status: string, output: unknown }>(
-    `SELECT id::text, params ->> 'scan_id' AS scan_id, status, output FROM helper_requests
+export async function applyDateResults(db: Queryable, requestsDir?: string): Promise<number> {
+  const r = await db.query<{ id: string, scan_id: string | null, status: string, output: unknown, purls: unknown, attempt: unknown }>(
+    `SELECT id::text, params ->> 'scan_id' AS scan_id, status, output, params -> 'purls' AS purls, params -> 'attempt' AS attempt FROM helper_requests
       WHERE type = 'package-dates' AND status IN ('ok', 'error', 'rejected', 'lost') AND NOT (params ? 'applied')
       ORDER BY created_at LIMIT 20`)
   for (const req of r.rows) {
@@ -134,17 +137,32 @@ export async function applyDateResults(db: Queryable): Promise<number> {
     }
     await db.query(`UPDATE helper_requests SET params = params || '{"applied": true}'::jsonb WHERE id = $1`, [req.id])
     if (req.scan_id && /^[0-9a-f-]{36}$/.test(req.scan_id)) {
-      const offline = (req.output as { stats?: { offline?: unknown } } | null)?.stats?.offline === true || req.status !== 'ok'
-      await recordDatesGap(db, req.scan_id, offline)
+      const stats = (req.output as { stats?: { offline?: unknown, unfinished?: unknown } } | null)?.stats
+      await recordDatesGap(db, req.scan_id, stats?.offline === true)
+      const attempt = typeof req.attempt === 'number' ? req.attempt : 0
+      const unfinished = typeof stats?.unfinished === 'number' ? stats.unfinished : 0
+      if (requestsDir && req.status === 'ok' && unfinished > 0 && stats?.offline !== true && attempt < MAX_DATE_RETRIES) {
+        await retryUnanswered(db, requestsDir, req.scan_id, req.purls, attempt + 1)
+      }
     }
   }
   return r.rows.length
 }
 
+/** Redépose une demande pour les purl de la demande précédente encore sans date. */
+async function retryUnanswered(db: Queryable, requestsDir: string, scanId: string, purls: unknown, attempt: number): Promise<void> {
+  if (!Array.isArray(purls)) return
+  const left = await db.query<{ purl: string }>(
+    `SELECT c.purl FROM sbom_components c WHERE c.scan_id = $1 AND c.published_at IS NULL AND c.purl = ANY ($2::text[]) ORDER BY c.purl`,
+    [scanId, purls.filter((p): p is string => typeof p === 'string').slice(0, MAX_BATCH)])
+  if (!left.rows.length) return
+  await submitRequest(db, requestsDir, 'package-dates', { purls: left.rows.map(x => x.purl) }, SYSTEM_REQUESTER, new Date(), { scan_id: scanId, attempt })
+}
+
 /** Une passe (boucle d'ingestion de la console) ; ne lève jamais. */
 export async function packageDatesTick(db: Queryable, requestsDir: string, log: (m: string) => void = console.warn): Promise<void> {
   try {
-    await applyDateResults(db)
+    await applyDateResults(db, requestsDir)
     for (const scanId of await scansNeedingDates(db, 3)) await requestScanDates(db, requestsDir, scanId)
   }
   catch (err) {

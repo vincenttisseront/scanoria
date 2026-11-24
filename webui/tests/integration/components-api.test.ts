@@ -310,6 +310,11 @@ describe.skipIf(!DATABASE_URL)('composants, licences, dates et re-corrélation (
       expect(v.reasons).toContainEqual(expect.objectContaining({ code: 'license-review', blocking: false, count: 1 }))
     })
 
+    it('projet archivé : décisions de licence d’une analyse réservées à l’administrateur', async () => {
+      expect((await call(`/api/licenses/scans/${s.gamma}`, { client: viewer })).status).toBe(404)
+      expect((await call(`/api/licenses/scans/${s.gamma}`, { client: admin })).status).toBe(200)
+    })
+
     it('retrait audité ; identifiant inconnu → 404', async () => {
       const list = await call(`/api/licenses/policy?project_id=${p.alpha}`, { client: admin })
       const id = list.data.project[0].id
@@ -371,6 +376,30 @@ describe.skipIf(!DATABASE_URL)('composants, licences, dates et re-corrélation (
       const v = await evaluateGate(db.pool, sc)
       expect(v.reasons).toContainEqual(expect.objectContaining({ code: 'quarantine', blocking: true, count: 1, actions: ['wait'] }))
       expect(v.verdict).toBe('failed')
+    })
+
+    it('purl restés sans réponse (échéance, 429) : redemandés deux fois au plus, puis laissés', async () => {
+      const dp = await newProject('relance')
+      const sc = await newScan(dp, { status: 'ingesting' })
+      await component(sc, dp, 'pkg:npm/lent-a@1.0.0')
+      await component(sc, dp, 'pkg:npm/lent-b@1.0.0')
+      await packageDatesTick(db.pool, join(root, 'requests'))
+      const answer = async (dates: Record<string, string | null>, unfinished: number) => {
+        const open = await db.pool.query<{ id: string }>(
+          `SELECT id FROM helper_requests WHERE type = 'package-dates' AND params ->> 'scan_id' = $1 AND NOT (params ? 'applied')`, [sc])
+        expect(open.rowCount).toBe(1)
+        await db.pool.query(`UPDATE helper_requests SET status = 'ok', code = 'OK', finished_at = now(), output = $2 WHERE id = $1`,
+          [open.rows[0]!.id, JSON.stringify({ dates, stats: { offline: false, unfinished } })])
+        await packageDatesTick(db.pool, join(root, 'requests'))
+      }
+      await answer({ 'pkg:npm/lent-a@1.0.0': '2026-01-01T00:00:00Z', 'pkg:npm/lent-b@1.0.0': null }, 1)
+      const retry = await db.pool.query<{ params: Json }>(
+        `SELECT params FROM helper_requests WHERE type = 'package-dates' AND params ->> 'scan_id' = $1 AND NOT (params ? 'applied')`, [sc])
+      expect(retry.rows[0]!.params).toMatchObject({ purls: ['pkg:npm/lent-b@1.0.0'], attempt: 1 })
+      await answer({ 'pkg:npm/lent-b@1.0.0': null }, 1)
+      await answer({ 'pkg:npm/lent-b@1.0.0': null }, 1)
+      const all = await db.pool.query(`SELECT 1 FROM helper_requests WHERE type = 'package-dates' AND params ->> 'scan_id' = $1`, [sc])
+      expect(all.rowCount).toBe(3)
     })
   })
 

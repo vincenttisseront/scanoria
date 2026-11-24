@@ -12,7 +12,8 @@ normales pour les paquets « bon », piégées pour les autres :
 - npm « casse » : JSON invalide ;
 - npm « ailleurs » : redirection 302 vers un autre hôte ;
 - npm « lent » : réponse après le délai ;
-- npm « datebizarre » : date mal formée.
+- npm « datebizarre » : date mal formée ;
+- npm « surcharge » : 429 (erreur passagère, jamais mise en cache).
 Chaque chemin demandé est ajouté à LOGFILE.
 """
 
@@ -55,6 +56,8 @@ class H(http.server.BaseHTTPRequestHandler):
             if name == "lent":
                 time.sleep(25)
                 return self.send(200, {"time": {"1.0.0": DATE}})
+            if name == "surcharge":
+                return self.send(429, {"error": "too many requests"})
             if name == "datebizarre":
                 return self.send(200, {"time": {"1.0.0": "hier soir"}})
             if name in ("bon", "@exemple/outil"):

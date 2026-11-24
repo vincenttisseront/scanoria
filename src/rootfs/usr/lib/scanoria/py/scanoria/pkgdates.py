@@ -17,10 +17,12 @@ Le helper ne fait confiance à rien :
   une date bien formée en est retenue ;
 - cache root /var/lib/scanoria/cache/package-dates : une date trouvée est
   définitive (une version publiée ne change pas de date), une absence est
-  gardée un jour, une erreur réseau jamais.
+  gardée un jour (404 ou réponse inexploitable), une erreur réseau ou une
+  erreur passagère du registre (429, 5xx) jamais.
 Sans Internet, tout est null : la demande réussit quand même (la console le
 signale dans la couverture, G15). Durée bornée : ce qui n'a pas été cherché à
-l'échéance reste null et sera cherché à la demande suivante.
+l'échéance, ou en erreur passagère, reste null et compté dans « unfinished » :
+la console redépose une demande pour ces purl (deux fois au plus).
 """
 
 import concurrent.futures
@@ -197,12 +199,16 @@ class Network(Exception):
     pass
 
 
+class Transient(Exception):
+    """Erreur passagère du registre (429, 5xx) : ni résultat ni cache."""
+
+
 def fetch_json(url, kind, work):
     """Réponse JSON d'un registre ; None si absente ou invalide ; Network si le réseau échoue."""
     max_size = MAX_DOC.get(kind, DEFAULT_MAX_DOC)
     fd, dest = tempfile.mkstemp(dir=work)
     os.close(fd)
-    args = ["--proto", "=https", "--tlsv1.2", "--silent", "--connect-timeout", "10",
+    args = ["--disable", "--proto", "=https", "--tlsv1.2", "--silent", "--connect-timeout", "10",
             "--max-time", str(REQUEST_TIMEOUT), "--max-filesize", str(max_size), "--max-redirs", "0",
             "--user-agent", feeds.user_agent(), "--header", "Accept: application/json",
             "--output", dest, "--write-out", "%{http_code}", url]
@@ -217,8 +223,10 @@ def fetch_json(url, kind, work):
             code = int(r.text.strip()[-3:])
         except ValueError:
             return None
+        if code == 429 or code >= 500:
+            raise Transient(str(code))
         if code != 200 or os.path.getsize(dest) > max_size:
-            return None                       # 3xx (redirection jamais suivie), 404, 5xx
+            return None                       # 3xx (redirection jamais suivie), 404
         with open(dest, "rb") as f:
             data = f.read(max_size + 1)
         try:
@@ -321,9 +329,12 @@ def lookup(purls, deadline_s=BUDGET_S):
         url = lookup_url(kind, parts, version)
         try:
             doc = fetch_json(url, kind, work)
-        except Network:
+        except (Network, common.Fail):
             state["network_errors"] += 1
             return purl, None, "network"
+        except Transient:
+            state["network_errors"] = 0
+            return purl, None, "skipped"
         state["network_errors"] = 0
         return purl, extract(kind, parts, version, doc), "done"
 

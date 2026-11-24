@@ -62,14 +62,18 @@ const params = computed(() => {
   return p
 })
 const canSearch = computed(() => !!(params.value.purl || params.value.name || params.value.vuln))
-const csvHref = computed(() => `/api/components/export.csv?${new URLSearchParams(params.value).toString()}`)
+/** Critères de la dernière recherche : « Plus » et l'export CSV s'y tiennent, même si le formulaire a changé depuis. */
+const searched = ref<Record<string, string>>({})
+const csvHref = computed(() => `/api/components/export.csv?${new URLSearchParams(searched.value).toString()}`)
 
 async function search() {
   if (!canSearch.value) return
   loading.value = true
   error.value = null
   try {
-    result.value = await api<SearchResult>('/api/components', { query: params.value })
+    const query = { ...params.value }
+    result.value = await api<SearchResult>('/api/components', { query })
+    searched.value = query
     void router.replace({ query: { q: form.query || undefined, ecosystem: form.ecosystem || undefined, from: form.version_from || undefined, to: form.version_to || undefined, vuln: form.vuln || undefined } })
   }
   catch (err) {
@@ -85,7 +89,7 @@ async function more() {
   if (!result.value?.next_cursor) return
   loadingMore.value = true
   try {
-    const next = await api<SearchResult>('/api/components', { query: { ...params.value, cursor: result.value.next_cursor } })
+    const next = await api<SearchResult>('/api/components', { query: { ...searched.value, cursor: result.value.next_cursor } })
     result.value = { ...next, items: [...result.value.items, ...next.items] }
   }
   catch (err) {

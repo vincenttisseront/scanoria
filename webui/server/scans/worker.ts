@@ -28,7 +28,7 @@ import { makeRedactor } from './redact'
 import { loadTimeoutOverrides } from '../ai/overrides'
 import { aiLogContext } from '../ai/context'
 import type { WorkerConfig } from './config'
-import { awaitPackageDates } from '../sbom/dates'
+import { awaitPackageDates, recordDatesGap } from '../sbom/dates'
 import { isRecorrelation, recorrelationPlan, recorrelationSource, reportRecorrelation } from './recorrelate'
 
 export interface WorkerPaths {
@@ -614,7 +614,12 @@ export class ScanWorker {
     // 0.5 (B) : une re-corrélation ne déclare jamais un résultat corrigé (contrat 16) ;
     // une release attend les dates de publication de ses composants (H5).
     const complete = outcome.complete && !(await isRecorrelation(this.pool, scanId))
-    await awaitPackageDates(this.pool, scanId).catch((e: unknown) => this.log(`scan ${scanId}: package dates: ${(e as Error).message}`))
+    // H5 : une release attend les dates (90 s au plus) ; au-delà, les dates manquantes restent visibles dans la couverture (G15).
+    const dated = await awaitPackageDates(this.pool, scanId).catch((e: unknown) => {
+      this.log(`scan ${scanId}: package dates: ${(e as Error).message}`)
+      return false
+    })
+    if (!dated) await recordDatesGap(this.pool, scanId).catch(() => {})
     try {
       await this.integrations.finalizeScanFindings(this.pool, scanId, { complete })
     }

@@ -63,7 +63,11 @@ onMounted(() => {
   void load()
   void loadProjects()
 })
-watch(projectId, () => void load())
+watch(projectId, (id) => {
+  // La portée « projet » suit le projet affiché : sans projet, l'ajout redevient global.
+  if (!id) form.scope = 'global'
+  void load()
+})
 
 const decisionItems = computed(() => (['allowed', 'review', 'denied'] as const).map(d => ({ label: t(`licenses.decision.${d}`), value: d })))
 const projectItems = computed(() => [{ label: t('licenses.globalOnly'), value: '' }, ...projects.value.map(p => ({ label: p.name, value: p.id }))])

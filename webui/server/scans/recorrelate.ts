@@ -123,7 +123,7 @@ export async function enqueueRecorrelation(db: Pick<pg.Pool, 'connect'>, input: 
     const src = await client.query<{ ref: string, commit_sha: string | null }>(
       'SELECT ref, commit_sha FROM scans WHERE id = $1 AND project_id = $2', [input.sourceScanId, input.projectId])
     const dup = await client.query(
-      `SELECT 1 FROM scans WHERE project_id = $1 AND trigger = 'recorrelate' AND status = 'queued' LIMIT 1`, [input.projectId])
+      `SELECT 1 FROM scans WHERE project_id = $1 AND trigger = 'recorrelate' AND status IN ('queued', 'dispatched', 'running', 'ingesting') LIMIT 1`, [input.projectId])
     if (!project || !src.rows[0] || dup.rowCount) {
       await client.query('COMMIT')
       return null
@@ -160,12 +160,15 @@ export async function runRecorrelation(pool: pg.Pool, paths: { modulesStateFile:
   if (!state.available) return 0
   const marks = await readMarks(pool)
   const { due, marks: next } = feedsToRecorrelate(state.feeds, marks, now)
-  if (JSON.stringify(next) !== JSON.stringify(marks)) await writeMarks(pool, next)
-  if (!due.length) return 0
-  if (!canRecorrelate(state.modules, await readPlanCatalog(paths.catalogIndexFile))) {
+  if (due.length && !canRecorrelate(state.modules, await readPlanCatalog(paths.catalogIndexFile))) {
+    // La mise à jour n'est pas consommée : elle déclenchera dès qu'un module saura re-corréler.
+    const kept = Object.fromEntries(Object.entries(next).filter(([f]) => !due.includes(f) || marks[f]).map(([f, m]) => [f, due.includes(f) ? marks[f]! : m]))
+    if (JSON.stringify(kept) !== JSON.stringify(marks)) await writeMarks(pool, kept)
     log(`recorrelation skipped (${due.join(', ')}): no installed module reads an SBOM`)
     return 0
   }
+  if (JSON.stringify(next) !== JSON.stringify(marks)) await writeMarks(pool, next)
+  if (!due.length) return 0
   let n = 0
   for (const s of await latestSbomScans(pool)) {
     if (await enqueueRecorrelation(pool, { projectId: s.project_id, sourceScanId: s.scan_id, feeds: due })) n++

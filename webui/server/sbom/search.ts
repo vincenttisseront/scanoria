@@ -128,7 +128,7 @@ async function candidates(db: Queryable, q: Omit<ComponentQuery, 'cursor' | 'lim
     `WITH latest AS (
        SELECT DISTINCT ON (s.project_id) s.project_id, s.id, s.number, s.ref, s.finished_at
          FROM scans s
-        WHERE s.status = 'done' AND EXISTS (SELECT 1 FROM sbom_components x WHERE x.scan_id = s.id)
+        WHERE s.status = 'done' AND s.trigger <> 'recorrelate' AND EXISTS (SELECT 1 FROM sbom_components x WHERE x.scan_id = s.id)
         ORDER BY s.project_id, s.finished_at DESC NULLS LAST, s.queued_at DESC)
      SELECT p.id::text AS project_id, p.slug, p.name AS project_name, (p.archived_at IS NOT NULL) AS archived,
             l.id::text AS scan_id, l.number, l.ref,
@@ -157,9 +157,16 @@ async function linkedFindings(db: Queryable, rows: Row[]): Promise<Map<string, L
       ORDER BY CASE f.severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END DESC
       LIMIT 5000`,
     [rows.map(x => x.project_id), rows.map(x => x.name)])
+  const byName = new Map<string, Row[]>()
+  for (const c of rows) {
+    const k = `${c.project_id}|${c.name}`
+    const list = byName.get(k)
+    if (list) list.push(c)
+    else byName.set(k, [c])
+  }
   for (const f of r.rows) {
-    for (const c of rows) {
-      if (c.project_id !== f.project_id || c.name !== f.pname || (f.pversion !== null && f.pversion !== c.version)) continue
+    for (const c of byName.get(`${f.project_id}|${f.pname}`) ?? []) {
+      if (f.pversion !== null && f.pversion !== c.version) continue
       const key = `${c.project_id}|${c.purl}`
       const list = out.get(key) ?? []
       if (list.length < 20) list.push({ id: f.id, tool: f.tool, severity: f.severity, status: f.status, vuln_ids: f.vuln_ids.slice(0, 10), title: f.title })

@@ -153,6 +153,8 @@ export async function upsertPolicy(db: Queryable, input: PolicyUpsert, userId: n
     const p = await db.query('SELECT 1 FROM projects WHERE id = $1', [input.project_id])
     if (!p.rowCount) throw new PolicyError('E_NOT_FOUND')
   }
+  // Deux écritures concurrentes « MIT » et « mit » : sérialisées par un verrou de transaction (l'index unique est sensible à la casse).
+  await db.query(`SELECT pg_advisory_xact_lock(hashtext('license-policy:' || COALESCE($1::text, '') || ':' || lower($2)))`, [input.project_id, input.license])
   const prev = await db.query<{ id: string, decision: LicenseDecision }>(
     `SELECT id::text, decision FROM license_policies
       WHERE project_id IS NOT DISTINCT FROM $1::uuid AND lower(license) = lower($2) FOR UPDATE`,
