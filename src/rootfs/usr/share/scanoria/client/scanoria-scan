@@ -1,0 +1,249 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# scanoria-scan : client CI de l'appliance Scanoria (ARCHITECTURE § 12.8).
+# sh POSIX, avec curl, jq, mktemp, head et date (coreutils, busybox). Téléchargeable depuis la console :
+#   curl -fsSo scanoria-scan https://<appliance>/api/gates/client
+#
+#   SCANORIA_TOKEN=scn_… scanoria-scan --url https://analyse.exemple.test \
+#       --project <id> --ref <branche|tag|commit> [--profile <profil>] \
+#       [--wait] [--timeout <s>] [--cacert <ac.pem>]
+#   SCANORIA_TOKEN=scn_… scanoria-scan --url … --scan <id> --wait
+#
+# Le jeton est lu dans SCANORIA_TOKEN, jamais en argument (il apparaîtrait
+# dans la liste des processus et dans les journaux de CI). Les options ont
+# aussi une variable : SCANORIA_URL, SCANORIA_PROJECT, SCANORIA_REF,
+# SCANORIA_PROFILE, SCANORIA_CACERT, SCANORIA_TIMEOUT ; SCANORIA_INTERVAL fixe
+# le premier intervalle d'attente (5 s par défaut).
+#
+# Codes de sortie :
+#   0  verdict « passed » (ou analyse déposée, sans --wait)
+#   1  verdict « failed »
+#   2  verdict « inconclusive » (G13), analyse en erreur ou délai d'attente dépassé
+#   3  erreur d'utilisation, d'accès (jeton refusé, projet inconnu) ou de réseau
+
+set -u
+
+URL=${SCANORIA_URL:-}
+PROJECT=${SCANORIA_PROJECT:-}
+REF=${SCANORIA_REF:-}
+PROFILE=${SCANORIA_PROFILE:-}
+CACERT=${SCANORIA_CACERT:-}
+TIMEOUT=${SCANORIA_TIMEOUT:-3600}
+SCAN=
+WAIT=0
+QUIET=0
+case ${SCANORIA_LANG:-${LC_ALL:-${LANG:-}}} in
+  en*) L=en ;;
+  *) L=fr ;;
+esac
+
+say() {
+  # say <fr> <en>
+  if [ "$L" = en ]; then printf '%s\n' "$2"; else printf '%s\n' "$1"; fi
+}
+info() {
+  [ "$QUIET" = 1 ] || say "$@" >&2
+}
+die() {
+  # die <code> <fr> <en>
+  code=$1
+  shift
+  say "scanoria-scan: $1" "scanoria-scan: $2" >&2
+  exit "$code"
+}
+
+usage() {
+  cat <<'EOF'
+scanoria-scan --url URL (--project ID --ref REF [--profile P] | --scan ID)
+              [--wait] [--timeout S] [--cacert FILE] [--quiet]
+Token: SCANORIA_TOKEN environment variable (never an argument).
+Exit codes: 0 passed, 1 failed, 2 inconclusive, 3 usage/access error.
+EOF
+}
+
+need_value() {
+  [ $# -ge 2 ] && [ -n "$2" ] || die 3 "valeur manquante pour $1" "missing value for $1"
+}
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --url) need_value "$@"; URL=$2; shift 2 ;;
+    --project) need_value "$@"; PROJECT=$2; shift 2 ;;
+    --ref) need_value "$@"; REF=$2; shift 2 ;;
+    --profile) need_value "$@"; PROFILE=$2; shift 2 ;;
+    --scan) need_value "$@"; SCAN=$2; shift 2 ;;
+    --timeout) need_value "$@"; TIMEOUT=$2; shift 2 ;;
+    --cacert) need_value "$@"; CACERT=$2; shift 2 ;;
+    --wait) WAIT=1; shift ;;
+    --quiet|-q) QUIET=1; shift ;;
+    --token|--token=*) die 3 "le jeton se passe par la variable SCANORIA_TOKEN, jamais en argument" "pass the token in SCANORIA_TOKEN, never as an argument" ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die 3 "option inconnue : $1" "unknown option: $1" ;;
+  esac
+done
+
+command -v curl >/dev/null 2>&1 || die 3 "curl est requis" "curl is required"
+command -v jq >/dev/null 2>&1 || die 3 "jq est requis" "jq is required"
+
+TOKEN=${SCANORIA_TOKEN:-}
+unset SCANORIA_TOKEN
+printf '%s' "$TOKEN" | grep -Eq '^scn_[A-Za-z0-9]{40}$' \
+  || die 3 "SCANORIA_TOKEN absent ou mal formé (scn_ suivi de 40 caractères)" "SCANORIA_TOKEN missing or malformed (scn_ followed by 40 characters)"
+
+URL=${URL%/}
+case $URL in
+  https://*) ;;
+  http://*)
+    [ "${SCANORIA_ALLOW_HTTP:-0}" = 1 ] \
+      || die 3 "adresse en http:// refusée (le jeton passerait en clair) ; utilisez https://" "http:// refused (the token would travel in clear text); use https://" ;;
+  *) die 3 "--url requis (https://nom-de-l-appliance)" "--url is required (https://appliance-name)" ;;
+esac
+UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+if [ -n "$SCAN" ]; then
+  printf '%s' "$SCAN" | grep -Eq "$UUID_RE" || die 3 "--scan doit être un identifiant d'analyse" "--scan must be a scan id"
+  WAIT=1
+else
+  printf '%s' "$PROJECT" | grep -Eq "$UUID_RE" || die 3 "--project doit être l'identifiant du projet (page Intégration CI)" "--project must be the project id (CI integration page)"
+  [ -n "$REF" ] || die 3 "--ref requis" "--ref is required"
+fi
+case $TIMEOUT in
+  ''|*[!0-9]*) die 3 "--timeout attend un nombre de secondes" "--timeout expects a number of seconds" ;;
+esac
+if [ -n "$CACERT" ] && [ ! -r "$CACERT" ]; then
+  die 3 "AC illisible : $CACERT" "unreadable CA: $CACERT"
+fi
+
+TMP=$(mktemp -d 2>/dev/null) || die 3 "mktemp a échoué" "mktemp failed"
+trap 'rm -rf "$TMP"' EXIT
+trap 'exit 3' HUP INT TERM
+# En-tête d'autorisation dans un fichier 0600 lu par curl (-H @fichier) : le
+# jeton n'apparaît jamais dans les arguments d'un processus.
+umask 077
+printf 'Authorization: Bearer %s\n' "$TOKEN" > "$TMP/auth"
+TOKEN=
+
+# api <méthode> <chemin> [corps JSON] : corps dans $TMP/body, code HTTP en sortie (000 = réseau).
+api() {
+  a_method=$1
+  a_path=$2
+  a_data=${3:-}
+  set -- -sS --max-time 30 -X "$a_method" -H @"$TMP/auth" -H 'Accept: application/json' -o "$TMP/body" -w '%{http_code}'
+  if [ -n "$CACERT" ]; then set -- "$@" --cacert "$CACERT"; fi
+  if [ -n "$a_data" ]; then set -- "$@" -H 'Content-Type: application/json' --data-binary "$a_data"; fi
+  : > "$TMP/body"
+  a_code=$(curl "$@" "$URL$a_path" 2>"$TMP/err") || :
+  case $a_code in
+    [0-9][0-9][0-9]) printf '%s' "$a_code" ;;
+    *) printf '000' ;;
+  esac
+}
+
+api_error() {
+  # api_error <code HTTP>
+  code=$(jq -r '.data.code // empty' "$TMP/body" 2>/dev/null)
+  case $1 in
+    000) say "scanoria-scan: console injoignable ($(head -c 200 "$TMP/err"))" "scanoria-scan: console unreachable ($(head -c 200 "$TMP/err"))" >&2 ;;
+    401) say "scanoria-scan: jeton refusé (${code:-401}) : invalide, révoqué ou expiré" "scanoria-scan: token refused (${code:-401}): invalid, revoked or expired" >&2 ;;
+    403) say "scanoria-scan: accès refusé (${code:-403}) : le jeton appartient-il à ce projet ?" "scanoria-scan: access denied (${code:-403}): does the token belong to this project?" >&2 ;;
+    404) say "scanoria-scan: projet ou analyse introuvable" "scanoria-scan: project or scan not found" >&2 ;;
+    429) say "scanoria-scan: trop de requêtes, réessayez plus tard" "scanoria-scan: too many requests, retry later" >&2 ;;
+    *) say "scanoria-scan: erreur HTTP $1 ${code}" "scanoria-scan: HTTP error $1 ${code}" >&2 ;;
+  esac
+}
+
+if [ -z "$SCAN" ]; then
+  body=$(jq -cn --arg ref "$REF" --arg profile "$PROFILE" '{ref: $ref} + (if $profile == "" then {} else {profile: $profile} end)')
+  status=$(api POST "/api/projects/$PROJECT/scans" "$body")
+  if [ "$status" != 202 ]; then
+    api_error "$status"
+    exit 3
+  fi
+  SCAN=$(jq -r '.scan_id // empty' "$TMP/body")
+  printf '%s' "$SCAN" | grep -Eq "$UUID_RE" || die 3 "réponse inattendue de la console" "unexpected console response"
+  number=$(jq -r '.number' "$TMP/body")
+  path=$(jq -r '.url' "$TMP/body")
+  info "scanoria-scan: analyse n° $number déposée pour $REF : $URL$path" "scanoria-scan: scan #$number queued for $REF: $URL$path"
+  printf '%s\n' "$SCAN"
+  [ "$WAIT" = 1 ] || exit 0
+fi
+
+# Attente du verdict : intervalle croissant de 5 à 15 secondes, erreurs réseau
+# et 5xx tolérées (redémarrage de la console), délai global --timeout.
+start=$(date +%s)
+interval=${SCANORIA_INTERVAL:-5}
+case $interval in
+  ''|*[!0-9]*|0) interval=5 ;;
+esac
+failures=0
+last=
+loc=$L
+while :; do
+  status=$(api GET "/api/scans/$SCAN/verdict?locale=$loc")
+  case $status in
+    200)
+      failures=0
+      state=$(jq -r '.status // empty' "$TMP/body" 2>/dev/null)
+      [ -n "$state" ] || die 3 "réponse inattendue de la console" "unexpected console response"
+      verdict=$(jq -r '.verdict // empty' "$TMP/body")
+      case $state in
+        done|error|cancelled) break ;;
+      esac
+      if [ "$state" != "$last" ]; then
+        info "scanoria-scan: état : $state" "scanoria-scan: state: $state"
+        last=$state
+      fi
+      ;;
+    000|5*)
+      failures=$((failures + 1))
+      if [ "$failures" -ge 10 ]; then
+        api_error "$status"
+        exit 3
+      fi
+      ;;
+    *)
+      api_error "$status"
+      exit 3
+      ;;
+  esac
+  now=$(date +%s)
+  if [ $((now - start)) -ge "$TIMEOUT" ]; then
+    die 2 "délai d'attente dépassé ($TIMEOUT s) : verdict non concluant" "timed out after $TIMEOUT s: verdict inconclusive"
+  fi
+  sleep "$interval"
+  [ "$interval" -ge 15 ] || interval=$((interval + 2))
+done
+
+# Résumé : verdict, raisons dans l'ordre de l'évaluateur, texte IA éventuel.
+url=$(jq -r '.url' "$TMP/body")
+if [ "$L" = en ]; then
+  jq -r '
+    "verdict: \(.verdict // "none") (scan #\(.number), \(.status))",
+    ((.details.reasons // [])[:20][] |
+      "  - \(if .blocking then "[blocking]" else "[info]" end) \(.code) x\(.count)"
+      + (if .severity then " \(.severity)" else "" end)
+      + (if .module then " (\(.module))" else "" end)
+      + (if (.actions | length) > 0 then " -> \(.actions | join(", "))" else "" end)),
+    ((.details.exceptions_applied // [])[] | "  exception until \(.expires_on): \(.reason)"),
+    (if .ai_summary then "AI-proposed (\(.ai_summary.model // "model")): \(.ai_summary.summary)" else empty end)
+  ' "$TMP/body"
+else
+  jq -r '
+    "verdict : \(.verdict // "aucun") (analyse n° \(.number), \(.status))",
+    ((.details.reasons // [])[:20][] |
+      "  - \(if .blocking then "[bloquant]" else "[info]" end) \(.code) ×\(.count)"
+      + (if .severity then " \(.severity)" else "" end)
+      + (if .module then " (\(.module))" else "" end)
+      + (if (.actions | length) > 0 then " → \(.actions | join(", "))" else "" end)),
+    ((.details.exceptions_applied // [])[] | "  exception jusqu'\''au \(.expires_on) : \(.reason)"),
+    (if .ai_summary then "Proposé par IA (\(.ai_summary.model // "modèle")) : \(.ai_summary.summary)" else empty end)
+  ' "$TMP/body"
+fi
+say "rapport : $URL$url" "report: $URL$url"
+
+case $verdict in
+  passed) exit 0 ;;
+  failed) exit 1 ;;
+  *) exit 2 ;;
+esac

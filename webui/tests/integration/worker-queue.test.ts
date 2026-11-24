@@ -762,7 +762,7 @@ describe.skipIf(!DATABASE_URL)('file d’analyses (PostgreSQL réel, faux runner
       await new WorkerService({ pool: db.pool, cfg, paths, integrations: defaultIntegrations, log: () => {} }).iterate()
     })
 
-    it('journaux orphelins purgés ; bouchon du verdict non concluant', async () => {
+    it('journaux orphelins purgés ; verdict sans module non concluant', async () => {
       await mkdir(join(cfg.scanLogsDir, randomUUID()), { recursive: true })
       await mkdir(join(cfg.scanLogsDir, 'pas-un-uuid'), { recursive: true })
       const kept = (await db.pool.query<{ id: string }>('SELECT id FROM scans LIMIT 1')).rows[0]!.id
@@ -772,7 +772,9 @@ describe.skipIf(!DATABASE_URL)('file d’analyses (PostgreSQL réel, faux runner
       expect(left).toContain(kept)
       expect(left).toContain('pas-un-uuid')
       const v = await defaultIntegrations.evaluateGate(db.pool, kept)
-      expect(v).toMatchObject({ verdict: 'inconclusive', reasons: [] })
+      // Verdict réel (chantier E) : analyse sans module → non concluant (G13).
+      expect(v).toMatchObject({ verdict: 'inconclusive' })
+      expect(v.reasons[0]).toMatchObject({ code: 'module-missing', blocking: true })
       expect(await defaultIntegrations.ingestModuleOutputs(db.pool, { scanId: kept, moduleId: 'x', resultDir: '/', outputs: {} })).toEqual({ count: 0, newCount: 0, errors: [] })
       await expect(defaultIntegrations.decryptSecret(db.pool, kept)).rejects.toThrow()
     })

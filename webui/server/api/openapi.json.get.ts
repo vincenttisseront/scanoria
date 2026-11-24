@@ -10,7 +10,7 @@ import { PROJECT_OPS, projectSchemas } from '../projects/openapi'
 
 type Role = 'public' | 'viewer' | 'operator' | 'admin'
 
-interface Op { summary: string, role: Role, body?: string, status?: number }
+interface Op { summary: string, role: Role, body?: string, status?: number, token?: boolean }
 
 const OPS: Record<string, Record<string, Op>> = {
   '/api/health': { get: { summary: 'Console health (status, version, db)', role: 'public' } },
@@ -60,6 +60,31 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/catalog/modules/{id}/uninstall': { post: { summary: 'Request uninstall-module (409 E_DEPENDENTS when another module needs it)', role: 'admin', body: 'ModuleUninstall', status: 202 } },
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
+  '/api/gates': {
+    get: { summary: 'Quality gates with the number of assigned projects', role: 'viewer' },
+    post: { summary: 'Create a quality gate by copying the rules of « defaut » (or copy_from)', role: 'admin', body: 'GateCreate', status: 201 },
+  },
+  '/api/gates/{id}': {
+    get: { summary: 'Quality gate: rules, assigned projects, locked rules (H4, G13)', role: 'viewer' },
+    patch: { summary: 'Update the rules (GateRules; block_malicious and inconclusive_blocks stay true)', role: 'admin', body: 'GateUpdate' },
+    delete: { summary: 'Delete a gate (never the built-in one, never a gate in use)', role: 'admin', status: 204 },
+  },
+  '/api/gates/{id}/assign': { post: { summary: 'Assign the gate to a project (next scans)', role: 'admin', body: 'GateAssign' } },
+  '/api/gates/projects/{id}': { get: { summary: 'CI integration of a project: gate, badge, active tokens', role: 'viewer' } },
+  '/api/gates/client': { get: { summary: 'Download the scanoria-scan CI client (POSIX sh, curl, jq)', role: 'public' } },
+  '/api/projects/{id}/tokens': {
+    get: { summary: 'Project API tokens (prefix and dates, never the value)', role: 'operator' },
+    post: { summary: 'Create a project API token scn_…; the value is returned once', role: 'operator', body: 'TokenCreate', status: 201 },
+  },
+  '/api/projects/{id}/tokens/{token}': { delete: { summary: 'Revoke a project API token', role: 'operator' } },
+  '/api/projects/{id}/scans': {
+    post: { summary: 'Queue a scan {ref, profile?} → 202 {scan_id, number, url}; API token of the project (trigger api) or operator session', role: 'operator', body: 'ProjectScanCreate', status: 202, token: true },
+  },
+  '/api/scans/{id}/verdict': {
+    get: { summary: 'Scan state, verdict and ordered reasons (VerdictDetails), optional ai_summary (I9); ?locale=fr|en', role: 'viewer', token: true },
+  },
+  '/api/badges/{name}': { get: { summary: 'Latest verdict badge, /api/badges/<project slug>.svg (404 unless enabled for the project)', role: 'public' } },
+  '/api/badges/projects/{id}': { put: { summary: 'Enable or disable the public badge of a project (disabled by default)', role: 'operator', body: 'BadgeUpdate' } },
   ...PROJECT_OPS,
   '/api/scans': {
     get: { summary: 'Scan queue (status=active, in worker order) or history (filters: project, status, verdict, trigger; paginated)', role: 'viewer' },
@@ -118,6 +143,7 @@ export default defineEventHandler(async () => {
         'x-scanoria-role': op.role,
         ...(params.length ? { parameters: params } : {}),
         ...(op.role === 'public' ? { security: [] } : {}),
+        ...(op.token ? { security: [{ session: [] }, { apiToken: [] }] } : {}),
         ...(op.body
           ? {
               requestBody: {
@@ -152,6 +178,7 @@ export default defineEventHandler(async () => {
     components: {
       securitySchemes: {
         session: { type: 'apiKey', in: 'cookie', name: '__Host-scanoria_session' },
+        apiToken: { type: 'http', scheme: 'bearer', description: 'Project API token scn_… (CI routes only: queue a scan, read a verdict)' },
       },
       schemas: {
         Error: {
@@ -214,6 +241,37 @@ export default defineEventHandler(async () => {
         ModuleState: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } },
         ModuleUpdate: { type: 'object', additionalProperties: false, properties: { version: { type: 'string' } } },
         ModuleUninstall: { type: 'object', additionalProperties: false, required: ['keep_data'], properties: { keep_data: { type: 'boolean' } } },
+        GateCreate: {
+          type: 'object', additionalProperties: false, required: ['slug'],
+          properties: { slug: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }, copy_from: { type: 'string', format: 'uuid' } },
+        },
+        GateUpdate: {
+          type: 'object', additionalProperties: false, required: ['rules'],
+          properties: {
+            rules: {
+              type: 'object', additionalProperties: false,
+              properties: {
+                new_code_only: { type: 'boolean' },
+                max_secrets: { type: 'integer', minimum: 0 },
+                vuln_block_from: { enum: ['critical', 'high', 'medium', 'low', 'info', null] },
+                sast_block_from: { enum: ['critical', 'high', 'medium', 'low', 'info', null] },
+                iac_block_from: { enum: ['critical', 'high', 'medium', 'low', 'info', null] },
+                block_malicious: { const: true },
+                inconclusive_blocks: { const: true },
+              },
+            },
+          },
+        },
+        GateAssign: { type: 'object', additionalProperties: false, required: ['project_id'], properties: { project_id: { type: 'string', format: 'uuid' } } },
+        TokenCreate: {
+          type: 'object', additionalProperties: false, required: ['name'],
+          properties: { name: { type: 'string', minLength: 1, maxLength: 100 }, expires_in_days: { type: ['integer', 'null'], minimum: 1, maximum: 3650 } },
+        },
+        ProjectScanCreate: {
+          type: 'object', additionalProperties: false, required: ['ref'],
+          properties: { ref: { type: 'string', minLength: 1, maxLength: 255 }, profile: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,62}$' } },
+        },
+        BadgeUpdate: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } },
         PasswordReset: {
           type: 'object', additionalProperties: false, required: ['password'],
           properties: { password: { type: 'string', minLength: 12, maxLength: 1024 }, must_change_password: { type: 'boolean' } },

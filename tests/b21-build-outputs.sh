@@ -140,6 +140,11 @@ cp "$OUT/$A" "$OUT/release.json" "$OUT/SHA256SUMS" "$TMP/assets/"
 res=$(SCANORIA_TEST_ROOT="$T" SCANORIA_TEST_BIN="$STUBS" bash "$L/rootfs/usr/sbin/scanoria-selfupdate" \
 	install-local "$TMP/assets" 2> "$TMP/install.err" || true)
 check "install-local : code OK" test "$(jq -r '.code // empty' <<< "$res" 2> /dev/null)" = OK
+if [[ "$(jq -r '.code // empty' <<< "$res" 2> /dev/null)" != OK ]]; then
+	# Diagnostic dans le journal du travail (les artefacts ne sont pas lisibles).
+	printf '     réponse : %s\n' "$res"
+	sed 's/^/     stderr : /' "$TMP/install.err" | tail -n 20
+fi
 check "install-local : current → releases/$V" test "$(readlink "$T/opt/scanoria/current")" = "releases/$V"
 check "install-local : commandes déployées" test -x "$T/usr/sbin/scanoria-helper" -a -x "$T/usr/sbin/scanoria-firstboot"
 check "install-local : MANIFEST déployé" cmp "$L/rootfs/usr/share/scanoria/MANIFEST" "$T/usr/share/scanoria/MANIFEST"

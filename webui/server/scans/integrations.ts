@@ -7,7 +7,7 @@
 // - D : ingestModuleOutputs, finalizeScanFindings (contrat 5) ;
 // - E : evaluateGate (contrat 6) ;
 // - F : enqueueAiTask (contrat 7).
-// A, D et F sont branchés (F : version d'attente de ai/enqueue.ts, remplacée par F).
+// A, D, E et F sont branchés (F : version d'attente de ai/enqueue.ts, remplacée par F).
 // Tant qu'un chantier n'est pas fusionné, son entrée est un bouchon sans
 // effet ; le bouchon du verdict rend « non concluant » (G13 : jamais un
 // verdict favorable par défaut). À la fusion, chaque bouchon est remplacé par
@@ -19,6 +19,7 @@ import type { VerdictDetails } from '#shared/analysis'
 import { GateRules } from '#shared/analysis'
 import { enqueueAiTask } from '../ai/enqueue'
 import { finalizeScanFindings, ingestModuleOutputs } from '../findings/ingest'
+import { evaluateGate } from '../gates/evaluate'
 import type { enqueueScan } from './enqueue'
 import { decryptSecret } from '../utils/secrets'
 import { runProjectSchedules } from '../projects/schedule'
@@ -69,7 +70,7 @@ export const defaultIntegrations: Integrations = {
   decryptSecret: (db, credentialId) => decryptSecret(db, credentialId),
   ingestModuleOutputs: (db, args) => ingestModuleOutputs(db, args),
   finalizeScanFindings: (db, scanId, opts) => finalizeScanFindings(db, scanId, opts),
-  evaluateGate: (db, scanId) => pendingGate(db, scanId),
+  evaluateGate: (db, scanId) => evaluateGate(db, scanId),
   enqueueAiTask,
   runProjectSchedules: (db, now, enqueue) => runProjectSchedules(db, now, enqueue).catch((err: unknown) => {
     console.error('[schedule]', (err as Error)?.message)
