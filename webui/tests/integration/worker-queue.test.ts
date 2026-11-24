@@ -342,7 +342,11 @@ describe.skipIf(!DATABASE_URL)('file d’analyses (PostgreSQL réel, faux runner
       ])
       expect(seen.ingest[0]!.resultDir).toBe(join(cfg.scansDir, 'results', row.job_id))
       expect(seen.finalize).toEqual([[scanId, true]])
-      expect(seen.ai).toEqual([{ kind: 'explain-verdict', subjectType: 'scan', subjectId: scanId, projectId: p, priority: 10 }])
+      // I9 verdict expliqué puis I5 résumé de l'analyse (0.4).
+      expect(seen.ai).toEqual([
+        { kind: 'explain-verdict', subjectType: 'scan', subjectId: scanId, projectId: p, priority: 10 },
+        { kind: 'summarize-scan', subjectType: 'scan', subjectId: scanId, projectId: p, priority: 10 },
+      ])
       // Une seconde passe ne retraite rien.
       await w.tick()
       expect(seen.finalize).toHaveLength(1)

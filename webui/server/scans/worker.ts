@@ -23,6 +23,7 @@ import {
 } from './plan'
 import { EFFECTIVE_PRIORITY_SQL, retryDelayS } from './priority'
 import { makeRedactor } from './redact'
+import { loadTimeoutOverrides } from '../ai/overrides'
 import type { WorkerConfig } from './config'
 
 export interface WorkerPaths {
@@ -259,6 +260,7 @@ export class ScanWorker {
       projectLicense: project.spdx_license,
       installed: state.modules,
       catalog,
+      timeoutOverrides: await loadTimeoutOverrides(client),
     })
     const plan: ScanPlan = {
       version: PLAN_VERSION,
@@ -613,6 +615,10 @@ export class ScanWorker {
     try {
       await this.integrations.enqueueAiTask(this.pool, {
         kind: 'explain-verdict', subjectType: 'scan', subjectId: scanId, projectId: r.rows[0].project_id, priority: 10,
+      })
+      // I5 : résumé de l'analyse, même branchement (contrat 13).
+      await this.integrations.enqueueAiTask(this.pool, {
+        kind: 'summarize-scan', subjectType: 'scan', subjectId: scanId, projectId: r.rows[0].project_id, priority: 10,
       })
     }
     catch (e) {

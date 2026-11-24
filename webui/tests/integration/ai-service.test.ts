@@ -22,7 +22,8 @@ import { OllamaClient } from '../../server/ai/ollama'
 import { loadEndpoint, type AiEndpoint } from '../../server/ai/config'
 import { clearConnectorCache, enqueueAiTask } from '../../server/ai/enqueue'
 import { clientFor, createService, runLoop } from '../../server/ai/runtime'
-import { readToken, saveToken, setTokenStore } from '../../server/ai/token'
+import { hashPassword } from '../../server/utils/password'
+import { consoleTokenStore, deleteToken, runtimeTokenStore } from '../../server/ai/token'
 
 const GRANTS = fileURLToPath(new URL('../../../src/rootfs/usr/share/scanoria/sql/ai-grants.sql', import.meta.url))
 
@@ -156,7 +157,10 @@ describe.skipIf(!DATABASE_URL)('service scanoria-ai (PostgreSQL réel, faux Olla
     expect(probe.selection.tasks['explain-finding']).toMatchObject({ model: 'qwen-test:14b', reason: 'only-model' })
     expect(probe.selection.embedding).toMatchObject({ model: 'embed-test:latest' })
     const tb = (await pool.query(`SELECT subject_id, output FROM ai_tasks WHERE kind = 'testbed' AND status = 'done' ORDER BY subject_id`)).rows
-    expect(tb.map(r => [r.subject_id, r.output.passed])).toEqual([['explain-finding', true], ['explain-verdict', true]])
+    expect(tb.map(r => [r.subject_id, r.output.passed])).toEqual([
+      ['classify-secret', true], ['diagnose-scan', true], ['explain-finding', true], ['explain-verdict', true],
+      ['summarize-scan', true], ['translate-rule', true], ['triage-finding', true],
+    ])
     const t = await task(id!)
     expect(t).toMatchObject({ status: 'done', model: 'qwen-test:14b', model_digest: 'a'.repeat(64), locale: 'fr' })
     const out = t.output as { summary: string, fix: string, references: { url: string }[] }
@@ -408,23 +412,43 @@ describe.skipIf(!DATABASE_URL)('service scanoria-ai (PostgreSQL réel, faux Olla
     expect(status).toBe('done:null')
   })
 
-  it('client du service : AC lue dans le répertoire d\'exécution, jeton exigé et lu par le magasin', async () => {
+  it('client du service : AC lue dans le répertoire d\'exécution, jeton chiffré par une clé dédiée', async () => {
     writeFileSync(join(dir, 'ca.pem'), '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n')
     const ep = { ...active(), ca: true, token: true } as Extract<AiEndpoint, { enabled: true }>
     await expect(clientFor(pool, ep, dir)).rejects.toThrow(/not stored/)
-    await expect(readToken(pool, '00000000-0000-4000-8000-000000000001')).rejects.toThrow()
-    await expect(saveToken(pool, 'x', 1)).rejects.toThrow()
-    setTokenStore({ save: async () => '00000000-0000-4000-8000-000000000001', read: async () => 'runtime-token' })
+    // La console crée la clé dédiée (ici directement dans le répertoire d'exécution du service).
+    const keyFile = join(dir, 'ai-token.key')
+    const tokenValue = randomBytes(24).toString('hex')
+    const admin = (await pool.query<{ id: number }>(
+      `INSERT INTO users (username, role, password_hash) VALUES ('ai-admin', 'admin', $1) RETURNING id`,
+      [await hashPassword('x-long-password-for-tests')],
+    )).rows[0]!.id
+    const id = await consoleTokenStore(keyFile).save(pool, tokenValue, admin)
     try {
+      const row = (await pool.query(`SELECT kind, secret_enc, hint FROM credentials WHERE id = $1`, [id])).rows[0]!
+      expect(row.kind).toBe('ai-token')
+      expect(Buffer.from(row.secret_enc).toString('latin1')).not.toContain(tokenValue)
+      expect(await runtimeTokenStore(dir).read(pool, id)).toBe(tokenValue)
       await pool.query(
-        `INSERT INTO appliance_settings (key, value) VALUES ('ai.token_credential_id', '"00000000-0000-4000-8000-000000000001"')
+        `INSERT INTO appliance_settings (key, value) VALUES ('ai.token_credential_id', $1)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [JSON.stringify(id)],
       )
       expect(await clientFor(pool, ep, dir)).toBeInstanceOf(OllamaClient)
+      // Sans la clé dédiée (secret.key ne suffit pas), le service ne lit rien.
+      const other = mkdtempSync(join(tmpdir(), 'scanoria-ai-nokey-'))
+      writeFileSync(join(other, 'secret.key'), randomBytes(32))
+      await expect(runtimeTokenStore(other).read(pool, id)).rejects.toThrow(/E_SECRET_KEY/)
+      rmSync(other, { recursive: true, force: true })
+      // Un jeton de forge n'est jamais lu comme jeton IA, même avec la bonne clé.
+      const forge = (await pool.query<{ id: string }>(`INSERT INTO credentials (kind, secret_enc, hint) VALUES ('token', '\\x01', '…cccc') RETURNING id::text`)).rows[0]!.id
+      await expect(runtimeTokenStore(dir).read(pool, forge)).rejects.toThrow(/E_SECRET_NOT_FOUND/)
+      await deleteToken(pool, id)
+      await expect(runtimeTokenStore(dir).read(pool, id)).rejects.toThrow(/E_SECRET_NOT_FOUND/)
     }
     finally {
-      setTokenStore(null)
       await pool.query(`DELETE FROM appliance_settings WHERE key = 'ai.token_credential_id'`)
+      rmSync(keyFile, { force: true })
     }
   })
 })

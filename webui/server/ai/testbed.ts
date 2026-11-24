@@ -11,6 +11,11 @@
 import { z } from 'zod'
 import findingCases from '../../ai/testbed/explain-finding.json'
 import verdictCases from '../../ai/testbed/explain-verdict.json'
+import triageCases from '../../ai/testbed/triage-finding.json'
+import summaryCases from '../../ai/testbed/summarize-scan.json'
+import secretCases from '../../ai/testbed/classify-secret.json'
+import diagnoseCases from '../../ai/testbed/diagnose-scan.json'
+import translateCases from '../../ai/testbed/translate-rule.json'
 
 export const TestbedCase = z.strictObject({
   id: z.string().regex(/^[a-z0-9-]{1,60}$/),
@@ -29,7 +34,7 @@ export type TestbedSuite = z.infer<typeof TestbedSuite>
 export type TestbedCase = z.infer<typeof TestbedCase>
 
 export const SUITES: Record<string, TestbedSuite> = Object.fromEntries(
-  [findingCases, verdictCases].map((s) => {
+  [findingCases, verdictCases, triageCases, summaryCases, secretCases, diagnoseCases, translateCases].map((s) => {
     const suite = TestbedSuite.parse(s)
     return [suite.kind, suite]
   }),

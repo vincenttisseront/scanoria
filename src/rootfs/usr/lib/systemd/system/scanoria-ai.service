@@ -8,8 +8,9 @@
 # refuse toute sortie à cet utilisateur.
 #
 # ExecStartPre=+ (root) : table nftables, rôle PostgreSQL et droits
-# (ai-grants.sql), copie de ai.json, de l'AC et de la clé des secrets (si un
-# jeton est configuré) dans /run/scanoria-ai, seul répertoire lisible du service.
+# (ai-grants.sql), copie de ai.json, de l'AC et de la clé dédiée au jeton IA
+# (ai-token.key, si un jeton est configuré ; jamais secret.key) dans
+# /run/scanoria-ai, seul répertoire lisible du service.
 [Unit]
 Description=Scanoria AI tasks (external Ollama connector)
 After=network-online.target postgresql.service scanoria-console.service

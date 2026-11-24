@@ -4,7 +4,7 @@
 // POST /api/ai/connector (admin) : active ou modifie le connecteur Ollama.
 // Une seule saisie obligatoire (l'adresse) et une seule confirmation (modale
 // d'activation, confirmed: true). Le jeton éventuel est chiffré en base
-// (contrat 2) et n'entre jamais dans la demande au helper, qui résout,
+// (contrat 2, clé dédiée ai-token.key) et n'entre jamais dans la demande au helper, qui résout,
 // épingle et ouvre la sortie pour scanoria-ai seulement (set-ai-endpoint).
 
 import { defineEventHandler } from 'h3'
@@ -13,14 +13,14 @@ import { apiError, readValidated, requireRole } from '../../utils/http'
 import { submitHelperAction } from '../../utils/helper-actions'
 import { ConnectorBody, saveSetting } from '../../ai/console'
 import { loadAiSettings } from '../../ai/config'
-import { saveToken, tokenStoreAvailable } from '../../ai/token'
+import { deleteToken, saveToken } from '../../ai/token'
 
 export default defineEventHandler(async (event) => {
   const auth = requireRole(event, 'admin')
   const body = await readValidated(event, ConnectorBody)
   const pool = getPool()
-  if (typeof body.token === 'string' && !tokenStoreAvailable()) throw apiError(503, 'E_UNAVAILABLE')
-  const stored = (await loadAiSettings(pool)).tokenCredentialId !== null
+  const previous = (await loadAiSettings(pool)).tokenCredentialId
+  const stored = previous !== null
   const hasToken = typeof body.token === 'string' || (body.token === undefined && stored)
   if (hasToken && body.url.startsWith('http:')) throw apiError(400, 'E_VALIDATION', { issues: [{ path: 'url', code: 'token_requires_https' }] })
   const params = {
@@ -37,9 +37,11 @@ export default defineEventHandler(async (event) => {
   if (typeof body.token === 'string') {
     const id = await saveToken(pool, body.token, auth.user.id)
     await saveSetting(pool, 'ai.token_credential_id', id, auth.user.id)
+    await deleteToken(pool, previous)
   }
   else if (body.token === null) {
     await saveSetting(pool, 'ai.token_credential_id', null, auth.user.id)
+    await deleteToken(pool, previous)
   }
   return submitted
 })

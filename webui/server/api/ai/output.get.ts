@@ -14,7 +14,7 @@ import { latestOutput, OutputQuery } from '../../ai/console'
 export default defineEventHandler(async (event) => {
   const auth = requireRole(event, 'viewer')
   const q = queryValidated(event, OutputQuery)
-  const r = await latestOutput(getPool(), q, auth.user.locale)
+  const r = await latestOutput(getPool(), q, auth.user.locale, auth.user.id)
   if (!r) throw apiError(404, 'E_NOT_FOUND')
   return r
 })

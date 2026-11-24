@@ -35,6 +35,7 @@ interface OutputResponse {
     model_digest: string | null
     generated_at: string | null
     stale?: boolean
+    feedback?: { vote: 1 | -1, correction: string | null } | null
   } | null
 }
 
@@ -224,6 +225,11 @@ onBeforeUnmount(() => {
           @click="ask"
         />
       </div>
+      <AiFeedback
+        v-if="data.task"
+        :task-id="data.task.id"
+        :initial="data.task.feedback ?? null"
+      />
     </template>
 
     <div

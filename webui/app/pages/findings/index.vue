@@ -131,6 +131,7 @@ async function load() {
     const res = await api<{ items: FindingRow[], total: number }>('/api/findings', { query: query() })
     items.value = res.items
     total.value = res.total
+    void loadSuggestions(res.items)
   }
   catch (err) {
     toast.add({ title: errorMessage(err), color: 'error' })
@@ -139,6 +140,24 @@ async function load() {
     loading.value = false
   }
 }
+// Pré-tri suggéré par IA (I3) à côté du statut « nouveau » : indice seulement,
+// le statut ne change que par un clic. Rien sans connecteur.
+const suggestions = ref<Record<string, { value: string }>>({})
+async function loadSuggestions(rows: FindingRow[]) {
+  const ids = rows.filter(r => r.status === 'new').map(r => r.id)
+  if (!ids.length) {
+    suggestions.value = {}
+    return
+  }
+  try {
+    suggestions.value = (await api<{ items: Record<string, { value: string }> }>('/api/ai/suggestions', { query: { kind: 'triage-finding', ids: ids.join(',') } })).items
+  }
+  catch {
+    suggestions.value = {}
+  }
+}
+const SUGGESTION_COLORS: Record<string, 'success' | 'warning' | 'error'> = { 'likely-false-positive': 'success', 'to-confirm': 'warning', 'likely-true-positive': 'error' }
+
 async function reloadAll() {
   await Promise.all([load(), loadSummary()])
 }
@@ -205,7 +224,18 @@ const columns = computed<TableColumn<FindingRow>[]>(() => [
   {
     accessorKey: 'status',
     header: t('findings.columns.status'),
-    cell: ({ row }) => h(UBadge, { color: statusColor(row.original.status), variant: 'subtle', label: t(`findings.status.${row.original.status}`) }),
+    cell: ({ row }) => {
+      const status = h(UBadge, { color: statusColor(row.original.status), variant: 'subtle', label: t(`findings.status.${row.original.status}`) })
+      const s = row.original.status === 'new' ? suggestions.value[row.original.id] : undefined
+      if (!s || !SUGGESTION_COLORS[s.value]) return status
+      return h('div', { class: 'flex flex-wrap items-center gap-1' }, [
+        status,
+        h(UBadge, {
+          'color': SUGGESTION_COLORS[s.value], 'variant': 'outline', 'size': 'sm', 'icon': 'i-lucide-sparkles',
+          'label': t('ai.triage.badge', { value: t(`ai.triage.${s.value}`) }), 'title': t('ai.triage.help'), 'data-testid': 'ai-triage-badge',
+        }),
+      ])
+    },
   },
 ])
 
@@ -604,6 +634,9 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
           <FindingsFindingAi
             :finding-id="detail.id"
             :project-id="detail.project_id"
+            :status="detail.status"
+            :title="detail.title"
+            :secret="!!detail.secret_type"
           />
 
           <UCard v-if="detail.secret_type">
@@ -634,6 +667,7 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
               <p class="text-xs text-muted">
                 {{ t('findings.detail.secretHelp') }}
               </p>
+              <AiSecretClass :finding-id="detail.id" />
               <div
                 v-if="canTriage"
                 class="flex flex-wrap gap-2"

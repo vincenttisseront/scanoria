@@ -246,10 +246,11 @@ dns ollama.exemple.test A 192.0.2.10
 expect "résolution revenue : plus de changement" "$(jq -r .resolution.changed "$STATUS")" false
 
 # --- 7. Préparation du service ---------------------------------------------------------------
-printf 'cle-de-test-32-octets-0123456789' > "$T/var/lib/scanoria/console/secret.key"
+printf 'cle-de-test-32-octets-0123456789' > "$T/var/lib/scanoria/console/ai-token.key"
+printf 'cle-des-forges-32-octets-0123456' > "$T/var/lib/scanoria/console/secret.key"
 : > "$CALLS"
 "$SETUP" prestart > "$TMP/pre.json" 2> "$TMP/pre.err" || ko "prestart : code de sortie"
-expect "prestart : fichiers copiés (jeton et AC configurés)" "$(jq -c .files "$TMP/pre.json")" '["ai.json","ca.pem","secret.key"]'
+expect "prestart : fichiers copiés (jeton et AC configurés)" "$(jq -c .files "$TMP/pre.json")" '["ai-token.key","ai.json","ca.pem"]'
 expect "prestart : fichiers 0400" "$(stat -c %a "$T/run/scanoria-ai/ai.json")" 400
 grep -q 'ai-grants.sql' "$CALLS" && jq -e 'select(.[0] == "runuser") | .[1:4] == ["-u", "postgres", "--"]' "$CALLS" > /dev/null \
 	&& ok "prestart : rôle et droits appliqués en postgres" || ko "prestart : psql"
@@ -285,7 +286,8 @@ grep -qF '["systemctl","try-restart","scanoria-ai.service"]' "$CALLS" && ok "sca
 expect "ai.alive : absent sans connecteur" "$(st)" '[]'
 "$SETUP" prestart > "$TMP/pre.json" 2> /dev/null || ko "prestart sans connecteur"
 expect "prestart sans connecteur : seule la configuration est copiée" "$(jq -c .files "$TMP/pre.json")" '["ai.json"]'
-[[ ! -e "$T/run/scanoria-ai/secret.key" ]] && ok "clé des secrets retirée du service" || ko "clé des secrets restée"
+[[ ! -e "$T/run/scanoria-ai/ai-token.key" ]] && ok "clé du jeton IA retirée du service" || ko "clé du jeton IA restée"
+[[ ! -e "$T/run/scanoria-ai/secret.key" ]] && ok "clé des secrets jamais copiée" || ko "clé des secrets copiée"
 printf '{"version":1,"enabled":true,"url":"x"}' > "$CONF"
 "$SETUP" prestart > "$TMP/pre.json" 2> /dev/null || true
 expect "ai.json incohérent : traité comme inactif (échec fermé)" "$(jq -r .enabled "$TMP/pre.json")" false
