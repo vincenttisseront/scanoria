@@ -12,7 +12,9 @@ import { describe, expect, it } from 'vitest'
 import {
   CATEGORIES, ERROR_CLASSES, EXCEPTION_KINDS, FINDING_STATUSES, FORGE_KINDS, GateRules, SCAN_MODULE_STATUSES,
   SCAN_PRIORITY, SCAN_STATUSES, SCAN_TRIGGERS, SCHEDULES, SECRET_STATES, SEVERITIES, VERDICTS, VerdictDetails,
+  ExceptionTargets,
 } from '#shared/analysis'
+import { enqueueAiTask } from '../../server/ai/enqueue'
 
 const root = (rel: string) => fileURLToPath(new URL(`../../../${rel}`, import.meta.url))
 const SQL = readFileSync(root('webui/server/db/migrations/003_analyses.sql'), 'utf8')
@@ -97,5 +99,26 @@ describe('contrats des analyses', () => {
     expect(result(ok)).toBe(true)
     for (const p of ['../x.sarif', '/etc/passwd', 'a/../../b', 'a/./b'])
       expect(result({ ...ok, modules: [{ ...ok.modules[0], outputs: { sarif: p } }] })).toBe(false)
+  })
+
+  it('ExceptionTargets : une cible par type, champs inconnus refusés', () => {
+    expect(ExceptionTargets.path.safeParse({ glob: 'tests/**' }).success).toBe(true)
+    expect(ExceptionTargets.path.safeParse({ glob: 'a\nb' }).success).toBe(false)
+    expect(ExceptionTargets.rule.safeParse({ rule_id: 'generic-api-key', tool: 'gitleaks' }).success).toBe(true)
+    expect(ExceptionTargets.vuln.safeParse({ vuln_id: 'CVE-2021-44906', package: 'minimist' }).success).toBe(true)
+    expect(ExceptionTargets.vuln.safeParse({ vuln_id: 'pas un avis' }).success).toBe(false)
+    expect(ExceptionTargets.finding.safeParse({ finding_id: id }).success).toBe(true)
+    expect(ExceptionTargets.module.safeParse({ module_id: 'trivy' }).success).toBe(true)
+    expect(ExceptionTargets.module.safeParse({ module_id: '../trivy' }).success).toBe(false)
+    expect(ExceptionTargets.rule.safeParse({ rule_id: 'x', extra: 1 }).success).toBe(false)
+  })
+
+  it('enqueueAiTask d\'attente : sans effet tant que le connecteur IA n\'est pas livré', async () => {
+    const db = {
+      query: () => {
+        throw new Error('aucune requête attendue')
+      },
+    }
+    expect(await enqueueAiTask(db as never, { kind: 'explain-finding', subjectType: 'finding', subjectId: id, projectId: null })).toBeNull()
   })
 })
