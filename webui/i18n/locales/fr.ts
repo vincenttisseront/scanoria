@@ -112,6 +112,11 @@ export default {
     E_ROLLBACK_FAILED: 'Le retour arrière a échoué : intervention nécessaire sur l’appliance.',
     E_TIMEOUT: 'Délai dépassé.',
     E_INTERNAL: 'Erreur interne du service système.',
+    E_RESOURCES: 'Ressources insuffisantes (mémoire, processeurs ou réglage du noyau) pour ce module.',
+    E_DEPENDENCY: 'Dépendance de module non satisfaite, ou module requis par un autre.',
+    E_CONFLICT: 'Ce module est incompatible avec un module installé.',
+    E_LICENSE: 'La licence de ce module comporte des restrictions à accepter explicitement.',
+    E_TESTBED: 'Le banc d’essai du module a échoué : module non activé, retour arrière effectué.',
   },
   request: {
     pending: 'En file d’attente…',

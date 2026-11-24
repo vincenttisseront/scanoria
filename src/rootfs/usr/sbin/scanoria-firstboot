@@ -523,7 +523,7 @@ start_services() {
 	done
 	for u in scanoria-firewall.service scanoria-state.timer scanoria-update-check.timer \
 		scanoria-update-apply.timer scanoria-cert-renew.timer \
-		scanoria-dns-check.timer scanoria-dns-check.path; do
+		scanoria-dns-check.timer scanoria-dns-check.path scanoria-catalog-refresh.timer; do
 		if systemctl cat "$u" > /dev/null 2>&1; then
 			logrun systemctl enable --now "$u" || return 1
 		fi

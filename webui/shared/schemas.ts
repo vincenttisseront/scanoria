@@ -32,6 +32,11 @@ export const REQUEST_TYPES = [
   'set-update-policy',
   'run-selftest',
   'check-dns',
+  'refresh-catalog',
+  'install-modules',
+  'uninstall-module',
+  'set-module-state',
+  'update-module',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -43,6 +48,7 @@ export const RESULT_CODES = [
   'E_ARCHIVE', 'E_VERSION', 'E_DISK_SPACE', 'E_CERT_INVALID', 'E_CERT_NAMES',
   'E_CERT_KEY_MISMATCH', 'E_CERT_EXPIRED', 'E_NO_PREVIOUS', 'E_HEALTH_ROLLED_BACK',
   'E_ROLLBACK_FAILED', 'E_TIMEOUT', 'E_INTERNAL',
+  'E_RESOURCES', 'E_DEPENDENCY', 'E_CONFLICT', 'E_LICENSE', 'E_TESTBED',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 
@@ -51,6 +57,10 @@ export type Role = (typeof ROLES)[number]
 export const LOCALES = ['fr', 'en'] as const
 export const CHANNELS = ['stable', 'prerelease'] as const
 export const WEEK_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+
+/** Modules (chantier 0.2-moteur) : mêmes motifs que les schémas de demandes. */
+export const MODULE_ID_RE = /^[a-z0-9][a-z0-9-]{1,40}$/
+export const MODULE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/
 
 const unique = (items: readonly unknown[]) => new Set(items).size === items.length
 
@@ -97,6 +107,18 @@ export const requestParamSchemas = {
     }),
   'run-selftest': z.strictObject({ quick: z.boolean().optional() }),
   'check-dns': z.strictObject({}),
+  'refresh-catalog': z.strictObject({}),
+  'install-modules': z.strictObject({
+    modules: z.array(z.strictObject({
+      id: z.string().regex(MODULE_ID_RE),
+      version: z.string().regex(MODULE_VERSION_RE),
+      options: z.record(z.string(), z.unknown()),
+    })).min(1).max(32),
+    accept_licenses: z.array(z.string().regex(MODULE_ID_RE)).max(32).refine(unique, { message: 'duplicate' }),
+  }),
+  'uninstall-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE), keep_data: z.boolean() }),
+  'set-module-state': z.strictObject({ id: z.string().regex(MODULE_ID_RE), enabled: z.boolean() }),
+  'update-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE), version: z.string().regex(MODULE_VERSION_RE) }),
 } satisfies Record<RequestType, z.ZodType>
 
 export type RequestParams<T extends RequestType> = z.infer<(typeof requestParamSchemas)[T]>

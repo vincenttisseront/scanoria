@@ -115,6 +115,36 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
     valid: [{}],
     invalid: [{ force: true }, { fqdn: 'analyse.exemple.test' }],
   },
+  'refresh-catalog': {
+    valid: [{}],
+    invalid: [{ force: true }],
+  },
+  'install-modules': {
+    valid: [
+      { modules: [{ id: 'gitleaks', version: '8.30.1', options: {} }], accept_licenses: [] },
+      { modules: [{ id: 'semgrep', version: '1.0.0', options: { level: 'high' } }], accept_licenses: ['semgrep'] },
+    ],
+    invalid: [
+      { modules: [], accept_licenses: [] },
+      { modules: [{ id: '../etc', version: '1', options: {} }], accept_licenses: [] },
+      { modules: [{ id: 'gitleaks', version: '8/../x', options: {} }], accept_licenses: [] },
+      { modules: [{ id: 'gitleaks', version: '1', options: {}, image: 'x' }], accept_licenses: [] },
+      { modules: [{ id: 'gitleaks', version: '1', options: {} }] },
+      { modules: [{ id: 'gitleaks', version: '1', options: {} }], accept_licenses: ['a1', 'a1'] },
+    ],
+  },
+  'uninstall-module': {
+    valid: [{ id: 'gitleaks', keep_data: true }],
+    invalid: [{ id: 'gitleaks' }, { id: 'gitleaks', keep_data: 'no' }, { id: 'Git', keep_data: false }],
+  },
+  'set-module-state': {
+    valid: [{ id: 'trivy-db', enabled: false }],
+    invalid: [{ id: 'trivy' }, { id: 'trivy', enabled: 1 }],
+  },
+  'update-module': {
+    valid: [{ id: 'gitleaks', version: '8.30.1' }],
+    invalid: [{ id: 'gitleaks' }, { id: 'gitleaks', version: '' }, { id: 'gitleaks', version: '1', x: 1 }],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {

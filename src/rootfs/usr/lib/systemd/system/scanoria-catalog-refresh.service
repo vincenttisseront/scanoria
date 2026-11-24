@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Rafraîchit l'index du catalogue des modules (principe 8 : automatique, sans
+# réglage). Sans Internet, l'échec est journalisé et l'index installé reste en place.
+[Unit]
+Description=Scanoria catalog index refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/scanoria-helper exec --origin timer --type refresh-catalog --params {}
+UMask=0027
+PrivateTmp=yes
+ProtectHome=read-only
