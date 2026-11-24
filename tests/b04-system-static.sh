@@ -94,9 +94,18 @@ grep -q '^NoNewPrivileges=yes' "$RF/usr/lib/systemd/system/scanoria-console.serv
 	&& ok "console : utilisateur scanoria, durcissement" || ko "console : durcissement"
 W="$RF/usr/lib/systemd/system/scanoria-worker.service"
 grep -q '^NoNewPrivileges=yes' "$W" && grep -q '^ProtectSystem=strict' "$W" && grep -q '^User=scanoria' "$W" \
-	&& grep -q '^PartOf=scanoria-console.service' "$W" && grep -q '^IPAddressDeny=any' "$W" \
+	&& grep -q '^PartOf=scanoria-console.service' "$W" \
 	&& grep -q '^Wants=scanoria-worker.service' "$RF/usr/lib/systemd/system/scanoria-console.service" \
 	&& ok "worker : utilisateur scanoria, durcissement, lié à la console" || ko "worker : durcissement"
+# Console et worker joignent les API des forges : un refus total (valeur
+# « any ») rendait toute forge injoignable (EPERM) sur l'appliance (0.4.0).
+for u in scanoria-console.service scanoria-worker.service; do
+	if grep -q '^IPAddressDeny=any' "$RF/usr/lib/systemd/system/$u" || ! grep -q '^IPAddressDeny=link-local multicast$' "$RF/usr/lib/systemd/system/$u"; then
+		ko "$u : sortie vers les forges bloquée ou lien local permis"
+	else
+		ok "$u : sortie vers les forges permise, lien local et multidiffusion refusés"
+	fi
+done
 # Renommage tmp/ → incoming/ : les deux doivent être sous un même montage
 # ReadWritePaths (sinon EXDEV sur l'appliance, invisible hors systemd).
 for u in scanoria-console.service scanoria-worker.service; do

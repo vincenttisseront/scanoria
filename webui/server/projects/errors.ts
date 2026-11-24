@@ -28,6 +28,9 @@ const FORGE_STATUS: Record<ForgeErrorCode, number> = {
   E_FORGE_RATE_LIMITED: 429,
   E_FORGE_UNSUPPORTED: 501,
   E_FORGE_UNREACHABLE: 502,
+  E_FORGE_DNS: 502,
+  E_FORGE_BLOCKED: 502,
+  E_FORGE_TLS: 502,
   E_FORGE_TIMEOUT: 502,
   E_FORGE_TOO_LARGE: 502,
   E_FORGE_REDIRECT: 502,
@@ -36,7 +39,10 @@ const FORGE_STATUS: Record<ForgeErrorCode, number> = {
 
 /** Convertit les erreurs connues (forge, URL, secret) en erreurs HTTP ; relance les autres. */
 export function mapProjectError(err: unknown): never {
-  if (err instanceof ForgeError) throw projectError(FORGE_STATUS[err.code], err.code, err.status ? { forge_status: err.status } : {})
+  if (err instanceof ForgeError) throw projectError(FORGE_STATUS[err.code], err.code, {
+    ...(err.status ? { forge_status: err.status } : {}),
+    ...(err.detail ? { forge_detail: err.detail } : {}),
+  })
   if (err instanceof GitUrlError) throw projectError(400, 'E_GIT_URL')
   if (err instanceof SecretError) throw projectError(500, 'E_SECRET')
   throw err

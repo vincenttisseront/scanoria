@@ -52,7 +52,7 @@ function install(ids: string[]) {
       variant="subtle"
       icon="i-lucide-triangle-alert"
       :title="label('errors', d.error)"
-      :description="t('projects.detection.errorHelp')"
+      :description="d.detail ? `${t('projects.detection.errorDetail', { detail: d.detail })} ${t('projects.detection.errorHelp')}` : t('projects.detection.errorHelp')"
     />
     <template v-else>
       <p class="text-xs text-muted">
