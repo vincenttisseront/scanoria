@@ -158,6 +158,32 @@ class Op:
 # Index du catalogue
 # --------------------------------------------------------------------------
 
+# Index plus ancien que ce délai : actualisé avant une installation. Le minuteur
+# n'actualise qu'une fois par jour ; une appliance mise à jour juste après la
+# publication d'un catalogue installait sinon avec les manifestes de la veille
+# (0.4.0 : OSV-Scanner limité à 512 Mo au lieu de 1536, tué au banc d'essai).
+CATALOG_FRESH_S = 3600
+
+
+def fresh_catalog():
+    """Actualise l'index s'il a été vérifié il y a plus de CATALOG_FRESH_S.
+
+    Au mieux : sans réseau ou en cas d'échec, l'index en place sert tel quel."""
+    s = catalogverify.source_info()
+    try:
+        age = (common.now() - common.parse_iso(s["checked_at"])).total_seconds() if s else None
+    except (KeyError, TypeError, ValueError):
+        age = None
+    if s is not None and age is not None and 0 <= age < CATALOG_FRESH_S:
+        return False
+    try:
+        catalogverify.refresh()
+        return True
+    except (Fail, OSError) as e:
+        common.log("catalog refresh before install skipped: %s" % getattr(e, "message", e))
+        return False
+
+
 def catalog():
     idx = catalogverify.installed_index()
     if idx is None:
@@ -660,6 +686,7 @@ def act_install_modules(c):
     if len({w["id"] for w in wanted}) != len(wanted):
         raise Fail("E_INVALID_PARAM", "duplicate module id")
     accepted = set(c.params["accept_licenses"])
+    fresh_catalog()
     mods = catalog()
     planned, options, skipped = plan_install(reg, mods, wanted, accepted)
     if not planned:
