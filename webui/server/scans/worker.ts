@@ -28,6 +28,8 @@ import { makeRedactor } from './redact'
 import { loadTimeoutOverrides } from '../ai/overrides'
 import { aiLogContext } from '../ai/context'
 import type { WorkerConfig } from './config'
+import { awaitPackageDates } from '../sbom/dates'
+import { isRecorrelation, recorrelationPlan, recorrelationSource, reportRecorrelation } from './recorrelate'
 
 export interface WorkerPaths {
   modulesStateFile: string
@@ -257,18 +259,22 @@ export class ScanWorker {
     if (!rules.success) throw new ScanFailure(err('E_SCAN_GATE', 'input', 'quality gate rules are invalid'))
     const catalog = await readPlanCatalog(this.paths.catalogIndexFile)
     if (catalog.size === 0 && state.modules.length > 0) throw new Deferred(err('E_CATALOG', 'infra', 'catalog index is unavailable'))
-    const { modules, gaps } = resolveProfile({
-      profile: prof.rows[0]!,
-      sourceKind: project.source_kind,
-      projectLicense: project.spdx_license,
-      installed: state.modules,
-      catalog,
-      timeoutOverrides: await loadTimeoutOverrides(client),
-    })
+    // 0.5 (B, contrat 16) : une re-corrélation ne lance que les modules SCA qui lisent un SBOM.
+    const recorrelate = scan.trigger === 'recorrelate'
+    const { modules, gaps } = recorrelate
+      ? recorrelationPlan({ installed: state.modules, catalog })
+      : resolveProfile({
+          profile: prof.rows[0]!,
+          sourceKind: project.source_kind,
+          projectLicense: project.spdx_license,
+          installed: state.modules,
+          catalog,
+          timeoutOverrides: await loadTimeoutOverrides(client),
+        })
     const plan: ScanPlan = {
       version: PLAN_VERSION,
       created_at: new Date().toISOString(),
-      source: { kind: project.source_kind, ref: scan.ref, commit: scan.commit_sha, history: planHistory(modules) },
+      source: { kind: recorrelate ? 'sbom' : project.source_kind, ref: scan.ref, commit: scan.commit_sha, history: recorrelate ? 'shallow' : planHistory(modules) },
       profile: prof.rows[0]!,
       gate: { id: gate.rows[0]!.id, slug: gate.rows[0]!.slug, rules: rules.data },
       modules,
@@ -284,7 +290,12 @@ export class ScanWorker {
       `SELECT source_kind, repo_url, credential_id, to_jsonb(projects) - 'detection' AS extra FROM projects WHERE id = $1`, [scan.project_id])
     const project = pr.rows[0]!
     let source: ScanJob['source']
-    if (plan.source.kind === 'archive') {
+    if (plan.source.kind === 'sbom') {
+      const sbom = await recorrelationSource(client, scan.id)
+      if (!sbom) throw new ScanFailure(err('E_SCAN_SOURCE', 'input', 'the SBOM to recorrelate is missing or too large'))
+      source = sbom
+    }
+    else if (plan.source.kind === 'archive') {
       if (!scan.upload_id) throw new ScanFailure(err('E_SCAN_SOURCE', 'input', 'no uploaded archive for this project'))
       source = { kind: 'archive', upload_id: scan.upload_id }
     }
@@ -600,8 +611,12 @@ export class ScanWorker {
    * enregistré, puis explication IA demandée (contrat 7, sans effet si l'IA est inactive).
    */
   async conclude(scanId: string, outcome: { status: 'done' | 'error', error: RunnerError | null, complete: boolean }): Promise<void> {
+    // 0.5 (B) : une re-corrélation ne déclare jamais un résultat corrigé (contrat 16) ;
+    // une release attend les dates de publication de ses composants (H5).
+    const complete = outcome.complete && !(await isRecorrelation(this.pool, scanId))
+    await awaitPackageDates(this.pool, scanId).catch((e: unknown) => this.log(`scan ${scanId}: package dates: ${(e as Error).message}`))
     try {
-      await this.integrations.finalizeScanFindings(this.pool, scanId, { complete: outcome.complete })
+      await this.integrations.finalizeScanFindings(this.pool, scanId, { complete })
     }
     catch (e) {
       this.log(`scan ${scanId}: finalize failed: ${(e as Error).message}`)
@@ -633,6 +648,7 @@ export class ScanWorker {
       this.log(`scan ${scanId}: AI task not queued: ${(e as Error).message}`)
     }
     await this.requestDiagnosis(scanId, r.rows[0].project_id)
+    await reportRecorrelation(this.pool, scanId).catch((e: unknown) => this.log(`scan ${scanId}: recorrelation report: ${(e as Error).message}`))
   }
 
   /**

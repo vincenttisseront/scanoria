@@ -23,6 +23,11 @@ const timestamp = z.string().regex(TIMESTAMP_RE)
 const moduleId = z.string().regex(MODULE_ID_RE)
 const resultPath = z.string().max(255).regex(RESULT_PATH_RE).refine(p => !RESULT_PATH_FORBIDDEN_RE.test(p))
 
+/** purl d'une tâche de re-corrélation : forme bornée, sans espace ni caractère de contrôle. */
+export const SBOM_PURL_RE = /^pkg:[a-z][a-z0-9.+-]{0,31}\/[\x21-\x7e]{1,1000}$/
+export const SBOM_JOB_MAX_COMPONENTS = 20_000
+const sbomPurl = z.string().max(1024).regex(SBOM_PURL_RE)
+
 export const gitRef = z.string().min(1).max(255).regex(GIT_REF_RE).refine(r => !GIT_REF_FORBIDDEN_RE.test(r))
 
 const tokenCredential = z.strictObject({
@@ -57,6 +62,8 @@ export const scanJobSchema = z.strictObject({
       credential: jobCredential.optional(),
     }),
     z.strictObject({ kind: z.literal('archive'), upload_id: uuid }),
+    // 0.5 (B, contrat 16) : re-corrélation ; le runner écrit lui-même le SBOM à partir de ces purl.
+    z.strictObject({ kind: z.literal('sbom'), scan_id: uuid, components: z.array(sbomPurl).min(1).max(SBOM_JOB_MAX_COMPONENTS) }),
   ]),
   modules: z.array(z.strictObject({
     id: moduleId,
@@ -84,7 +91,7 @@ export const scanResultSchema = z.strictObject({
   started_at: timestamp,
   finished_at: timestamp,
   source: z.strictObject({
-    kind: z.enum(['git', 'archive']),
+    kind: z.enum(['git', 'archive', 'sbom']),
     commit: z.string().regex(COMMIT_RE).nullable(),
     history: z.enum(['shallow', 'full', 'none']),
     files: z.number().int().min(0),

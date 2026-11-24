@@ -131,6 +131,17 @@ const OPS: Record<string, Record<string, Op>> = {
     get: { summary: 'Severity normalization per module, with origin value', role: 'viewer' },
     patch: { summary: 'Change a normalized severity, or reset it to its origin value (severity null)', role: 'admin', body: 'SeverityMapUpdate' },
   },
+  // 0.5 (B) : recherche transverse (F3), politique de licences (F8).
+  '/api/components': { get: { summary: 'Cross-project component search (F3) in the latest SBOM of each visible project: purl, name, ecosystem, version, version_from/version_to, vuln (aliases included); grouped by project, cursor pagination', role: 'viewer' } },
+  '/api/components/export.csv': { get: { summary: 'Same search as /api/components, whole result as CSV (formulas neutralized)', role: 'viewer' } },
+  '/api/components/exposures': { get: { summary: 'Projects newly affected by a re-correlation after a database update, over 7 days', role: 'viewer' } },
+  '/api/licenses/policy': {
+    get: { summary: 'License policy (F8): automatic defaults, global decisions, decisions of a project (query project_id)', role: 'viewer' },
+    put: { summary: 'Set a license decision (allowed, review, denied), global or per project; audited with the previous value', role: 'admin' },
+  },
+  '/api/licenses/policy/{id}': { delete: { summary: 'Remove a license decision (back to the global or default decision); audited', role: 'admin' } },
+  '/api/licenses/evaluate': { post: { summary: 'Evaluate an SPDX expression against the policy (OR = best, AND = worst, WITH = base license)', role: 'viewer' } },
+  '/api/licenses/scans/{id}': { get: { summary: 'License decision of each SBOM component of a scan, with counts', role: 'viewer' } },
 }
 
 const HELPER_BODIES = [

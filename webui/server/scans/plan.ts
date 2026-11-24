@@ -72,7 +72,8 @@ export interface CoverageGap {
 export interface ScanPlan {
   version: typeof PLAN_VERSION
   created_at: string
-  source: { kind: 'git' | 'archive', ref: string, commit: string | null, history: 'shallow' | 'full' }
+  /** « sbom » (0.5) : re-corrélation d'un SBOM déjà relevé (contrat 16). */
+  source: { kind: 'git' | 'archive' | 'sbom', ref: string, commit: string | null, history: 'shallow' | 'full' }
   profile: { id: string, slug: string, categories: string[], include_modules: string[], exclude_modules: string[] }
   gate: { id: string, slug: string, rules: GateRules }
   modules: PlannedModule[]
@@ -138,7 +139,8 @@ export function catalogEntry(m: unknown): PlanCatalogEntry | null {
 
 export interface ResolveInput {
   profile: ProfileInput
-  sourceKind: 'git' | 'archive'
+  /** « sbom » (0.5) : re-corrélation, modules qui lisent l'entrée « sbom ». */
+  sourceKind: 'git' | 'archive' | 'sbom'
   /** Licence OSI déclarée du projet : seule une source open source admet un module « private-code-forbidden ». */
   projectLicense: string | null
   installed: InstalledModule[]
@@ -156,7 +158,7 @@ export interface ResolveInput {
  */
 export function resolveProfile(input: ResolveInput): { modules: PlannedModule[], gaps: CoverageGap[] } {
   const { profile } = input
-  const want: PlanInput = input.sourceKind === 'git' ? 'repo' : 'archive'
+  const want: PlanInput | 'sbom' = input.sourceKind === 'git' ? 'repo' : input.sourceKind === 'sbom' ? 'sbom' : 'archive'
   const exclude = new Set(profile.exclude_modules)
   const include = new Set(profile.include_modules.filter(id => !exclude.has(id)))
   const categories = new Set(profile.categories.filter(c => (CATEGORIES as readonly string[]).includes(c)))
@@ -259,7 +261,7 @@ export const scanPlanSchema = z.object({
   version: z.literal(PLAN_VERSION),
   created_at: z.string(),
   source: z.object({
-    kind: z.enum(['git', 'archive']),
+    kind: z.enum(['git', 'archive', 'sbom']),
     ref: z.string(),
     commit: z.string().nullable(),
     history: z.enum(['shallow', 'full']),

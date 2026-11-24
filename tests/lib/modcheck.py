@@ -80,17 +80,19 @@ def scan_errors(manifest):
     if any(".." in arg.split("/") for arg in scan["command"]):
         errs.append("scan.command: chemin avec « .. »")
     props = (manifest.get("options") or {}).get("properties") or {}
-    for key in ("command", "history_command"):
+    for key in ("command", "history_command", "sbom_command"):
         for arg in scan.get(key) or []:
             for name in re.findall(r"\{opt\.([^}]*)\}", arg):
                 if name not in props:
                     errs.append(f"scan.{key}: option inconnue dans {{opt.{name}}}")
     for kind, out in (manifest.get("outputs") or {}).items():
-        for key in ("command", "history_command"):
+        for key in ("command", "history_command", "sbom_command"):
             if key in scan and out["path"] not in scan[key]:
                 errs.append(f"outputs.{kind}: {out['path']} absent de scan.{key}")
     if "history_command" in scan and scan.get("history") != "full":
         errs.append("scan.history_command exige scan.history: full")
+    if "sbom_command" in scan and ("sbom" not in scan.get("inputs", []) or "/src/sbom.cdx.json" not in scan["sbom_command"]):
+        errs.append("scan.sbom_command exige l'entrée sbom et lit /src/sbom.cdx.json")
     feeds = manifest.get("requires", {}).get("feeds", [])
     for feed in feeds:
         if not any(f"/feeds/{feed}" in arg for arg in scan["command"] + list((scan.get("env") or {}).values())):

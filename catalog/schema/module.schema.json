@@ -550,6 +550,17 @@
           },
           "description": "argv lancé à la place de command quand la source est un dépôt Git lu avec son historique (history: full) ; le dépôt Git est monté en lecture seule sur /git."
         },
+        "sbom_command": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "description": "argv lancé à la place de command quand la source est un SBOM (entrée « sbom », re-corrélation de la 0.5, contrat 16) : le runner écrit le CycloneDX dans /src/sbom.cdx.json (lecture seule). Sans ce champ, le module est ignoré (skipped) pour une source SBOM."
+        },
         "severity_map": {
           "type": "object",
           "additionalProperties": {
