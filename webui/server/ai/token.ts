@@ -46,8 +46,15 @@ export function consoleTokenStore(keyFile?: string): TokenStore {
       )
       return id
     },
-    read: (db, id) => readWithKey(db, id, () => loadSecretKey(path())),
+    // Lecture stricte : une lecture ne crée jamais de clé (elle ne déchiffrerait rien).
+    read: (db, id) => readWithKey(db, id, () => strictKey(path())),
   }
+}
+
+async function strictKey(path: string): Promise<Buffer> {
+  const buf = await readFile(path).catch(() => Buffer.alloc(0))
+  if (buf.length !== 32) throw new SecretError('E_SECRET_KEY')
+  return buf
 }
 
 /** Magasin de scanoria-ai : lecture seule, clé copiée dans le répertoire d'exécution (jamais créée). */
@@ -56,11 +63,7 @@ export function runtimeTokenStore(runtimeDir: string): TokenStore {
     save: async () => {
       throw new SecretError('E_SECRET_KEY')
     },
-    read: (db, id) => readWithKey(db, id, async () => {
-      const buf = await readFile(join(runtimeDir, RUNTIME_KEY_NAME)).catch(() => Buffer.alloc(0))
-      if (buf.length !== 32) throw new SecretError('E_SECRET_KEY')
-      return buf
-    }),
+    read: (db, id) => readWithKey(db, id, () => strictKey(join(runtimeDir, RUNTIME_KEY_NAME))),
   }
 }
 

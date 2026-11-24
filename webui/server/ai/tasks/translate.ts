@@ -46,10 +46,13 @@ export const translateRule: TaskDefinition<TranslateInput, TranslateOutput> = {
     const m = RULE_KEY_RE.exec(ctx.subjectId)
     if (!m) return null
     const [, tool, , ruleId] = m
-    // Le titre le plus fréquent de la règle, sur les projets qui acceptent l'IA seulement.
+    // Le titre est la description de la règle fournie par l'outil (SARIF
+    // shortDescription, description de l'avis) : une métadonnée de règle,
+    // seule donnée qu'une fonction transverse peut envoyer (CLAUDE.md § 3.5),
+    // jamais du code. Le plus fréquent, sur les projets qui acceptent l'IA.
     const { rows } = await db.query<{ title: string }>(
       `SELECT f.title FROM findings f JOIN projects p ON p.id = f.project_id
-        WHERE f.tool = $1 AND f.rule_id = $2 AND NOT p.ai_opt_out AND p.archived_at IS NULL AND f.category <> 'secrets'
+        WHERE f.tool = $1 AND regexp_replace(f.rule_id, '\\s+', '_', 'g') = $2 AND NOT p.ai_opt_out AND p.archived_at IS NULL AND f.category <> 'secrets'
         GROUP BY f.title ORDER BY count(*) DESC, f.title LIMIT 1`,
       [tool, ruleId],
     )

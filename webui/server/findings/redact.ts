@@ -35,8 +35,16 @@ export function maskToken(type: string, length: number): string {
 /** Longueur maximale traitée ; au-delà, le texte est tronqué. */
 export const MAX_REDACT = 8000
 
-/** Masques déjà posés, dans les deux présentations : jamais remasqués (idempotence). */
-const MASK_RE = /\[secret masqué : [a-z0-9-]+, longueur [0-9]+\]|\[REDACTED [^\]\n]{1,80}\]/g
+/** Masque des deux présentations, en tête de chaîne. */
+const MASK_SRC = String.raw`\[secret masqué : [a-z0-9-]{1,40}, longueur [0-9]{1,6}\]|\[REDACTED type=[a-z0-9-]{1,40} len=[0-9]{1,6} charset=[A-Za-z0-9,-]{1,40}\]`
+const MASK_AT_RE = new RegExp(`^(?:${MASK_SRC})(?=$|[\\s"'\`,;)}\\]<>])`)
+/** Masque immédiatement suivi d'une valeur (pas d'un « @ », « : » ou « / » d'URL) : cette valeur est masquée. */
+const AFTER_MASK_RE = new RegExp(`(${MASK_SRC})([A-Za-z0-9_+~-][^\\s"'\`,;<>\u0000]{0,4095})`, 'g')
+
+/** Vrai si un masque complet, suivi d'une fin de valeur, commence à cette position. */
+function isMaskAt(text: string, at: number): boolean {
+  return MASK_AT_RE.test(text.slice(at, at + 200))
+}
 
 // Motifs construits par morceaux : aucun ne doit ressembler lui-même à un secret.
 const PEM_BEGIN = '-----BEGIN'
@@ -45,8 +53,11 @@ const KEY_MARK = 'PRIVATE KEY( BLOCK)?-----'
 interface Pattern {
   type: string
   re: RegExp
-  /** 1 : le groupe 1 est un préfixe conservé, le groupe 2 la valeur masquée. */
-  group?: 1
+  /**
+   * 1 : le groupe 1 est un préfixe conservé, le groupe 2 la valeur masquée ;
+   * 2 : groupe 1 préfixe (guillemet ouvrant compris), groupe 2 le guillemet, groupe 3 la valeur.
+   */
+  group?: 1 | 2
 }
 
 // Toutes les expressions sont linéaires (aucune répétition imbriquée, espaces bornés).
@@ -61,8 +72,16 @@ const PATTERNS: Pattern[] = [
   { type: 'scanoria-token', re: /\bscn_[A-Za-z0-9]{8,255}\b/g },
   { type: 'api-key', re: /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,255}\b/g },
   // Identifiants dans une URL : seul le mot de passe est masqué.
+  // Le mot de passe va jusqu'au DERNIER « @ » avant l'hôte (un « @ » peut y figurer).
   // eslint-disable-next-line no-control-regex
-  { type: 'url-password', re: /(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@"'<>]{1,256}:)([^\s@/"'<>\u0000]{1,256})(?=@)/gi, group: 1 },
+  { type: 'url-password', re: /(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@"'<>]{1,256}:)([^\s/"'<>\u0000]{1,256})(?=@[^\s@/"'<>\u0000]{1,253}(?:[/:?#\s"'<>]|$))/gi, group: 1 },
+  // Affectation dont la valeur est entre guillemets : tout jusqu'au guillemet fermant, espaces compris.
+  {
+    type: 'assignment',
+    // eslint-disable-next-line no-control-regex
+    re: /(\b[A-Za-z0-9_.-]{0,64}?(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|client[_-]?secret|credentials?|auth)[A-Za-z0-9_.-]{0,64}["']?[ \t]{0,8}(?::=|=>|[:=])[ \t]{0,8}(["'`]))((?:(?!\2)[^\n\u0000]){3,4096})(?=\2)/gi,
+    group: 2,
+  },
   // Affectation « clé = valeur » dont le nom évoque un secret (suffixe permis : password_hash = …).
   {
     type: 'assignment',
@@ -130,12 +149,17 @@ export function maskSecrets(raw: string, opts: EngineOptions = {}): RedactResult
   const found: SecretShape[] = []
   // Taille bornée avant masquage : coût linéaire garanti.
   const input = max !== null && raw.length > max ? `${raw.slice(0, max)}…` : raw
-  // Les masques déjà posés sont protégés (idempotence).
+  // Un masque déjà présent dans l'entrée n'est PAS mis à l'abri en bloc : il
+  // pourrait être un faux masque placé pour cacher le secret collé à lui.
+  // Seule une valeur d'affectation qui est exactement un masque, suivi d'une
+  // fin de valeur, est laissée telle quelle (idempotence) ; ce qui est collé
+  // à un masque est masqué.
   const kept: string[] = []
   // eslint-disable-next-line no-control-regex
-  let text = input.replace(/\u0000/g, '').replace(MASK_RE, (m) => {
-    kept.push(m)
-    return `\u0000${kept.length - 1}\u0000`
+  let text = input.replace(/\u0000/g, '').replace(AFTER_MASK_RE, (_m, mask: string, tail: string) => {
+    found.push(secretShape(tail, 'after-mask'))
+    kept.push(format('after-mask', tail))
+    return `${mask}\u0000${kept.length - 1}\u0000`
   })
   // Chaque masque posé est mis à l'abri : un motif suivant ne le retouche pas.
   const hide = (type: string, m: string) => {
@@ -144,9 +168,13 @@ export function maskSecrets(raw: string, opts: EngineOptions = {}): RedactResult
     return `\u0000${kept.length - 1}\u0000`
   }
   for (const p of PATTERNS) {
-    text = p.group
-      ? text.replace(p.re, (_m, prefix: string, value: string) => `${prefix}${hide(p.type, value)}`)
-      : text.replace(p.re, m => hide(p.type, m))
+    text = p.group === 2
+      ? text.replace(p.re, (m, prefix: string, _q: string, value: string, at: number, all: string) =>
+          (isMaskAt(all, at + prefix.length) ? m : `${prefix}${hide(p.type, value)}`))
+      : p.group
+        ? text.replace(p.re, (m, prefix: string, value: string, at: number, all: string) =>
+            (isMaskAt(all, at + prefix.length) ? m : `${prefix}${hide(p.type, value)}`))
+        : text.replace(p.re, m => hide(p.type, m))
   }
   if (opts.aggressive) text = text.replace(CANDIDATE_RE, m => (looksRandom(m) ? hide('high-entropy', m) : m))
   // eslint-disable-next-line no-control-regex

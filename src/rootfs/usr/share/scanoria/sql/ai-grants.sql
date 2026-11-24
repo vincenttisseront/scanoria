@@ -46,7 +46,10 @@ GRANT SELECT (scan_id, module_id, module_version, status, error_class, attempts,
 GRANT SELECT (id, kind, secret_enc) ON credentials TO "scanoria-ai";
 
 -- Écritures : tables ai_* seulement.
-GRANT SELECT, INSERT ON ai_tasks TO "scanoria-ai";
+GRANT SELECT ON ai_tasks TO "scanoria-ai";
+-- Insertion limitée aux bancs d'essai qu'il se planifie : statut, sortie,
+-- projet et contexte prennent leur valeur par défaut (aucune sortie forgée).
+GRANT INSERT (kind, subject_type, subject_id, priority) ON ai_tasks TO "scanoria-ai";
 -- Mise à jour limitée à l'état d'exécution : ni le sujet, ni le projet, ni la priorité.
 GRANT UPDATE (status, output, error, model, model_digest, input_hash, attempts, started_at, finished_at) ON ai_tasks TO "scanoria-ai";
 GRANT SELECT, INSERT, DELETE ON ai_cache TO "scanoria-ai";

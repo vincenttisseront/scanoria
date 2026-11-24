@@ -30,13 +30,21 @@ export default defineEventHandler(async (event) => {
     ...(hasToken ? { token: true } : {}),
     ...(body.ca_pem ? { ca_pem: body.ca_pem } : {}),
   }
-  // La demande est déposée d'abord : un refus de dépôt ne laisse aucun jeton modifié.
-  const submitted = await submitHelperAction(event, 'set-ai-endpoint', params, {
-    auditDetails: { url: body.url, token: hasToken, ca: Boolean(body.ca_pem), confirmed: true },
-  })
-  if (typeof body.token === 'string') {
-    const id = await saveToken(pool, body.token, auth.user.id)
-    await saveSetting(pool, 'ai.token_credential_id', id, auth.user.id)
+  // Un nouveau jeton est scellé AVANT le dépôt : la clé dédiée existe quand le
+  // helper la copie pour scanoria-ai. Si le dépôt est refusé, il est retiré.
+  const fresh = typeof body.token === 'string' ? await saveToken(pool, body.token, auth.user.id) : null
+  let submitted
+  try {
+    submitted = await submitHelperAction(event, 'set-ai-endpoint', params, {
+      auditDetails: { url: body.url, token: hasToken, ca: Boolean(body.ca_pem), confirmed: true },
+    })
+  }
+  catch (err) {
+    await deleteToken(pool, fresh)
+    throw err
+  }
+  if (fresh) {
+    await saveSetting(pool, 'ai.token_credential_id', fresh, auth.user.id)
     await deleteToken(pool, previous)
   }
   else if (body.token === null) {
