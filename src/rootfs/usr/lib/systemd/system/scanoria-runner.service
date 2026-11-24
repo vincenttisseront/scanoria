@@ -17,7 +17,28 @@ Restart=on-failure
 RestartSec=5
 UMask=0027
 PrivateTmp=yes
-ProtectHome=read-only
+# Durcissement (0.4) compatible avec Podman root : arborescence en lecture
+# seule sauf la file d'analyses, le stockage et la configuration réseau de
+# Podman et /run (état de Podman, netavark, crun, état du runner). Une seule
+# entrée ReadWritePaths par arborescence : deux entrées imbriquées sont deux
+# montages, et un rename entre elles échoue en EXDEV (#29). Les cgroups et
+# /proc/sys restent inscriptibles : Podman crée les cgroups des conteneurs et
+# netavark active le routage de ses réseaux. Pas de ProtectHostname : crun
+# donne son propre nom à chaque conteneur (sethostname refusé sinon). b16-live
+# lance un conteneur confiné sous ces mêmes réglages.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/scanoria/scans
+ReadWritePaths=/var/lib/containers
+ReadWritePaths=/etc/containers/networks
+ReadWritePaths=/run
+ProtectHome=yes
+NoNewPrivileges=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectControlGroups=no
+RestrictSUIDSGID=yes
+LockPersonality=yes
 # Les conteneurs d'analyse en cours sont arrêtés avec le service ; les tâches
 # interrompues sont publiées en erreur infra au redémarrage (E_RUNNER_RESTARTED).
 KillMode=mixed

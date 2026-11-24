@@ -59,6 +59,8 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/catalog/modules/{id}/state': { post: { summary: 'Request set-module-state (enable or disable)', role: 'admin', body: 'ModuleState', status: 202 } },
   '/api/catalog/modules/{id}/update': { post: { summary: 'Request update-module (latest version by default)', role: 'admin', body: 'ModuleUpdate', status: 202 } },
   '/api/catalog/modules/{id}/uninstall': { post: { summary: 'Request uninstall-module (409 E_DEPENDENTS when another module needs it)', role: 'admin', body: 'ModuleUninstall', status: 202 } },
+  '/api/catalog/modules/{id}/backup': { post: { summary: 'Request backup-module: database and volumes of a service or runner module (409 E_NOT_PERMANENT otherwise)', role: 'admin', body: 'ModuleBackup', status: 202 } },
+  '/api/catalog/modules/{id}/restore': { post: { summary: 'Request restore-module from a listed backup of the installed version (404 E_BACKUP_NOT_FOUND, 409 E_BACKUP_INVALID)', role: 'admin', body: 'ModuleRestore', status: 202 } },
   '/api/ai/status': { get: { summary: 'AI connector (external Ollama): pinned address, models chosen per task and why, testbed, circuit breaker, latency', role: 'operator' } },
   '/api/ai/calls': { get: { summary: 'AI call log (metadata only, never content)', role: 'operator' } },
   '/api/ai/connector': { post: { summary: 'Request set-ai-endpoint: enable or change the Ollama connector (confirmed: true required)', role: 'admin', body: 'AiConnector', status: 202 } },
@@ -290,6 +292,8 @@ export default defineEventHandler(async () => {
         ModuleState: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } },
         ModuleUpdate: { type: 'object', additionalProperties: false, properties: { version: { type: 'string' } } },
         ModuleUninstall: { type: 'object', additionalProperties: false, required: ['keep_data'], properties: { keep_data: { type: 'boolean' } } },
+        ModuleBackup: { type: 'object', additionalProperties: false, properties: {} },
+        ModuleRestore: { type: 'object', additionalProperties: false, required: ['backup'], properties: { backup: { type: 'string', pattern: '^[0-9]{8}T[0-9]{6}Z(-[0-9])?$' } } },
         GateCreate: {
           type: 'object', additionalProperties: false, required: ['slug'],
           properties: { slug: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }, copy_from: { type: 'string', format: 'uuid' } },

@@ -61,13 +61,13 @@ convertisseur n'est nécessaire.
 | `hostname` | `service` | libellé DNS (`sonarqube` → `sonarqube.<appliance>`) ; `null` sinon |
 | `requires` | oui | `modules` (ids non `feed`), `feeds` (ids `feed`), `appliance` (`>=X.Y.Z`) — G1 |
 | `conflicts` | non | ids incompatibles — G1 |
-| `needs` | non | `sysctl` (posés et retirés par le module), `postgres` (base dédiée) |
+| `needs` | non | `sysctl` (liste blanche, posés et retirés par le module, plus `nofile`/`nproc` pour un module permanent), `postgres` (base dédiée, § 4.3) |
 | `options` | oui | schéma des paramètres (§ 3) — G3 |
 | `options_i18n` | non | traductions des titres et descriptions d'options |
 | `scan` | `scanner` | exécution (§ 4) |
 | `outputs` | `scanner` | sorties déclarées : `sarif: {path, version: "2.1.0"}` et/ou `cyclonedx: {path, version: "1.x"}` — G2 |
 | `testbed` | `scanner` | banc d'essai (§ 5) — F12 |
-| `service` | `service` | `{port, health_path, units}` |
+| `service` | `service` | `{port, health_path, units, volumes, env, secrets, backup}` (§ 4.3) |
 | `feed` | `feed` | `{format, mount, max_age_days, source: {kind: oci\|https, ref}, schedule}` |
 | `health` | non | commande de santé dans l'image |
 | `upgrade` | non | `{policy: on-demand}` : mise à jour détectée, appliquée à la demande, sauvegarde préalable |
@@ -210,6 +210,66 @@ sur le port 443 (proxy inverse, forge installée comme module). Une tâche dont
 l'identifiant est déjà en cours ou déjà publié est écartée sans résultat. Au
 démarrage, l'ensemble nftables `allow4` est vidé et les conteneurs
 `scanoria-fetch-*` / `scanoria-scan-*` orphelins sont retirés.
+
+### 4.3 Modules permanents : `service` et `runner` (0.4)
+
+Le service root prend tout en charge ; le manifeste ne déclare que le besoin.
+
+- **Réseaux.** Chaque module permanent reçoit un sous-réseau /24 du bassin
+  `10.90.0.0/16` (`/usr/share/scanoria/modules/services-network.conf`) :
+  réseau `scanoria-mod-<id>` (passerelle `10.90.N.1`, joignable par le proxy
+  et par PostgreSQL) et réseau **interne** `scanoria-mod-<id>_scan`, sans
+  sortie, pour dialoguer avec les conteneurs d'analyse.
+- **Base PostgreSQL** (`needs.postgres: true`). Rôle et base `mod_<id>`
+  (tirets remplacés par `_`), propriétaire unique, `PUBLIC` révoqué. Accès
+  ouvert seulement depuis le sous-réseau du module
+  (`/etc/postgresql/16/main/scanoria-modules-hba.conf`, inclus par
+  `pg_hba.conf`, `scram-sha-256`), et par nftables du bassin vers le port 5432.
+  PostgreSQL écoute alors sur toutes les interfaces
+  (`conf.d/scanoria_modules.conf`) : il redémarre une seule fois, au premier
+  module qui en a besoin, puis un simple rechargement suffit.
+- **Variables** (`service.env`) : non secrètes, gabarits `{db_host}` (la
+  passerelle), `{db_port}`, `{db_name}`, `{db_user}`, `{db_url_jdbc}`,
+  `{hostname}`, `{host_port}`, `{opt.<nom>}`. `{db_password}` est refusé.
+- **Secrets** (`service.secrets`) : valeurs aléatoires générées par le helper,
+  jamais par la console ni le catalogue, fichiers root `0600` dans
+  `/var/lib/scanoria/modules/<id>/secrets/`, transmis par secret Podman
+  `scanoria-mod-<id>-<nom>` : monté sur `/run/secrets/<nom>`, ou, avec
+  `env`, injecté **seulement** dans cette variable (pas de montage).
+  `db-password` est créé d'office pour un module `needs.postgres`.
+- **Réglages noyau.** `vm.max_map_count`, `fs.file-max`, `fs.inotify.*`,
+  `net.core.somaxconn` : un fichier `/etc/sysctl.d/60-scanoria-<id>.conf`
+  par module, valeur = maximum des modules installés et de la valeur
+  courante (jamais abaissée) ; `nofile`/`nproc` deviennent des `Ulimit=`
+  de l'unité. Toute autre clé est refusée (`E_SERVICE_RESOURCES`).
+- **Ressources.** Un module `service` trop gros pour la machine est refusé
+  avec `E_SERVICE_RESOURCES` (ressource, besoin, disponible, modules déjà
+  installés).
+- **Préparation** (`provision`). Après la santé, à l'installation et à
+  chaque activation, le helper appelle le crochet `provision.run(m, info)`
+  du module s'il existe (`{host_port, secrets_dir, network, timeout,
+  phase}`) : création d'un jeton, branchement OIDC… Son échec annule
+  l'installation.
+- **Sauvegarde** (`service.backup`, sinon tous les volumes). Dans
+  `/var/lib/scanoria/backups/modules/<id>/<horodatage>/` : `db.dump`
+  (`pg_dump -Fc`), `volume-<nom>.tar` (module arrêté le temps de la copie)
+  et `manifest.json` écrit en dernier (version, image, motif, empreintes
+  SHA-256). Les 3 dernières sont gardées ; une sauvegarde incomplète est
+  écartée. Faite d'office avant chaque mise à jour (motif `update`) et à la
+  demande depuis la console (`backup-module`).
+- **Restauration** (`restore-module`, confirmée dans une modale). Le helper
+  revérifie le manifeste et chaque empreinte, refuse une sauvegarde d'une
+  autre version (`E_BACKUP_INVALID`), arrête le module, recrée la base et
+  les volumes, puis attend la santé.
+- **Mise à jour.** Sauvegarde, nouvelle image, santé ; en cas d'échec,
+  restauration de la sauvegarde et retour aux unités précédentes. Le journal
+  des étapes (`backup`, `pulled`, `failed:…`, `restored`, `previous`) est
+  rendu dans le résultat de la demande.
+- **Consommation** (`modules_usage` de `state.json`, F14) : mémoire et CPU
+  lus dans le cgroup de l'unité, disque = volumes + base (recalculé toutes
+  les 15 minutes). Le CPU est `null` au premier relevé.
+- **Désinstallation** sans conservation des données : base, rôle, secrets,
+  volumes, réglages noyau et sauvegardes sont supprimés.
 
 ## 5. Banc d'essai (F12)
 

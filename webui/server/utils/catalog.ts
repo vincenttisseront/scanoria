@@ -10,7 +10,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
-import { MODULE_ID_RE, MODULE_VERSION_RE, TIMESTAMP_RE } from '#shared/schemas'
+import { BACKUP_ID_RE, MODULE_ID_RE, MODULE_VERSION_RE, TIMESTAMP_RE } from '#shared/schemas'
 
 export const MODULE_TYPES = ['scanner', 'service', 'feed', 'runner'] as const
 export const RESTRICTIONS = ['none', 'private-code-forbidden', 'no-redistribution', 'other'] as const
@@ -107,6 +107,16 @@ const installedSchema = z.object({
   testbed: testbedSchema,
   route: z.object({ hostname: text(253).nullable(), url: httpsUrl.nullable() }).nullable().optional(),
   last_error: z.union([text(2000), z.object({ code: text(64).optional(), message: text(2000).optional() })]).nullable().optional(),
+  // Modules permanents (0.4) : sauvegardes complètes, la plus récente en premier.
+  backups: z.array(z.object({
+    id: z.string().regex(BACKUP_ID_RE),
+    created_at: z.string().regex(TIMESTAMP_RE),
+    module_version: z.string().regex(MODULE_VERSION_RE),
+    reason: z.enum(['manual', 'update', 'scheduled']),
+    size_bytes: z.number().int().min(0),
+    database: z.boolean(),
+    volumes: z.array(text(31)).max(32),
+  })).max(20).optional(),
 })
 export type InstalledModule = z.infer<typeof installedSchema>
 

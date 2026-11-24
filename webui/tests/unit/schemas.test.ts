@@ -172,6 +172,14 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
       { enabled: true, url: 'https://ollama.exemple.test', model: 'x' },
     ],
   },
+  'backup-module': {
+    valid: [{ id: 'sonarqube' }],
+    invalid: [{}, { id: '../x' }, { id: 'sonarqube', stop: true }],
+  },
+  'restore-module': {
+    valid: [{ id: 'sonarqube', backup: '20261123T020000Z' }, { id: 'sonarqube', backup: '20261123T020000Z-1' }],
+    invalid: [{ id: 'sonarqube' }, { id: 'sonarqube', backup: '../20261123T020000Z' }, { id: 'sonarqube', backup: '20261123T020000Z-12' }, { id: 'sonarqube', backup: '20261123T020000Z', force: true }],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {
