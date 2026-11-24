@@ -7,14 +7,14 @@
 // Comportements simulés : pagination, 401, 404, 429, réponse énorme,
 // redirection vers un autre hôte, arbre de dépôt et fichiers.
 
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomInt } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { setForgeTransport } from '../../server/forges/http'
 
 /** Jeton de test manifestement faux, généré à l'exécution (aucun motif connu). */
 export function fakeToken(): string {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-  return `scn_${[...randomBytes(40)].map(b => alphabet[b % alphabet.length]).join('')}`
+  return `scn_${Array.from({ length: 40 }, () => alphabet[randomInt(alphabet.length)]).join('')}`
 }
 
 export interface FakeRepo {
