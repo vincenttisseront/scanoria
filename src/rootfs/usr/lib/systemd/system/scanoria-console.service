@@ -25,9 +25,13 @@ TimeoutStartSec=300
 UMask=0077
 
 # Durcissement : lecture seule partout sauf les répertoires propres à la console.
+# Chaque entrée de ReadWritePaths devient un point de montage distinct : la demande
+# est écrite dans requests/tmp puis renommée dans requests/incoming, ce que le noyau
+# refuse entre deux montages (EXDEV). On ouvre donc le parent requests/ ; les droits
+# Unix (tmpfiles.d) laissent work/, done/ et failed/ hors d'atteinte de la console.
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/scanoria/requests/tmp /var/lib/scanoria/requests/incoming
+ReadWritePaths=/var/lib/scanoria/requests
 ReadWritePaths=/var/lib/scanoria/uploads /var/lib/scanoria/console /var/lib/scanoria/bootstrap
 ProtectHome=yes
 PrivateTmp=yes

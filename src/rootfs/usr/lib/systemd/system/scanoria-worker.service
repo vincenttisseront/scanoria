@@ -31,7 +31,9 @@ UMask=0077
 # tâches (jobs/tmp, jobs/incoming) et dans les journaux copiés (console/).
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/scanoria/scans/jobs/tmp /var/lib/scanoria/scans/jobs/incoming
+# Un seul montage pour jobs/ : le renommage tmp/ → incoming/ échouerait (EXDEV)
+# entre deux entrées distinctes. Les droits Unix protègent jobs/work/.
+ReadWritePaths=/var/lib/scanoria/scans/jobs
 ReadWritePaths=/var/lib/scanoria/console
 ProtectHome=yes
 PrivateTmp=yes
