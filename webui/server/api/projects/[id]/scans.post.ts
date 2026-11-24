@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
     const p = await pool.query('SELECT 1 FROM profiles WHERE slug = $1', [body.profile])
     if (!p.rowCount) throw apiError(400, 'E_VALIDATION', { issues: [{ path: 'profile', code: 'unknown_profile' }] })
   }
-  let res: { scanId: string, number: number }
+  let res: { scanId: string, number: number, merged?: boolean }
   try {
     res = await enqueueScan(pool, {
       projectId,
@@ -56,5 +56,5 @@ export default defineEventHandler(async (event) => {
     details: { project: project.slug, ref: body.ref, profile: body.profile ?? null, number: res.number, via: caller.kind },
   })
   setResponseStatus(event, 202)
-  return { scan_id: res.scanId, number: res.number, url: `/scans/${res.scanId}` }
+  return { scan_id: res.scanId, number: res.number, url: `/scans/${res.scanId}`, merged: res.merged ?? false }
 })

@@ -77,13 +77,22 @@ const OPS: Record<string, Record<string, Op>> = {
   },
   '/api/projects/{id}/tokens/{token}': { delete: { summary: 'Revoke a project API token', role: 'operator' } },
   '/api/projects/{id}/scans': {
-    post: { summary: 'Queue a scan {ref, profile?} → 202 {scan_id, number, url}; API token of the project (trigger api) or operator session', role: 'operator', body: 'ScanCreate', status: 202, token: true },
+    post: { summary: 'Queue a scan {ref, profile?} → 202 {scan_id, number, url}; API token of the project (trigger api) or operator session', role: 'operator', body: 'ProjectScanCreate', status: 202, token: true },
   },
   '/api/scans/{id}/verdict': {
     get: { summary: 'Scan state, verdict and ordered reasons (VerdictDetails), optional ai_summary (I9); ?locale=fr|en', role: 'viewer', token: true },
   },
   '/api/badges/{name}': { get: { summary: 'Latest verdict badge, /api/badges/<project slug>.svg (404 unless enabled for the project)', role: 'public' } },
   '/api/badges/projects/{id}': { put: { summary: 'Enable or disable the public badge of a project (disabled by default)', role: 'operator', body: 'BadgeUpdate' } },
+  '/api/scans': {
+    get: { summary: 'Scan queue (status=active, in worker order) or history (filters: project, status, verdict, trigger; paginated)', role: 'viewer' },
+    post: { summary: 'Queue a manual scan {project_id, ref?, profile?}; 200 when merged into an identical queued scan', role: 'operator', body: 'ScanCreate', status: 202 },
+  },
+  '/api/scans/{id}': { get: { summary: 'Scan detail: status, frozen plan (G11), modules, coverage (G15), queue position, raw verdict', role: 'viewer' } },
+  '/api/scans/{id}/cancel': { post: { summary: 'Cancel a queued, dispatched or running scan (409 E_SCAN_STATE when finished)', role: 'operator' } },
+  '/api/scans/{id}/retry': { post: { summary: 'Queue a new scan of the same project, ref and profile', role: 'operator', status: 202 } },
+  '/api/scans/{id}/replay': { post: { summary: 'Replay identically (G11): same commit and frozen plan', role: 'operator', status: 202 } },
+  '/api/scans/{id}/modules/{module}/log': { get: { summary: 'Full module log (text/plain, G20)', role: 'viewer' } },
   '/api/findings': { get: { summary: 'Unified findings (filters: project_id, scan_id, tool, severity, category, status, is_new, secret, malicious, q; paginated)', role: 'viewer' } },
   '/api/findings/summary': { get: { summary: 'Open findings per project and severity, secrets to revoke, malicious packages', role: 'viewer' } },
   '/api/findings/{id}': { get: { summary: 'Finding detail (masked snippet, scans where it appears); never a secret value', role: 'viewer' } },
@@ -219,6 +228,14 @@ export default defineEventHandler(async () => {
             accept_licenses: { type: 'array', maxItems: 32, items: { type: 'string' }, description: 'Modules whose license restrictions are explicitly accepted' },
           },
         },
+        ScanCreate: {
+          type: 'object', additionalProperties: false, required: ['project_id'],
+          properties: {
+            project_id: { type: 'string', format: 'uuid' },
+            ref: { type: 'string', maxLength: 255, description: 'Default branch of the project when absent' },
+            profile: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,62}$', description: 'Project profile when absent' },
+          },
+        },
         ModuleState: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } },
         ModuleUpdate: { type: 'object', additionalProperties: false, properties: { version: { type: 'string' } } },
         ModuleUninstall: { type: 'object', additionalProperties: false, required: ['keep_data'], properties: { keep_data: { type: 'boolean' } } },
@@ -248,7 +265,7 @@ export default defineEventHandler(async () => {
           type: 'object', additionalProperties: false, required: ['name'],
           properties: { name: { type: 'string', minLength: 1, maxLength: 100 }, expires_in_days: { type: ['integer', 'null'], minimum: 1, maximum: 3650 } },
         },
-        ScanCreate: {
+        ProjectScanCreate: {
           type: 'object', additionalProperties: false, required: ['ref'],
           properties: { ref: { type: 'string', minLength: 1, maxLength: 255 }, profile: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,62}$' } },
         },

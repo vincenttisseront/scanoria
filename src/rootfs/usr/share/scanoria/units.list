@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Unités activées par le premier démarrage, puis par chaque mise à jour ou
+# retour arrière (selfupdate.sync_units) : une unité ajoutée par une version
+# est activée sur les appliances déjà installées. Les services listés sont
+# redémarrés après une mise à jour pour charger le nouveau code. nginx, le
+# helper et la console sont gérés à part. Fichier partagé : ajout seulement.
+scanoria-firewall.service
+scanoria-state.timer
+scanoria-update-check.timer
+scanoria-update-apply.timer
+scanoria-cert-renew.timer
+scanoria-dns-check.timer
+scanoria-dns-check.path
+scanoria-catalog-refresh.timer
+scanoria-runner.service
+scanoria-worker.service

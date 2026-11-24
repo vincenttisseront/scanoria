@@ -212,6 +212,10 @@ expect "install-local refusé si current existe → E_PRECONDITION" "$(code "$("
 
 R2="$TMP/rel-0.2.0"; mkrel 0.2.0 "$R2"
 echo '{"status":"ok","version":"0.2.0","db":"ok"}' > "$TMP/health.json"
+# Unités à activer après la mise à jour (appliance déjà mise en service).
+touch "$T/var/lib/scanoria/firstboot.done"
+printf '# commentaire\nscanoria-runner.service\nscanoria-state.timer\n../evil.service\nnginx.service\n' \
+	> "$T/usr/share/scanoria/units.list"
 id=$(upload "$R2")
 expect "mise à jour 0.1.0 → 0.2.0 par téléversement → OK" "$(apply_upload "$id")" OK
 expect "liens après mise à jour" "$(current) $(previous)" "releases/0.2.0 releases/0.1.0"
@@ -221,6 +225,12 @@ expect "rootfs de 0.2.0 déployé" "$(tail -n 1 "$T/usr/sbin/scanoria-dummy")" "
 [[ -f "$T/var/lib/scanoria/backups/pre-update/0.1.0.dump" ]] && ok "sauvegarde de base avant mise à jour" || ko "sauvegarde"
 [[ ! -e "$T/var/lib/scanoria/uploads/$id" ]] && ok "téléversement nettoyé" || ko "téléversement non nettoyé"
 grep -qF '["systemctl","stop","scanoria-console.service"]' "$T/test-commands.log" && ok "console arrêtée pendant le déploiement" || ko "arrêt console"
+grep -qF '["systemctl","enable","--now","scanoria-runner.service"]' "$T/test-commands.log" \
+	&& grep -qF '["systemctl","try-restart","scanoria-runner.service"]' "$T/test-commands.log" \
+	&& grep -qF '["systemctl","enable","--now","scanoria-state.timer"]' "$T/test-commands.log" \
+	&& ok "unités de units.list activées, services redémarrés" || ko "activation des unités"
+grep -qF '"try-restart","scanoria-state.timer"' "$T/test-commands.log" && ko "timer redémarré" || ok "timer non redémarré"
+grep -qE 'evil|"nginx.service"' "$T/test-commands.log" && ko "unité hors liste activée" || ok "noms d'unités invalides ignorés"
 
 R3="$TMP/rel-0.1.5"; mkrel 0.1.5 "$R3"
 expect "rétrogradation 0.2.0 → 0.1.5 → E_VERSION" "$(apply_upload "$(upload "$R3")")" E_VERSION
