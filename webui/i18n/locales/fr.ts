@@ -454,7 +454,6 @@ export default {
     title: 'Catalogue',
     refresh: 'Actualiser le catalogue',
     dnsLink: 'État DNS',
-    indexInfo: 'Catalogue n° {version}, publié le {date}.',
     indexRejected: '{count} entrée(s) mal formée(s) écartée(s)',
     indexMissing: 'Catalogue pas encore disponible',
     indexMissingHelp: 'Le service système n’a pas encore téléchargé ni vérifié l’index signé du catalogue. Il le fait automatiquement ; un administrateur peut aussi cliquer sur « Actualiser le catalogue ».',

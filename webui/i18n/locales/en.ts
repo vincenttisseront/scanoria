@@ -454,7 +454,6 @@ export default {
     title: 'Catalog',
     refresh: 'Refresh catalog',
     dnsLink: 'DNS status',
-    indexInfo: 'Catalog no. {version}, published on {date}.',
     indexRejected: '{count} malformed entry(ies) discarded',
     indexMissing: 'Catalog not available yet',
     indexMissingHelp: 'The system service has not downloaded and verified the signed catalog index yet. It does so automatically; an administrator can also click “Refresh catalog”.',

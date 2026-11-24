@@ -4,13 +4,13 @@ Copyright (C) 2026 Vincent Tisseront
 
 Catalogue des modules : sélection conseillée au premier accès (§ 5.3), packs
 avec contrôle global des ressources (F11), liste des modules (licence,
-restrictions, ressources, compatibilité), opérations en cours et graphe des
-dépendances (G1).
+restrictions, ressources, compatibilité), opérations en cours (l'historique
+est dans le journal d'audit) et graphe des dépendances (G1).
 -->
 
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import type { CatalogEntry, CatalogPack } from '~/composables/useCatalog'
+import { isRunningOperation, type CatalogEntry, type CatalogPack, type ModuleOperation } from '~/composables/useCatalog'
 
 const { t } = useI18n()
 useHead({ title: computed(() => t('catalog.title')) })
@@ -71,6 +71,35 @@ const showRecommended = computed(() => !!data.value?.recommended.ids.length
   && (data.value.recommended.first_access || !hideRecommended.value))
 const names = computed(() => Object.fromEntries((data.value?.modules ?? []).map(m => [m.id, m.name])))
 const installedIds = computed(() => (data.value?.modules ?? []).filter(m => m.installed).map(m => m.id))
+
+// --- Opérations : seules celles en cours sont affichées ; l'historique est
+// dans le journal d'audit. Un échec est signalé par une notification : à
+// l'ouverture s'il date de moins d'une heure, puis dès qu'une opération
+// suivie pendant la visite échoue.
+const toast = useToast()
+const runningOperations = computed(() => (data.value?.operations ?? []).filter(isRunningOperation))
+const FAILURE_RECENT_MS = 3_600_000
+let seenOperations: Set<string> | null = null
+function notifyFailure(op: ModuleOperation) {
+  toast.add({
+    title: text.operationLabel(op),
+    description: op.message ? `${t('catalog.operations.failed')} · ${op.message}` : t('catalog.operations.failed'),
+    color: 'error',
+    icon: 'i-lucide-circle-x',
+  })
+}
+watch(() => data.value?.operations, (ops) => {
+  if (!ops) return
+  const finished = ops.filter(o => !isRunningOperation(o))
+  if (seenOperations === null) {
+    const last = [...finished].sort((a, b) => (b.finished_at ?? '').localeCompare(a.finished_at ?? ''))[0]
+    if (last?.result === 'failed' && Date.now() - Date.parse(last.finished_at!) < FAILURE_RECENT_MS) notifyFailure(last)
+  }
+  else {
+    for (const o of finished) if (o.result === 'failed' && !seenOperations.has(o.id)) notifyFailure(o)
+  }
+  seenOperations = new Set(finished.map(o => o.id))
+})
 
 // --- Filtres ---
 const search = ref('')
@@ -165,15 +194,13 @@ const packResourcesOk = (p: CatalogPack) => !p.plan || p.plan.checks.every(c => 
         :title="t('catalog.indexMissing')"
         :description="t('catalog.indexMissingHelp')"
       />
-      <p
-        v-else
-        class="text-sm text-muted"
-      >
-        {{ t('catalog.indexInfo', { version: data.index.version ?? '?', date: fmt.date(data.index.generated_at) }) }}
-        <template v-if="data.index.rejected">
-          · {{ t('catalog.indexRejected', { count: data.index.rejected }) }}
-        </template>
-      </p>
+      <UAlert
+        v-else-if="data.index.rejected"
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-triangle-alert"
+        :title="t('catalog.indexRejected', { count: data.index.rejected })"
+      />
       <UAlert
         v-if="!data.state_available"
         color="neutral"
@@ -238,17 +265,11 @@ const packResourcesOk = (p: CatalogPack) => !p.plan || p.plan.checks.every(c => 
         </p>
       </UCard>
 
-      <UCard v-if="data.operations.length">
-        <template #header>
-          <h2 class="font-semibold">
-            {{ t('catalog.operations.title') }}
-          </h2>
-        </template>
-        <ModuleOperations
-          :operations="data.operations"
-          :limit="5"
-        />
-      </UCard>
+      <ModuleOperations
+        v-if="runningOperations.length"
+        :operations="runningOperations"
+        data-running-operations
+      />
 
       <div
         v-if="data.packs.length"
