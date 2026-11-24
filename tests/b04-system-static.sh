@@ -92,6 +92,11 @@ grep -q '^NoNewPrivileges=yes' "$RF/usr/lib/systemd/system/scanoria-console.serv
 	&& grep -q '^ProtectSystem=strict' "$RF/usr/lib/systemd/system/scanoria-console.service" \
 	&& grep -q '^User=scanoria' "$RF/usr/lib/systemd/system/scanoria-console.service" \
 	&& ok "console : utilisateur scanoria, durcissement" || ko "console : durcissement"
+W="$RF/usr/lib/systemd/system/scanoria-worker.service"
+grep -q '^NoNewPrivileges=yes' "$W" && grep -q '^ProtectSystem=strict' "$W" && grep -q '^User=scanoria' "$W" \
+	&& grep -q '^PartOf=scanoria-console.service' "$W" && grep -q '^IPAddressDeny=any' "$W" \
+	&& grep -q '^Wants=scanoria-worker.service' "$RF/usr/lib/systemd/system/scanoria-console.service" \
+	&& ok "worker : utilisateur scanoria, durcissement, lié à la console" || ko "worker : durcissement"
 
 # --- 3. Pare-feu --------------------------------------------------------------------------
 T="$TMP/root"
@@ -145,7 +150,7 @@ from scanoria import schema
 assert schema.load("schemas", "selftest").valid(json.load(open(sys.argv[2])))' "$RF/usr/lib/scanoria/py" "$TMP/st.json"
 ids=$(jq -r '[.checks[].id] | join(" ")' "$TMP/st.json")
 for id in version.files layout.release perms.paths pubkey.present services.postgresql services.nginx \
-	services.console services.helper-path db.connect db.migrations console.health tls.cert-valid \
+	services.console services.helper-path worker.alive db.connect db.migrations console.health tls.cert-valid \
 	tls.cert-names tls.key-match tls.ca-present firewall.loaded requests.queue disk.free; do
 	[[ " $ids " == *" $id "* ]] && ok "selftest --quick : $id" || ko "selftest --quick : $id absent"
 done

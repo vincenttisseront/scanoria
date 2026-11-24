@@ -59,6 +59,15 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/catalog/modules/{id}/uninstall': { post: { summary: 'Request uninstall-module (409 E_DEPENDENTS when another module needs it)', role: 'admin', body: 'ModuleUninstall', status: 202 } },
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
+  '/api/scans': {
+    get: { summary: 'Scan queue (status=active, in worker order) or history (filters: project, status, verdict, trigger; paginated)', role: 'viewer' },
+    post: { summary: 'Queue a manual scan {project_id, ref?, profile?}; 200 when merged into an identical queued scan', role: 'operator', body: 'ScanCreate', status: 202 },
+  },
+  '/api/scans/{id}': { get: { summary: 'Scan detail: status, frozen plan (G11), modules, coverage (G15), queue position, raw verdict', role: 'viewer' } },
+  '/api/scans/{id}/cancel': { post: { summary: 'Cancel a queued, dispatched or running scan (409 E_SCAN_STATE when finished)', role: 'operator' } },
+  '/api/scans/{id}/retry': { post: { summary: 'Queue a new scan of the same project, ref and profile', role: 'operator', status: 202 } },
+  '/api/scans/{id}/replay': { post: { summary: 'Replay identically (G11): same commit and frozen plan', role: 'operator', status: 202 } },
+  '/api/scans/{id}/modules/{module}/log': { get: { summary: 'Full module log (text/plain, G20)', role: 'viewer' } },
   '/api/findings': { get: { summary: 'Unified findings (filters: project_id, scan_id, tool, severity, category, status, is_new, secret, malicious, q; paginated)', role: 'viewer' } },
   '/api/findings/summary': { get: { summary: 'Open findings per project and severity, secrets to revoke, malicious packages', role: 'viewer' } },
   '/api/findings/{id}': { get: { summary: 'Finding detail (masked snippet, scans where it appears); never a secret value', role: 'viewer' } },
@@ -190,6 +199,14 @@ export default defineEventHandler(async () => {
           properties: {
             ...PLAN_PROPERTIES,
             accept_licenses: { type: 'array', maxItems: 32, items: { type: 'string' }, description: 'Modules whose license restrictions are explicitly accepted' },
+          },
+        },
+        ScanCreate: {
+          type: 'object', additionalProperties: false, required: ['project_id'],
+          properties: {
+            project_id: { type: 'string', format: 'uuid' },
+            ref: { type: 'string', maxLength: 255, description: 'Default branch of the project when absent' },
+            profile: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,62}$', description: 'Project profile when absent' },
           },
         },
         ModuleState: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } },
