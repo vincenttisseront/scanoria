@@ -23,3 +23,10 @@ ALTER TABLE projects
     ADD COLUMN ssh_known_hosts text CHECK (ssh_known_hosts IS NULL OR length(ssh_known_hosts) BETWEEN 1 AND 16384),
     ADD COLUMN upload_id uuid,
     ADD COLUMN last_polled_at timestamptz;
+
+-- Chantier F : le rôle PostgreSQL de scanoria-ai (créé hors migration par
+-- son unité) ne lit que le jeton IA, jamais les jetons de forge. Le
+-- propriétaire (scanoria) contourne la sécurité par ligne : rien ne change
+-- pour la console.
+ALTER TABLE credentials ENABLE ROW LEVEL SECURITY;
+CREATE POLICY credentials_ai_token_read ON credentials FOR SELECT USING (kind = 'ai-token');
