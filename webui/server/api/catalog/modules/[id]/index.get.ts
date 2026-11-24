@@ -27,6 +27,8 @@ export default defineEventHandler(async (event) => {
     versions: (ctx.index?.modules ?? []).filter(m => m.id === id).map(m => m.version),
     installed: installed ?? null,
     update_available: updateAvailable(installed, latest),
+    // Licence de la version proposée : à accepter explicitement si elle a des restrictions.
+    update_license: updateAvailable(installed, latest) ? latest!.license : null,
     plan: latest && !installed ? compatibility(ctx, [id]) : null,
     dependents: dependentsOf(id, ctx),
     operations: ctx.operations.filter(o => o.module === id).slice(-10),

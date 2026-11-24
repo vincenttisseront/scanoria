@@ -200,8 +200,9 @@ export function compareVersions(a: string, b: string): number {
     const nx = /^[0-9]+$/.test(x) ? Number(x) : Number.NaN
     const ny = /^[0-9]+$/.test(y) ? Number(y) : Number.NaN
     if (!Number.isNaN(nx) && !Number.isNaN(ny)) return nx - ny
-    if (x === '') return -1
-    if (y === '') return 1
+    // Segment absent : 0 face à un nombre ; une version finale passe devant une pré-version.
+    if (x === '') return Number.isNaN(ny) ? 1 : -ny || 0
+    if (y === '') return Number.isNaN(nx) ? -1 : nx || 0
     return x < y ? -1 : 1
   }
   return 0

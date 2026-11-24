@@ -251,5 +251,8 @@ export const installBodySchema = z
   .refine(onePlanSource, { message: 'modules or pack' })
 
 export const moduleStateBodySchema = z.strictObject({ enabled: z.boolean() })
-export const moduleUpdateBodySchema = z.strictObject({ version: moduleVersionSchema.optional() })
+export const moduleUpdateBodySchema = z.strictObject({
+  version: moduleVersionSchema.optional(),
+  accept_licenses: z.array(moduleIdSchema).max(32).default([]),
+})
 export const moduleUninstallBodySchema = z.strictObject({ keep_data: z.boolean() })

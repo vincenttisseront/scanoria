@@ -50,7 +50,8 @@ export interface PlanItem {
 
 export interface PlanIssue {
   code: 'E_NOT_FOUND' | 'E_DEPENDENCY' | 'E_CONFLICT' | 'E_APPLIANCE_VERSION' | 'E_LICENSE_REQUIRED'
-    | 'E_RESOURCES' | 'E_OPTIONS' | 'E_DUPLICATE' | 'W_RESOURCES_UNKNOWN' | 'W_DNS' | 'W_INSTALLED'
+    | 'E_RESOURCES' | 'E_OPTIONS' | 'E_DUPLICATE' | 'E_HOSTNAME' | 'W_RESOURCES_UNKNOWN' | 'W_DNS' | 'W_DNS_UNKNOWN'
+    | 'W_INSTALLED' | 'W_PACK_INSTALLED'
   module?: string
   other?: string
   options?: OptionIssue[]
@@ -100,7 +101,7 @@ export function resourceChecks(
   const ram = RESERVED_RAM_MB
     + permanent.reduce((s, m) => s + m.resources.min_ram_mb, 0)
     + Math.max(0, ...transient.map(m => m.resources.min_ram_mb))
-  const cpu = Math.max(0, ...newModules.map(m => m.resources.min_cpu))
+  const cpu = Math.max(0, ...[...newModules, ...installed.filter(i => i.enabled).map(i => i.module)].map(m => m.resources.min_cpu))
   const disk = newModules.reduce((s, m) => s + m.resources.disk_mb, 0)
   const avail = machine ? containersDisk(machine.disks)?.avail_mb ?? null : null
   return [
@@ -133,7 +134,7 @@ export function buildInstallPlan(requests: PlanRequest[], ctx: PlanContext): Ins
     seen.add(r.id)
   }
 
-  const add = (id: string, reason: PlanReason, by: string | null, req?: PlanRequest) => {
+  const add = (id: string, reason: PlanReason, by: string | null, req?: PlanRequest, recurse = true) => {
     const existing = items.get(id)
     if (existing) {
       if (by && !existing.required_by.includes(by)) existing.required_by.push(by)
@@ -166,9 +167,14 @@ export function buildInstallPlan(requests: PlanRequest[], ctx: PlanContext): Ins
       resources: m.resources,
       hostname: m.type === 'service' ? m.hostname ?? null : null,
     })
-    for (const dep of dependencyIds(m)) add(dep.id, dep.reason, id)
+    if (recurse) for (const dep of dependencyIds(m)) add(dep.id, dep.reason, id)
   }
-  for (const r of requests) add(r.id, 'requested', null, r)
+  // Demandes explicites d'abord (leurs options et leur version priment), puis leurs dépendances.
+  for (const r of requests) add(r.id, 'requested', null, r, false)
+  for (const r of requests) {
+    const m = items.has(r.id) ? findModule(ctx.index, r.id, items.get(r.id)!.version) : undefined
+    if (m) for (const dep of dependencyIds(m)) add(dep.id, dep.reason, r.id)
+  }
 
   const latest = latestModules(ctx.index)
   const planned = [...items.values()]
@@ -188,6 +194,16 @@ export function buildInstallPlan(requests: PlanRequest[], ctx: PlanContext): Ins
         && !blockers.some(b => b.code === 'E_CONFLICT' && [b.module, b.other].includes(item.id) && [b.module, b.other].includes(o.id))) {
         blockers.push({ code: 'E_CONFLICT', module: item.id, other: o.id })
       }
+    }
+    if (item.hostname) {
+      const taken = [
+        ...planned.filter(p => p.id !== item.id && p.hostname === item.hostname).map(p => p.id),
+        ...installedModules.filter(i => i.module?.type === 'service' && i.module.hostname === item.hostname).map(i => i.installed.id),
+      ]
+      if (taken.length && !blockers.some(b => b.code === 'E_HOSTNAME' && taken.includes(b.module ?? ''))) {
+        blockers.push({ code: 'E_HOSTNAME', module: item.id, other: taken[0] })
+      }
+      if (!ctx.dns) warnings.push({ code: 'W_DNS_UNKNOWN', module: item.id })
     }
     if (item.hostname && ctx.dns) {
       const fqdn = ctx.dns.fqdn

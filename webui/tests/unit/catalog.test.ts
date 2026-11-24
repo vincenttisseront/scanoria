@@ -107,6 +107,10 @@ describe('versions', () => {
     expect(compareVersions('1.0.1', '1.0')).toBeGreaterThan(0)
     expect(compareVersions('1.0.0-rc1', '1.0.0-rc2')).toBeLessThan(0)
     expect(compareVersions('1.0.b', '1.0.a')).toBeGreaterThan(0)
+    expect(compareVersions('1.0.0', '1.0.0-rc1')).toBeGreaterThan(0)
+    expect(compareVersions('1.0.0-rc1', '1.0.0')).toBeLessThan(0)
+    expect(compareVersions('1.0', '1.0.0')).toBe(0)
+    expect(compareVersions('1.0.0', '1.0')).toBe(0)
   })
 
   it('retient la dernière version de chaque module', () => {
@@ -172,11 +176,28 @@ describe('plan d’installation', () => {
     expect(plan.ok).toBe(true)
     expect(plan.items.map(i => [i.id, i.reason, i.required_by])).toEqual([
       ['trivy', 'requested', []],
-      ['trivy-db', 'feed', ['trivy']],
       ['osv-scanner', 'requested', []],
+      ['trivy-db', 'feed', ['trivy']],
       ['osv-db', 'feed', ['osv-scanner']],
     ])
     expect(plan.items[0]!.options).toEqual({ severity: 'HIGH', skip_dirs: [], timeout_s: 900 })
+  })
+
+  it('une demande explicite garde ses options même si elle est aussi une dépendance', () => {
+    const plan = buildInstallPlan([{ id: 'osv-scanner' }, { id: 'osv-db', options: {} }, { id: 'trivy', options: { severity: 'LOW' } }], ctx())
+    expect(plan.items.map(i => [i.id, i.reason])).toEqual([['osv-scanner', 'requested'], ['osv-db', 'requested'], ['trivy', 'requested'], ['trivy-db', 'feed']])
+    expect(plan.items[2]!.options.severity).toBe('LOW')
+  })
+
+  it('refuse deux applications sur le même nom ; DNS inconnu signalé', () => {
+    const clone = { ...findModule(index, 'sonarqube')!, id: 'sonar-bis' }
+    const idx = { ...index, modules: [...index.modules, clone] }
+    const plan = buildInstallPlan([{ id: 'sonarqube' }, { id: 'sonar-bis' }], ctx({ index: idx, dns: null }))
+    expect(plan.blockers.filter(b => b.code === 'E_HOSTNAME')).toEqual([{ code: 'E_HOSTNAME', module: 'sonarqube', other: 'sonar-bis' }])
+    expect(plan.warnings.filter(w => w.code === 'W_DNS_UNKNOWN')).toHaveLength(2)
+    const inst = [{ ...installed[0]!, id: 'sonarqube', version: '25.10.0', type: 'service' as const }]
+    expect(buildInstallPlan([{ id: 'sonar-bis' }], ctx({ index: idx, installed: inst })).blockers)
+      .toContainEqual({ code: 'E_HOSTNAME', module: 'sonar-bis', other: 'sonarqube' })
   })
 
   it('ne réinstalle pas un module présent et le signale', () => {
@@ -236,6 +257,8 @@ describe('plan d’installation', () => {
     const service = { type: 'service' as const, resources: { min_ram_mb: 3000, min_cpu: 1, disk_mb: 0 } }
     const checks = resourceChecks([service], [{ module: service, enabled: true }, { module: service, enabled: false }], MACHINE)
     expect(checks[0]).toEqual({ kind: 'ram', needed: 2048 + 6000, available: 8192, ok: true })
+    const heavy = { type: 'scanner' as const, resources: { min_ram_mb: 0, min_cpu: 8, disk_mb: 0 } }
+    expect(resourceChecks([], [{ module: heavy, enabled: true }], MACHINE)[1]).toMatchObject({ kind: 'cpu', needed: 8, ok: false })
     expect(containersDisk([{ mount: '/', size_mb: 1, avail_mb: 1 }, { mount: '/var', size_mb: 2, avail_mb: 2 }, { mount: '/var/lib/containers', size_mb: 3, avail_mb: 3 }, { mount: '/srv', size_mb: 4, avail_mb: 4 }])?.mount)
       .toBe('/var/lib/containers')
     expect(containersDisk([{ mount: '/home', size_mb: 1, avail_mb: 1 }])).toBeUndefined()
@@ -276,7 +299,7 @@ describe('vue du catalogue', () => {
     const v = view()
     expect(v.recommended.ids).toEqual(['osv-scanner', 'shellcheck'])
     expect(v.recommended.first_access).toBe(false)
-    expect(v.recommended.plan?.items.map(i => i.id)).toEqual(['osv-scanner', 'osv-db', 'shellcheck'])
+    expect(v.recommended.plan?.items.map(i => i.id)).toEqual(['osv-scanner', 'shellcheck', 'osv-db'])
     const fresh = buildCatalogView({ ...ctx(), operations: [], stateAvailable: false } as CatalogContext)
     expect(fresh.recommended.first_access).toBe(true)
     expect(fresh.recommended.ids).toEqual(['gitleaks', 'osv-scanner', 'trivy', 'shellcheck'])

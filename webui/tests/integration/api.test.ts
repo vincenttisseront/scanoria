@@ -498,7 +498,7 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
     it('plan : dépendances, licences ; validation des corps', async () => {
       const plan = await call('/api/catalog/plan', { method: 'POST', client: viewer, json: { modules: [{ id: 'osv-scanner' }, { id: 'codeql' }] } })
       expect(plan.status).toBe(200)
-      expect((plan.data.items as { id: string }[]).map(i => i.id)).toEqual(['osv-scanner', 'osv-db', 'codeql'])
+      expect((plan.data.items as { id: string }[]).map(i => i.id)).toEqual(['osv-scanner', 'codeql', 'osv-db'])
       expect(plan.data.licenses_to_accept).toEqual(['codeql'])
       for (const json of [{}, { pack: 'base', modules: [{ id: 'gitleaks' }] }, { modules: [] }, { pack: '../x' }]) {
         expect(code(await call('/api/catalog/plan', { method: 'POST', client: viewer, json })), JSON.stringify(json)).toBe('E_VALIDATION')
@@ -518,15 +518,17 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
       expect((await lastIncoming('install-modules'))!.params).toEqual({
         modules: [
           { id: 'osv-scanner', version: '2.2.0', options: {} },
-          { id: 'osv-db', version: '1', options: {} },
           { id: 'codeql', version: '2.23.0', options: {} },
+          { id: 'osv-db', version: '1', options: {} },
         ],
         accept_licenses: ['codeql'],
       })
       const audit = await call('/api/audit?action=system.install-modules.request', { client: admin })
       expect(JSON.stringify(audit.data)).toContain('osv-db')
-      const pack = await call('/api/catalog/install', { method: 'POST', client: admin, json: { pack: 'iac' } })
-      expect(code(pack)).toBe('E_PLAN')
+      const pack = await call('/api/catalog/install', { method: 'POST', client: admin, json: { pack: 'secrets' } })
+      expect(pack.data.data).toMatchObject({ code: 'E_PLAN', blockers: [{ code: 'W_PACK_INSTALLED', other: 'secrets' }] })
+      const iac = await call('/api/catalog/install', { method: 'POST', client: admin, json: { pack: 'iac' } })
+      expect(iac.data.data).toMatchObject({ code: 'E_PLAN', blockers: [{ code: 'E_NOT_FOUND', module: 'checkov' }] })
     })
 
     it('activation, mise à jour, désinstallation', async () => {
@@ -539,6 +541,15 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
       expect((await lastIncoming('update-module'))!.params).toEqual({ id: 'gitleaks', version: '8.28.0' })
       expect(code(await call('/api/catalog/modules/trivy/update', { method: 'POST', client: admin, json: { version: '0.66.0' } }))).toBe('E_NO_UPDATE')
       expect(code(await call('/api/catalog/modules/trivy/update', { method: 'POST', client: admin, json: { version: '9.9.9' } }))).toBe('E_NOT_FOUND')
+      expect((await call('/api/catalog/modules/trivy/update', { method: 'POST', client: admin, json: {} })).status).toBe(202)
+      expect((await lastIncoming('update-module'))!.params).toEqual({ id: 'trivy', version: '0.67.2' })
+      // Version cible soumise aux mêmes contrôles qu'une installation : licence, dépendances.
+      const idx = JSON.parse(await readFile(join(root, 'catalog-index.json'), 'utf8')) as { modules: Record<string, unknown>[] }
+      const next = { ...idx.modules.find(m => m.id === 'gitleaks')!, version: '9.0.0', license: { spdx: 'X', restrictions: 'other' }, requires: { modules: [], feeds: ['osv-db'] } }
+      await writeFile(join(root, 'catalog-index.json'), JSON.stringify({ ...idx, modules: [...idx.modules, next] }))
+      const blocked9 = await call('/api/catalog/modules/gitleaks/update', { method: 'POST', client: admin, json: { version: '9.0.0' } })
+      expect(blocked9.data.data).toMatchObject({ code: 'E_PLAN', blockers: [{ code: 'E_LICENSE_REQUIRED' }, { code: 'E_DEPENDENCY', other: 'osv-db' }] })
+      await writeFile(join(root, 'catalog-index.json'), JSON.stringify(idx))
 
       const blocked = await call('/api/catalog/modules/trivy-db/uninstall', { method: 'POST', client: admin, json: { keep_data: true } })
       expect(blocked.data.data).toMatchObject({ code: 'E_DEPENDENTS', dependents: ['trivy'] })
@@ -552,6 +563,7 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
       expect((await call('/api/catalog/refresh', { method: 'POST', client: admin, json: {} })).status).toBe(202)
       expect(code(await call('/api/catalog/refresh', { method: 'POST', client: admin, json: { force: true } }))).toBe('E_VALIDATION')
       expect(code(await call('/api/dns/check', { method: 'POST', client: viewer, json: {} }))).toBe('E_FORBIDDEN')
+      expect(code(await call('/api/dns/check', { method: 'POST', client: viewer, json: { x: 1 } }))).toBe('E_FORBIDDEN')
       expect((await call('/api/dns/check', { method: 'POST', client: admin, json: {} })).status).toBe(202)
       const dns = await call('/api/dns', { client: viewer })
       expect(dns.data.required).toEqual([

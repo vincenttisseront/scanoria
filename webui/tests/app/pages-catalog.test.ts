@@ -355,6 +355,7 @@ describe('détail d’un module', () => {
       ...DETAIL,
       plan: null,
       update_available: '25.11.0',
+      update_license: { spdx: 'Other-1.0', restrictions: 'other' },
       dependents: ['dtrack'],
       installed: {
         id: 'sonarqube', version: '25.10.0', type: 'service', status: 'healthy', enabled: true, installed_at: '2026-11-20T10:00:00Z',
@@ -389,9 +390,12 @@ describe('détail d’un module', () => {
     expect(callsTo('POST', '/api/catalog/modules/sonarqube/state')[0]!.body).toEqual({ enabled: false })
     await click(button('Mettre à jour vers 25.11.0'))
     expect(bodyText()).toContain('sauvegardé automatiquement avant la mise à jour')
+    expect(bodyText()).toContain('La version 25.11.0 est sous licence Other-1.0 (restrictions particulières)')
+    expect(buttons('Mettre à jour vers 25.11.0').pop()!.disabled).toBe(true)
+    await click(document.body.querySelector('[role="dialog"] [role="checkbox"]')!)
     buttons('Mettre à jour vers 25.11.0').pop()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await drive()
-    expect(callsTo('POST', '/api/catalog/modules/sonarqube/update')[0]!.body).toEqual({ version: '25.11.0' })
+    expect(callsTo('POST', '/api/catalog/modules/sonarqube/update')[0]!.body).toEqual({ version: '25.11.0', accept_licenses: ['sonarqube'] })
   })
 
   it('désinstallation : garder par défaut, suppression des données avec case à cocher, activation', async () => {

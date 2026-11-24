@@ -19,7 +19,7 @@ export function planRequests(
   if (!pack) throw apiError(404, 'E_NOT_FOUND')
   const installed = new Set(ctx.installed.map(m => m.id))
   const pending = pack.modules.filter(id => !installed.has(id))
-  if (!pending.length) throw apiError(409, 'E_PLAN', { blockers: [{ code: 'W_INSTALLED', module: pack.id }] })
+  if (!pending.length) throw apiError(409, 'E_PLAN', { blockers: [{ code: 'W_PACK_INSTALLED', other: pack.id }] })
   return pending.map(id => ({ id }))
 }
 

@@ -506,6 +506,9 @@ export default {
       E_DUPLICATE: '{module} is requested twice.',
       W_RESOURCES_UNKNOWN: 'Machine resources unknown: the system service will check them.',
       W_DNS: 'The name {other} does not resolve yet: the application will be reachable once DNS is in place.',
+      E_HOSTNAME: '{module} uses the same application name as {other}.',
+      W_DNS_UNKNOWN: 'DNS status unknown for {module}: run a DNS check.',
+      W_PACK_INSTALLED: 'All modules of the {other} pack are already installed.',
       W_INSTALLED: '{module} is already installed.',
     },
     options: {
@@ -579,6 +582,7 @@ export default {
       disableBodyDependents: 'These modules depend on it and may stop working: {list}. Data is kept.',
       update: 'Update to {version}',
       updateTitle: 'Update {name} to {version}?',
+      updateLicense: 'Version {version} is licensed {spdx} ({restriction}): I accept these terms.',
       updateBody: 'The module is backed up automatically before the update (database and volumes). If the new version is not healthy, it rolls back to the current version automatically.',
       uninstall: 'Uninstall',
       uninstallTitle: 'Uninstall {name}?',

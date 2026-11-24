@@ -18,6 +18,7 @@ interface ModuleDetail {
   versions: string[]
   installed: InstalledModule | null
   update_available: string | null
+  update_license: ModuleSummary['license'] | null
   plan: InstallPlan | null
   dependents: string[]
   operations: ModuleOperation[]
@@ -90,7 +91,11 @@ async function setEnabled(enabled: boolean) {
 const updateModal = ref(false)
 const updateReq = useHelperRequest()
 async function update() {
-  await updateReq.run(`/api/catalog/modules/${id.value}/update`, { version: detail.value?.update_available ?? undefined }, { timeoutMs: 60 * 60_000 })
+  const restricted = !!detail.value?.update_license && detail.value.update_license.restrictions !== 'none'
+  await updateReq.run(`/api/catalog/modules/${id.value}/update`, {
+    version: detail.value?.update_available ?? undefined,
+    accept_licenses: restricted ? [id.value] : [],
+  }, { timeoutMs: 60 * 60_000 })
   updateModal.value = false
   await reload()
 }
@@ -116,6 +121,12 @@ async function uninstall() {
   await reload()
 }
 
+const updateAck = computed(() => {
+  const l = detail.value?.update_license
+  if (!l || l.restrictions === 'none') return undefined
+  return t('catalog.detail.updateLicense', { version: detail.value!.update_available ?? '', spdx: l.spdx, restriction: text.restrictionLabel(l.restrictions) })
+})
+const dependentNames = computed(() => (detail.value?.dependents ?? []).map(d => names.value[d] ?? d).join(', '))
 const anyRunning = computed(() => stateReq.running.value || updateReq.running.value || uninstallReq.running.value)
 interface TestbedCase { rule: string | null, category: string | null, min: number, found: number, ok: boolean }
 const testbedCases = computed<TestbedCase[]>(() => {
@@ -531,7 +542,7 @@ const testbedDetails = computed(() => {
     <ConfirmModal
       v-model:open="stateModal"
       :title="t('catalog.detail.disableTitle', { name: title })"
-      :body="detail?.dependents.length ? t('catalog.detail.disableBodyDependents', { list: detail.dependents.join(', ') }) : t('catalog.detail.disableBody')"
+      :body="detail?.dependents.length ? t('catalog.detail.disableBodyDependents', { list: dependentNames }) : t('catalog.detail.disableBody')"
       :confirm-label="t('catalog.detail.disable')"
       color="warning"
       :loading="stateReq.running.value"
@@ -542,6 +553,7 @@ const testbedDetails = computed(() => {
       v-model:open="updateModal"
       :title="t('catalog.detail.updateTitle', { name: title, version: detail?.update_available ?? '' })"
       :body="t('catalog.detail.updateBody')"
+      :ack="updateAck"
       :confirm-label="t('catalog.detail.update', { version: detail?.update_available ?? '' })"
       :loading="updateReq.running.value"
       @confirm="update"
