@@ -12,6 +12,7 @@ import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:
 import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { Queryable } from './db'
+import { trimEnd } from './text'
 
 export const SECRET_KINDS = ['token', 'ssh-key', 'ai-token'] as const
 export type SecretKind = (typeof SECRET_KINDS)[number]
@@ -101,12 +102,12 @@ export function openSecret(key: Buffer, aad: string, sealed: Buffer): string {
  * corps d'une clé SSH (armure PEM et espaces retirés). Rien sous 12 caractères.
  */
 export function secretHint(value: string): string {
-  const body = value
+  let body = value
     .split(/\r?\n/)
     .filter(l => !/^-{5}(BEGIN|END) /.test(l))
     .join('')
     .replace(/\s+/g, '')
-    .replace(/=+$/, '')
+  body = trimEnd(body, '=')
   if (body.length < 12) return '…'
   return `…${body.slice(-4)}`
 }

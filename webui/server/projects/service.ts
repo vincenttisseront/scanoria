@@ -13,6 +13,7 @@ import { ForgeError } from '../forges/http'
 import { forgeClient, getForge, openForge, type ForgeClient } from '../forges'
 import { detectRepository, suggestModules, DETECTION_VERSION, type CatalogModuleLite, type Detection, type InstalledLite } from './detect'
 import { fullNameFromPath, parseGitUrl } from './git-url'
+import { trimBoth, trimEnd } from '../utils/text'
 
 export interface ProjectRow {
   id: string
@@ -94,14 +95,14 @@ export function publicProject(p: ProjectRow) {
 }
 
 export function slugify(name: string): string {
-  const s = name
+  let s = name
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 50)
-  return /^[a-z0-9]/.test(s) ? s : `projet-${s}`.replace(/-+$/, '').slice(0, 50) || 'projet'
+    .slice(0, 200)
+  s = trimBoth(s, '-').slice(0, 50)
+  return /^[a-z0-9]/.test(s) ? s : trimEnd(`projet-${s}`, '-').slice(0, 50) || 'projet'
 }
 
 export async function uniqueSlug(db: Queryable, name: string): Promise<string> {

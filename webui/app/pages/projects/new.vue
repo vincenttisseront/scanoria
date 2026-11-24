@@ -451,17 +451,26 @@ async function addArchive() {
         class="space-y-4"
         @submit.prevent="addArchive"
       >
-        <UFormField
-          :label="t('projects.new.archiveFile')"
-          :help="t('projects.new.archiveHelp')"
-        >
+        <div class="space-y-1">
+          <label
+            for="project-archive-file"
+            class="block text-sm font-medium"
+          >{{ t('projects.new.archiveFile') }}</label>
           <input
+            id="project-archive-file"
             type="file"
             accept=".zip,.tar,.tar.gz,.tgz,application/zip,application/x-tar,application/gzip"
             class="text-sm"
+            aria-describedby="project-archive-help"
             @change="onFile"
           >
-        </UFormField>
+          <p
+            id="project-archive-help"
+            class="text-sm text-muted"
+          >
+            {{ t('projects.new.archiveHelp') }}
+          </p>
+        </div>
         <UFormField :label="t('projects.name')">
           <UInput
             v-model="archiveName"

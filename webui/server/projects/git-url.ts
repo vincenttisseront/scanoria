@@ -6,6 +6,7 @@
 // http://, option déguisée (« -oProxyCommand »), bouclage, lien local.
 
 import { ForgeError, normalizeBaseUrl } from '../forges/http'
+import { trimEnd } from '../utils/text'
 
 export interface GitUrl {
   kind: 'https' | 'ssh'
@@ -43,7 +44,7 @@ function checkRepoPath(path: string, host: string): string {
   if (!p || p.length > 512 || !PATH_RE.test(p) || p.startsWith('-') || p.split('/').some(s => s === '..' || s === '.')) throw new GitUrlError()
   // github.com : « propriétaire/dépôt » seulement (une adresse de page comme
   // …/tree/v1.0 n'est pas un dépôt).
-  if (host.toLowerCase() === 'github.com' && !/^[^/]+\/[^/]+$/.test(p.replace(/\/+$/, ''))) throw new GitUrlError()
+  if (host.toLowerCase() === 'github.com' && trimEnd(p, '/').split('/').length !== 2) throw new GitUrlError()
   return p
 }
 

@@ -297,7 +297,7 @@ export async function detectRepository(input: DetectInput): Promise<Omit<Detecti
     ci,
     shell_scripts: shellScripts,
     license,
-    categories: [...categories].sort(),
+    categories: [...categories].sort((a, b) => a.localeCompare(b)),
     profile: 'complet',
     pr_profile: 'rapide',
   }

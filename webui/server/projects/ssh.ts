@@ -7,6 +7,7 @@
 
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { trimEnd } from '../utils/text'
 
 const KEY_TYPES = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)$/
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/
@@ -22,7 +23,7 @@ export function hostPattern(host: string, port: number): string {
 }
 
 export function fingerprint(b64: string): string {
-  return `SHA256:${createHash('sha256').update(Buffer.from(b64, 'base64')).digest('base64').replace(/=+$/, '')}`
+  return `SHA256:${trimEnd(createHash('sha256').update(Buffer.from(b64, 'base64')).digest('base64'), '=')}`
 }
 
 /**
@@ -49,8 +50,8 @@ export function parseKnownHosts(text: string, host: string, port: number): HostK
 export type Keyscan = (host: string, port: number) => Promise<string>
 
 const realKeyscan: Keyscan = (host, port) => new Promise((resolve, reject) => {
-  execFile('ssh-keyscan', ['-T', '5', '-p', String(port), '-t', 'ed25519,ecdsa,rsa', host],
-    { timeout: 15_000, maxBuffer: 64 * 1024, env: { PATH: '/usr/bin:/bin' } },
+  execFile('/usr/bin/ssh-keyscan', ['-T', '5', '-p', String(port), '-t', 'ed25519,ecdsa,rsa', host],
+    { timeout: 15_000, maxBuffer: 64 * 1024, env: {} },
     (err, stdout) => {
       if (err && !stdout) reject(new Error('E_SSH_KEYSCAN'))
       else resolve(stdout)

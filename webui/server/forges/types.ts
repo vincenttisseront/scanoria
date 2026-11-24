@@ -4,6 +4,7 @@
 // Contrat 3 de la 0.3 : client de forge commun à Forgejo, GitHub et GitLab.
 
 import { ForgeError } from './http'
+import { trimEnd } from '../utils/text'
 
 export interface ForgeRepo {
   full_name: string
@@ -122,5 +123,5 @@ export function toRepo(raw: unknown): ForgeRepo | null {
  * que vers la forge elle-même.
  */
 export function cloneUrlFor(baseUrl: string, fullName: string): string {
-  return `${baseUrl.replace(/\/+$/, '')}/${checkFullName(fullName)}.git`
+  return `${trimEnd(baseUrl, '/')}/${checkFullName(fullName)}.git`
 }

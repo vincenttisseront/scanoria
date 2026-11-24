@@ -6,6 +6,8 @@
 // redirections suivies seulement vers le même hôte. Le jeton ne figure jamais
 // dans une erreur : les messages ne portent qu'un code et un statut HTTP.
 
+import { trimEnd } from '../utils/text'
+
 export const FORGE_ERROR_CODES = [
   'E_FORGE_URL', 'E_FORGE_UNREACHABLE', 'E_FORGE_TIMEOUT', 'E_FORGE_AUTH', 'E_FORGE_NOT_FOUND',
   'E_FORGE_RATE_LIMITED', 'E_FORGE_TOO_LARGE', 'E_FORGE_REDIRECT', 'E_FORGE_RESPONSE',
@@ -37,13 +39,13 @@ const LOOPBACK_HOST_RE = /^(localhost|.+\.localhost|localhost\.localdomain|ip6-l
 
 /** Adresse littérale à refuser : bouclage, non spécifiée, lien local. */
 function forbiddenAddress(host: string): boolean {
-  let h = host.replace(/^\[|\]$/g, '').replace(/\.+$/, '').toLowerCase()
+  let h = trimEnd(host.replace(/^\[|\]$/g, ''), '.').toLowerCase()
   // IPv4 mappée en IPv6 sous forme hexadécimale (::ffff:7f00:1, que produit
   // la normalisation de l'URL) : ramenée à la forme pointée.
   const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(h)
   if (mapped) {
-    const hi = parseInt(mapped[1]!, 16)
-    const lo = parseInt(mapped[2]!, 16)
+    const hi = Number.parseInt(mapped[1]!, 16)
+    const lo = Number.parseInt(mapped[2]!, 16)
     h = `::ffff:${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`
   }
   if (/^127\./.test(h) || /^0\./.test(h) || h === '0.0.0.0' || /^169\.254\./.test(h)) return true
@@ -65,9 +67,9 @@ export function normalizeBaseUrl(raw: string): string {
     throw new ForgeError('E_FORGE_URL')
   }
   if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash || raw.includes('@')) throw new ForgeError('E_FORGE_URL')
-  if (!u.hostname || LOOPBACK_HOST_RE.test(u.hostname.replace(/\.+$/, '')) || forbiddenAddress(u.hostname)) throw new ForgeError('E_FORGE_URL')
+  if (!u.hostname || LOOPBACK_HOST_RE.test(trimEnd(u.hostname, '.')) || forbiddenAddress(u.hostname)) throw new ForgeError('E_FORGE_URL')
   if (raw.length > 512) throw new ForgeError('E_FORGE_URL')
-  const path = u.pathname.replace(/\/+$/, '')
+  const path = trimEnd(u.pathname, '/')
   if (path.split('/').some(s => s === '..' || s === '.')) throw new ForgeError('E_FORGE_URL')
   return `${u.protocol}//${u.host}${path}`
 }
