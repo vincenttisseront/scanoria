@@ -331,7 +331,7 @@ docs/                    # ARCHITECTURE, MODULES, SECURITE, TESTING, RELEASING, 
 - **Dépôt public, mais non annoncé** : rien dans le dépôt ne doit trahir une infrastructure réelle (principe 3), et aucun secret n'y entre jamais ; gitleaks bloque la CI au moindre doute.
 
 ## 13. Itérations
-Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I1–I26, J1–J14) est rattachée à une itération.
+Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I1–I26, J1–J16) est rattachée à une itération.
 
 | Version | Contenu |
 |---|---|
@@ -341,8 +341,8 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I
 | 0.4 | **SonarQube Community Build** (PostgreSQL, sysctl, proxy, sauvegarde, mise à jour à la demande). **Consommation réelle par module (F14)**, **santé des analyses (G20)**. IA : **pré-tri assisté (I3)**, **résumé d'analyse (I5)**, **typage des secrets génériques (I14)**, **diagnostic des analyses en échec (I15)**, **traduction des messages des outils (I17)**, **retours et qualité mesurée (I24)** |
 | 0.5 | **SBOM** : Syft → Dependency-Track. **Politique de licences (F8)**, **recherche transverse CVE / composant avec re-corrélation (F3)**, **recoupement entre outils (F16)**, **priorisation EPSS + KEV (H3)**, **quarantaine des nouvelles versions (H5)**. IA : **regroupement sémantique (I7)**, **atteignabilité assistée (I11)**, **explication des licences (I18)** |
 | 0.6 | **Hors ligne et vigilance** : modules `feed`, lots signés, âge des bases. **Appliance miroir (F17)**, **mise à jour d'outil à l'essai (F13)**, **alertes sur l'appliance elle-même (F19)**, **canaris nocturnes (G14)**, **fraîcheur obligatoire (G16)**, **version de module figée par projet (G6)**. IA : **diagnostic de l'appliance (I16)**. **Résultats externes acceptés (J6)** |
-| 0.7 | **SAST/IaC étendus** (Semgrep/Opengrep, Checkov, KICS, Bandit), profils personnalisés, webhooks et statuts de commit. **Tri en masse (F4)**, **exceptions soumises à approbation (F5)**, **affectation `CODEOWNERS` (F6)**, **analyse incrémentale des PR (G18)**, **jeux de règles gérés dans la console (G4)**, **héritage et verrouillage des profils (G8)**, **profil par déclencheur (G9)**, **aperçu d'un profil (G10)**, **audit des workflows CI (H1)**, **posture des dépôts (H2)**, **revue des dépendances en PR (H6)**. IA : **recherche en langage naturel (I8)**, **rédaction des exceptions (I10)**, **générateur de règles (I12)**, **commentaires de PR expliqués (I25)**. Intégration : **application de forge en un clic (J1)**, **reprise de l'existant (J5)**, **annotations ligne à ligne dans la PR (J7)**, **configuration en code (J8)** |
-| 0.8 | **Gate de release** : profil `release`, modes tiré et poussé, rapport de release signé, `scanoria-verify`. **Comparaison entre releases (F2)**, **simulateur de quality gate (F9)**, **VEX (H7)**. Branchement sur Ipnoria. IA : **notes de sécurité de release (I6)**, **seuils de quality gate suggérés (I19)**. Intégration : **PR d'intégration automatique (J2)**, **modèles CI officiels (J3)**, **CI sans secret par OIDC (J4)**, **attestations pour le déploiement (J9)**. Déploiement après verdict favorable : **déclenchement de la CD existante (J11)**, **promotion GitOps (J12)**, **promotion dans le registre (J13)** |
+| 0.7 | **SAST/IaC étendus** (Semgrep/Opengrep, Checkov, KICS, Bandit), profils personnalisés, webhooks et statuts de commit. **Tri en masse (F4)**, **exceptions soumises à approbation (F5)**, **affectation `CODEOWNERS` (F6)**, **analyse incrémentale des PR (G18)**, **jeux de règles gérés dans la console (G4)**, **héritage et verrouillage des profils (G8)**, **profil par déclencheur (G9)**, **aperçu d'un profil (G10)**, **audit des workflows CI (H1)**, **posture des dépôts (H2)**, **revue des dépendances en PR (H6)**. IA : **recherche en langage naturel (I8)**, **rédaction des exceptions (I10)**, **générateur de règles (I12)**, **commentaires de PR expliqués (I25)**. Intégration : **application de forge en un clic (J1)**, **reprise de l'existant (J5)**, **annotations ligne à ligne dans la PR (J7)**, **configuration en code (J8)**, **acceptation depuis la PR (J15)** |
+| 0.8 | **Gate de release** : profil `release`, modes tiré et poussé, rapport de release signé, `scanoria-verify`. **Comparaison entre releases (F2)**, **simulateur de quality gate (F9)**, **VEX (H7)**. Branchement sur Ipnoria. IA : **notes de sécurité de release (I6)**, **seuils de quality gate suggérés (I19)**. Intégration : **PR d'intégration automatique (J2)**, **modèles CI officiels (J3)**, **CI sans secret par OIDC (J4)**, **attestations pour le déploiement (J9)**. Déploiement après verdict favorable : **déclenchement de la CD existante (J11)**, **promotion GitOps (J12)**, **promotion dans le registre (J13)**, **chaîne autonome PR → scan → déploiement (J16)** |
 | 0.9 | **Runners CI** (Forgejo Actions, runner GitHub pour dépôts privés). **Notifications et rapport mensuel (F10)**, **kit développeur (F20)**, **remédiation automatique (H8)**, **tickets synchronisés (H9)**. IA : **correctif proposé et vérifié (I4)**, **évaluation des PR de remédiation (I13)**, **rapport mensuel commenté (I20)**, **assistant « Demander à Scanoria » (I21)**, **tickets rédigés et dédupliqués (I26)** |
 | 0.10 | **DAST** (ZAP, Nuclei) avec cibles autorisées ; DefectDojo optionnel. **Catalogue privé et SDK de scanner (F15)**, **surveillance du registre interne (H10)**. IA : **cartographie de la surface d'attaque (I22)**. **Recette éphémère et DAST avant production (J14)** |
 | 1.0 | LDAP/AD, OIDC et connexion unique aux modules, sauvegardes distantes, durcissement, documentation complète. **Raccordement à la supervision (J10)** |
@@ -352,7 +352,7 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I
 - **Accès aux applications par nom** : `<libellé>.<nom de l'appliance>`, avec un DNS générique et un certificat générique (section 3.4).
 - **Installation de base = console seule** : tout outil s'ajoute par le catalogue, et aucune image n'est embarquée dans l'ISO (section 5.3).
 - **Releases passées par tous les outils** installés, via la CI de chaque dépôt (section 7).
-- **Fonctionnalités F1 à F20, G1 à G20, H1 à H10, I1 à I26 et J1 à J14 retenues** (section 15), réparties dans les itérations (section 13).
+- **Fonctionnalités F1 à F20, G1 à G20, H1 à H10, I1 à I26 et J1 à J16 retenues** (section 15), réparties dans les itérations (section 13).
 - **Dépôt GitHub public, sans aucune communication** (« non publié ») : CI, CodeQL, SonarQube Cloud, protection de `main` et environments gratuits ; mises à jour des appliances sans jeton. Conséquences : sections 10 et 12.
 - **Claude gère tout le cycle Git** : branches, commits, push, PR, merges, versions et suivi des publications, selon les règles de la section 16.
 - **Mises à jour de la console par les releases GitHub** dès la 0.1 (section 10, F18).
@@ -372,7 +372,7 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I
 **Ouvertes**
 - Aucune à ce jour.
 
-## 15. Fonctionnalités retenues (F1–F20, G1–G20, H1–H10, I1–I26, J1–J14)
+## 15. Fonctionnalités retenues (F1–F20, G1–G20, H1–H10, I1–I26, J1–J16)
 
 ### Console
 | # | Fonctionnalité | Ce qu'elle doit faire |
@@ -487,7 +487,7 @@ Toutes passent par le connecteur de la section 3.5 et en respectent les garde-fo
 | I25 | Commentaires de PR expliqués | Les nouveaux résultats d'une PR (G18) sont publiés dans le commentaire de forge avec leur explication courte (I2) et, dès la 0.9, le correctif vérifié s'il existe (I4), à côté de la revue des dépendances H6 | Automatique |
 | I26 | Tickets rédigés et dédupliqués | Extension de H9 : les tickets de H9 reçoivent un titre et une description clairs (contexte, risque, correction) ; avant création, un ticket semblable déjà ouvert est cherché par similarité et le résultat y est rattaché plutôt que dupliqué | Automatique |
 
-### Intégration aux forges, CI et outils existants (J1–J14)
+### Intégration aux forges, CI et outils existants (J1–J16)
 Retenues le 2026-11-24 (demande de Vincent). Même principe que H1–H10 : **actives par défaut**, réglage minimal (principe 8) ; toute écriture dans une forge ou un réglage de dépôt reste soumise aux règles habituelles (confirmation pour ce qui est à risque).
 
 | # | Fonctionnalité | Ce qu'elle doit faire |
@@ -511,6 +511,13 @@ Retenues le 2026-11-24 (demande de Vincent). Même principe que H1–H10 : **act
 | J12 | Promotion GitOps | L'appliance ouvre une PR dans le dépôt de déploiement (Argo CD, Flux) qui porte la nouvelle empreinte d'image (`@sha256:`) ; Argo CD ou Flux applique. Retour arrière par revert. Fusion humaine par défaut, automatique seulement si un administrateur l'autorise pour ce projet et cet environnement |
 | J13 | Promotion dans le registre | L'image validée est copiée **par empreinte** d'un dépôt « candidat » vers un dépôt « validé » (Harbor, registre OCI), avec l'attestation J9 ; la politique d'admission n'accepte que les images validées. Indépendant de l'outil de déploiement, combinable avec J11 ou J12 |
 | J14 | Recette éphémère et DAST avant production | La CD (J11) déploie d'abord dans un environnement de recette temporaire chez l'entreprise, déclaré comme cible autorisée (section 6.5) ; l'appliance y lance le DAST, puis ne déclenche la production que si le verdict reste favorable ; l'environnement est ensuite détruit par la CD |
+
+**Acceptation en CI et chaîne autonome (J15–J16)** : retenues le 2026-11-24. Le code peut être écrit et poussé par un agent (Claude ou un autre bot) ; **l'acceptation d'un risque reste toujours humaine**, et **personne ne valide ses propres résultats**.
+
+| # | Fonctionnalité | Ce qu'elle doit faire |
+|---|---|---|
+| J15 | Acceptation depuis la PR | Quand le gate bloque, le statut de commit et le commentaire de PR portent, pour chaque résultat bloquant, un lien « demander une exception » vers une modale de la console (motif et date de fin obligatoires, rédaction proposée par I10), ou une commande de commentaire `/scanoria accept <résultat> --until <date> --reason "…"` lue par J1. Le circuit est celui de F5 : demande, puis **approbation par un administrateur**, puis **réévaluation du verdict sans réanalyse**, statut mis à jour, CI débloquée. Règles fixes : le demandeur ne peut pas approuver ; **l'auteur du commit analysé ne peut pas approuver** une exception qui le concerne ; une identité **non humaine** (jeton d'API, jeton OIDC de CI J4, application de forge, compte déclaré « agent » ou « bot ») peut demander mais **jamais approuver** ; l'IA n'approuve jamais (section 3.5) ; H4 (`MAL-`) et les verrous G8 restent sans exception possible. Une acceptation faite dans un outil (« Accept » dans SonarQube, `# nosec`…) arrive comme **demande**, jamais comme approbation. Tout est tracé dans l'audit et repris dans le rapport de release (section 7.3) et le VEX (H7) |
+| J16 | Chaîne autonome PR → scan → déploiement | Flux de bout en bout sans intervention quand tout est vert : un agent ou une personne ouvre une PR ; l'appliance l'analyse (profil PR, G9) et pose son statut ; la **fusion automatique native de la forge** (GitHub auto-merge, Forgejo « fusionner quand les contrôles passent ») fusionne quand les contrôles requis sont verts, l'appliance ne fusionnant jamais elle-même ; le tag ou la branche de release déclenche le profil `release` ; sur verdict favorable, J11 lance le déploiement (puis J12, J13 ou J14 selon le projet). Activé par projet en une case lors de J1/J2. Arrêt net à toute étape défavorable ou non concluante, avec la raison (I9) et le lien J15 si une exception est possible ; échec du déploiement rattaché à l'analyse et notifié (F10) |
 
 ## 16. Consignes pour Claude Code dans ce dépôt
 - Session principale : Sonnet 5.5 ; conseiller : Opus 5.5.
