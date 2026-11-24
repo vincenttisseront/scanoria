@@ -38,6 +38,21 @@ describe('modèles', () => {
     expect(selectModels([m('a', null, null)], ['explain-finding'], {}).tasks['explain-finding']).toMatchObject({ reason: 'only-model' })
   })
 
+  it('modèle de rédaction pour toutes les tâches et modèle d\'embedding choisis dans la liste', () => {
+    const models = [m('a', 8, 8192), m('b', 14, 32768), m('e1', 0.1, 512, ['embedding']), m('e2', 0.3, 2048, ['embedding'])]
+    const sel = selectModels(models, ['explain-finding', 'explain-verdict'], { 'default': 'a', 'explain-verdict': 'b', 'embedding': 'e1' })
+    expect(sel.tasks['explain-finding']).toMatchObject({ model: 'a', reason: 'admin-default' })
+    expect(sel.tasks['explain-verdict']).toMatchObject({ model: 'b', reason: 'admin-choice' })
+    expect(sel.embedding).toMatchObject({ model: 'e1', reason: 'admin-choice' })
+    expect(selectModels(models, ['explain-finding'], { 'default': 'a', 'explain-finding': 'zz' }).tasks['explain-finding'])
+      .toMatchObject({ model: 'a', reason: 'admin-choice-missing-default' })
+    // Nom saisi à la main absent du serveur : choix automatique, signalé.
+    const missing = selectModels(models, ['explain-finding'], { default: 'zz', embedding: 'a' })
+    expect(missing.tasks['explain-finding']).toMatchObject({ model: 'b', reason: 'admin-choice-missing' })
+    // Un modèle de rédaction n'est jamais retenu comme modèle d'embedding.
+    expect(missing.embedding).toMatchObject({ model: 'e2', reason: 'admin-choice-missing' })
+  })
+
   it('sans modèle : aucune tâche, et recherche lexicale faute d\'embedding', () => {
     const sel = selectModels([m('emb', 0.1, 512, ['embedding']), m('emb2', 0.3, 2048, ['embedding'])], ['explain-finding'], {})
     expect(sel.tasks['explain-finding']).toBeNull()
