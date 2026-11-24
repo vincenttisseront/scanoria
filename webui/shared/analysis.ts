@@ -20,6 +20,8 @@ export const CATEGORIES = [
   'lint', 'licenses', 'vuln-management', 'ci',
 ] as const
 export type Category = (typeof CATEGORIES)[number]
+/** Catégorie des modules système (git-fetch, chantier B) : jamais résolue dans un profil ni lancée par une analyse. */
+export const SYSTEM_CATEGORY = 'system' as const
 
 export const SCAN_TRIGGERS = ['manual', 'schedule', 'commit', 'webhook', 'api', 'release', 'replay'] as const
 export type ScanTrigger = (typeof SCAN_TRIGGERS)[number]

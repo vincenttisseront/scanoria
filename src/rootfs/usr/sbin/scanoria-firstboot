@@ -521,13 +521,13 @@ start_services() {
 	for u in nginx.service scanoria-helper.path scanoria-console.service; do
 		logrun systemctl enable --now "$u" || return 1
 	done
-	for u in scanoria-firewall.service scanoria-state.timer scanoria-update-check.timer \
-		scanoria-update-apply.timer scanoria-cert-renew.timer \
-		scanoria-dns-check.timer scanoria-dns-check.path scanoria-catalog-refresh.timer; do
+	# Unités communes au premier démarrage et aux mises à jour (units.list).
+	while IFS= read -r u; do
+		[[ $u =~ ^scanoria-[a-z0-9-]{1,48}\.(service|timer|path)$ ]] || continue
 		if systemctl cat "$u" > /dev/null 2>&1; then
 			logrun systemctl enable --now "$u" || return 1
 		fi
-	done
+	done < /usr/share/scanoria/units.list
 }
 
 wait_console() {

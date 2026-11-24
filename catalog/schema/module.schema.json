@@ -73,7 +73,8 @@
           "lint",
           "licenses",
           "vuln-management",
-          "ci"
+          "ci",
+          "system"
         ]
       }
     },
@@ -520,6 +521,38 @@
             "minimum": 0,
             "maximum": 255
           }
+        },
+        "history": {
+          "enum": [
+            "shallow",
+            "full"
+          ],
+          "default": "shallow",
+          "description": "Historique Git lu par le scanner (contrat 9 de la 0.3) : « full » demande un clone complet et lance history_command s'il existe ; une option booléenne « history » à false le désactive pour un projet."
+        },
+        "history_command": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "description": "argv lancé à la place de command quand la source est un dépôt Git lu avec son historique (history: full) ; le dépôt Git est monté en lecture seule sur /git."
+        },
+        "severity_map": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ]
+          },
+          "description": "Correspondance des gravités natives de l'outil vers la gravité normalisée (G5), lue par l'ingestion pour remplir severity_maps ; facultative."
         }
       }
     },
@@ -609,7 +642,8 @@
                   "lint",
                   "licenses",
                   "vuln-management",
-                  "ci"
+                  "ci",
+                  "system"
                 ]
               },
               "min": {

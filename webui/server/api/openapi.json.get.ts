@@ -61,6 +61,20 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
   ...PROJECT_OPS,
+  '/api/findings': { get: { summary: 'Unified findings (filters: project_id, scan_id, tool, severity, category, status, is_new, secret, malicious, q; paginated)', role: 'viewer' } },
+  '/api/findings/summary': { get: { summary: 'Open findings per project and severity, secrets to revoke, malicious packages', role: 'viewer' } },
+  '/api/findings/{id}': { get: { summary: 'Finding detail (masked snippet, scans where it appears); never a secret value', role: 'viewer' } },
+  '/api/findings/{id}/status': { post: { summary: 'Triage a finding (accepted needs reason and end date; refused 409 E_MALICIOUS for a malicious package)', role: 'operator', body: 'FindingStatus' } },
+  '/api/findings/{id}/secret': { post: { summary: 'Secret follow-up (to-revoke, revoked, false-positive) with date and author', role: 'operator', body: 'SecretState' } },
+  '/api/exceptions': {
+    get: { summary: 'Project exceptions (query project_id; all=true includes expired and revoked)', role: 'viewer' },
+    post: { summary: 'Create a dated exception (at most one year; refused 409 E_MALICIOUS for MAL- advisories)', role: 'operator', body: 'ExceptionCreate', status: 201 },
+  },
+  '/api/exceptions/{id}': { delete: { summary: 'Revoke an exception (history kept)', role: 'operator' } },
+  '/api/severity-maps': {
+    get: { summary: 'Severity normalization per module, with origin value', role: 'viewer' },
+    patch: { summary: 'Change a normalized severity, or reset it to its origin value (severity null)', role: 'admin', body: 'SeverityMapUpdate' },
+  },
 }
 
 const HELPER_BODIES = [
@@ -188,6 +202,33 @@ export default defineEventHandler(async () => {
           properties: { password: { type: 'string', minLength: 12, maxLength: 1024 }, must_change_password: { type: 'boolean' } },
         },
         ...projectSchemas(),
+        FindingStatus: {
+          type: 'object', additionalProperties: false, required: ['status'],
+          properties: {
+            status: { enum: ['new', 'confirmed', 'false-positive', 'accepted'] },
+            reason: { type: 'string', maxLength: 2000, description: 'Required for false-positive and accepted' },
+            until: { type: 'string', format: 'date', description: 'Required for accepted, at most one year ahead' },
+          },
+        },
+        SecretState: { type: 'object', additionalProperties: false, required: ['state'], properties: { state: { enum: ['to-revoke', 'revoked', 'false-positive'] } } },
+        ExceptionCreate: {
+          type: 'object', additionalProperties: false, required: ['project_id', 'kind', 'target', 'reason', 'expires_on'],
+          properties: {
+            project_id: { type: 'string', format: 'uuid' },
+            kind: { enum: ['path', 'rule', 'vuln', 'finding', 'module'] },
+            target: { type: 'object', description: 'path {glob, tool?}; rule {rule_id, tool?}; vuln {vuln_id, package?}; finding {finding_id}; module {module_id}' },
+            reason: { type: 'string', minLength: 3, maxLength: 2000 },
+            expires_on: { type: 'string', format: 'date' },
+          },
+        },
+        SeverityMapUpdate: {
+          type: 'object', additionalProperties: false, required: ['module_id', 'native', 'severity'],
+          properties: {
+            module_id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,40}$' },
+            native: { type: 'string', maxLength: 64 },
+            severity: { enum: ['critical', 'high', 'medium', 'low', 'info', null] },
+          },
+        },
       },
     },
   }
