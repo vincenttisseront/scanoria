@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module SonarQube Community Build (service permanent, CLAUDE.md § 5.1).
+# Version, empreinte d'image et licence relevées en amont le 2026-11-24 :
+# image officielle docker.io/library/sonarqube, étiquette
+# 26.11.0.134175-community (index OCI multi-architecture), dépôts
+# SonarSource/sonarqube et SonarSource/docker-sonarqube sous LGPL-3.0.
+# Contraintes : branche principale seulement (pas d'analyse de PR ni de
+# branche), PostgreSQL, vm.max_map_count ≥ 524288, ≥ 4 Go de RAM pour lui seul.
+# Mise en service automatique par le helper (provision.py) : mot de passe
+# admin aléatoire (jamais affiché ni en base), utilisateur et jeton d'analyse
+# dédiés, authentification forcée. Le verdict reste celui de Scanoria : le
+# quality gate SonarQube est laissé par défaut.
+id: sonarqube
+name: SonarQube Community Build
+description:
+  fr: Qualité du code et SAST sur la branche principale, avec son interface web.
+  en: Code quality and SAST on the main branch, with its web interface.
+type: service
+categories: [quality, sast]
+license:
+  spdx: LGPL-3.0-only
+  url: https://github.com/SonarSource/sonarqube/blob/master/LICENSE.txt
+  restrictions: none
+  verified_at: "2026-11-24"
+  notes: Community Build. Analyse de la branche principale seulement ; les analyses de PR et de branches sont réservées aux éditions payantes.
+upstream:
+  homepage: https://www.sonarsource.com/products/sonarqube/
+  source: https://github.com/SonarSource/sonarqube
+image: docker.io/library/sonarqube@sha256:7b2296713a92b8ea0dd7a083a25faadc59376c9a1e6daf2744a89711c54ea1ba
+version: "26.11.0.134175"
+resources: { min_ram_mb: 4096, min_cpu: 2, disk_mb: 10240 }
+hostname: sonarqube
+requires: { modules: [], feeds: [], appliance: ">=0.4.0" }
+conflicts: []
+needs:
+  postgres: true
+  sysctl:
+    vm.max_map_count: 524288
+    fs.file-max: 131072
+    nofile: 131072
+    nproc: 8192
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+service:
+  port: 9000
+  health_path: /api/system/status
+  units:
+    - { name: sonarqube }
+  volumes:
+    - { name: data, path: /opt/sonarqube/data }
+    - { name: extensions, path: /opt/sonarqube/extensions }
+    - { name: logs, path: /opt/sonarqube/logs }
+  backup: [data, extensions, logs]
+  env:
+    SONAR_JDBC_URL: "{db_url_jdbc}"
+    SONAR_JDBC_USERNAME: "{db_user}"
+    # Aucun appel sortant : ni télémétrie, ni place de marché des extensions.
+    SONAR_TELEMETRY_ENABLE: "false"
+    SONAR_UPDATECENTER_ACTIVATE: "false"
+  secrets:
+    - { name: db-password, env: SONAR_JDBC_PASSWORD }
+  # Le mot de passe admin et le jeton d'analyse sont créés par provision.py
+  # dans le même répertoire de secrets, sans être montés dans le conteneur.
+upgrade: { policy: on-demand }

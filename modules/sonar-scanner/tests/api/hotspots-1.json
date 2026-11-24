@@ -1,0 +1,65 @@
+{
+ "paging": {
+  "pageIndex": 1,
+  "pageSize": 500,
+  "total": 2
+ },
+ "hotspots": [
+  {
+   "key": "hotspot-0001",
+   "component": "scanoria-testbed:app/db.py",
+   "project": "scanoria-testbed",
+   "securityCategory": "auth",
+   "vulnerabilityProbability": "HIGH",
+   "status": "TO_REVIEW",
+   "line": 5,
+   "message": "\"password\" detected here, review this potentially hard-coded password.",
+   "creationDate": "2026-11-24T14:00:00+0000",
+   "updateDate": "2026-11-24T14:00:00+0000",
+   "textRange": {
+    "startLine": 5,
+    "endLine": 5,
+    "startOffset": 0,
+    "endOffset": 8
+   },
+   "flows": [],
+   "ruleKey": "python:S2068",
+   "messageFormattings": []
+  },
+  {
+   "key": "hotspot-0002",
+   "component": "scanoria-testbed:app/db.py",
+   "project": "scanoria-testbed",
+   "securityCategory": "sql-injection",
+   "vulnerabilityProbability": "HIGH",
+   "status": "TO_REVIEW",
+   "line": 12,
+   "message": "Make sure using a dynamically formatted SQL query is safe here.",
+   "textRange": {
+    "startLine": 12,
+    "endLine": 12,
+    "startOffset": 4,
+    "endOffset": 25
+   },
+   "flows": [],
+   "ruleKey": "python:S2077"
+  }
+ ],
+ "components": [
+  {
+   "key": "scanoria-testbed",
+   "qualifier": "TRK",
+   "name": "scanoria-testbed",
+   "longName": "scanoria-testbed",
+   "enabled": true
+  },
+  {
+   "key": "scanoria-testbed:app/db.py",
+   "qualifier": "FIL",
+   "name": "db.py",
+   "longName": "app/db.py",
+   "path": "app/db.py",
+   "enabled": true
+  }
+ ]
+}

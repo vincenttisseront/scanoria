@@ -112,11 +112,16 @@ def feed_mounts(manifest):
     return res
 
 
-def run_confined(manifest, command, mounts=(), timeout=DEFAULT_TIMEOUT, env=None):
-    """Lance command dans l'image du module ; retourne le code de sortie."""
+def run_confined(manifest, command, mounts=(), timeout=DEFAULT_TIMEOUT, env=None, network=None):
+    """Lance command dans l'image du module ; retourne le code de sortie.
+
+    network : arguments qui remplacent --network=none (scanner relié à un service, svcnet)."""
     import secrets
     name = "scanoria-run-%s" % secrets.token_hex(8)
     args = confined_args(manifest, list(mounts) + feed_mounts(manifest), name=name)
+    if network:
+        from . import svcnet
+        args = svcnet.network_args(args, network)
     # Délai appliqué par podman lui-même, et conteneur nommé retiré quoi qu'il arrive.
     args += ["--timeout", str(int(timeout))]
     for k in sorted(env or {}):
@@ -374,8 +379,18 @@ def run(manifest, timeout=None):
     if not isinstance(tb, dict) or not isinstance(tb.get("expect"), list) or not tb["expect"]:
         raise Fail("E_TESTBED", "scanner %s declares no testbed expectation" % manifest["id"])
     scan = manifest.get("scan") or {}
-    if scan.get("network", "none") != "none":
+    if scan.get("network", "none") == "target":
         raise Fail("E_PRECONDITION", "networked scanners are not supported yet")
+    from . import svcnet
+    svc = None
+    try:
+        if svcnet.service_of(manifest):
+            # Scanner relié à un service (contrat 12) : son service doit déjà être sain.
+            from . import modules
+            svc = svcnet.resolve(modules.load_registry(), manifest)
+        tools = svcnet.tool_mount(manifest)
+    except svcnet.Unavailable as u:
+        raise Fail("E_DEPENDENCY" if u.code == svcnet.E_SERVICE_MISSING else "E_TESTBED", u.message)
     os.makedirs(WORK, mode=0o700, exist_ok=True)
     import secrets
     work = os.path.join(WORK, "testbed-%s-%s" % (manifest["id"], secrets.token_hex(6)))
@@ -391,8 +406,15 @@ def run(manifest, timeout=None):
         t = scan.get("timeout_s") if isinstance(scan.get("timeout_s"), int) else DEFAULT_TIMEOUT
         t = max(10, min(t, timeout or DEFAULT_TIMEOUT))
         cmd = render_command(scan["command"], option_defaults(manifest))
-        rc = run_confined(manifest, cmd, [(src, "/src", "ro"), (out, "/out", "rw")], timeout=t,
-                          env=scan.get("env"))
+        mounts = [(src, "/src", "ro"), (out, "/out", "rw")] + tools
+        if svc:
+            try:
+                with svcnet.Attachment(svc, svcnet.TESTBED_KEY, budget_s=max(60, t - 60)) as att:
+                    rc = run_confined(manifest, cmd, mounts, timeout=t, env=scan.get("env"), network=att.args())
+            except svcnet.Unavailable as u:
+                raise Fail("E_TESTBED", u.message)
+        else:
+            rc = run_confined(manifest, cmd, mounts, timeout=t, env=scan.get("env"))
         if rc not in (scan.get("exit_codes_ok") or SCANNER_OK_RC):
             raise Fail("E_TESTBED", "scanner exited with code %d on its testbed" % rc)
         details = check_expect(collect(manifest, out), tb["expect"])

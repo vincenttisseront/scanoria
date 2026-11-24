@@ -55,7 +55,8 @@
             "uninstall-module",
             "set-module-state",
             "update-module",
-            "set-ai-endpoint"
+            "set-ai-endpoint",
+            "reset-service-admin"
           ]
         }
       ]
@@ -115,7 +116,10 @@
         "E_AI_URL",
         "E_AI_UNRESOLVED",
         "E_AI_FORBIDDEN_ADDRESS",
-        "E_AI_CA"
+        "E_AI_CA",
+        "E_SONAR_UNAVAILABLE",
+        "E_SONAR_ADMIN",
+        "E_SONAR_API"
       ]
     },
     "message": {

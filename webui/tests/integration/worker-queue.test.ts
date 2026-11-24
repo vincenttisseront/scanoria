@@ -299,7 +299,9 @@ describe.skipIf(!DATABASE_URL)('file d’analyses (PostgreSQL réel, faux runner
         await fh.close()
       }
       expect(await readdir(join(cfg.scansDir, 'jobs', 'tmp'))).toEqual([])
-      expect(job.source).toEqual({ kind: 'git', url: expect.stringMatching(/^https:\/\/forge\.exemple\.test\//), ref: 'main', history: 'full', credential: null })
+      expect(job.source).toEqual({ kind: 'git', url: expect.stringMatching(/^https:\/\/forge\.exemple\.test\//), ref: 'main', history: 'full', credential: null, default_branch: 'main' })
+      // 0.4 (chantier B) : projet et branche par défaut pour les scanners reliés à un service.
+      expect(job.project_id).toBe(row.project_id)
       expect(job.modules).toEqual([{ id: 'gitleaks', version: '8.30.1', options: { history: true } }, { id: 'trivy', version: '0.76.2', options: {} }])
       expect(row.plan.modules.map((m: { id: string }) => m.id)).toEqual(['gitleaks', 'trivy'])
       expect(row.plan.gate.slug).toBe('defaut')

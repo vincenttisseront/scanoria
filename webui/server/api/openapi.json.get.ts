@@ -58,6 +58,8 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/catalog/modules/{id}/state': { post: { summary: 'Request set-module-state (enable or disable)', role: 'admin', body: 'ModuleState', status: 202 } },
   '/api/catalog/modules/{id}/update': { post: { summary: 'Request update-module (latest version by default)', role: 'admin', body: 'ModuleUpdate', status: 202 } },
   '/api/catalog/modules/{id}/uninstall': { post: { summary: 'Request uninstall-module (409 E_DEPENDENTS when another module needs it)', role: 'admin', body: 'ModuleUninstall', status: 202 } },
+  '/api/catalog/modules/{id}/admin-password': { post: { summary: 'Request reset-service-admin: new random admin password of a service set up by the appliance (SonarQube)', role: 'admin', status: 202 } },
+  '/api/catalog/modules/{id}/admin-password/reveal': { post: { summary: 'Admin password of a finished reset-service-admin, returned once to its requester (410 E_GONE afterwards)', role: 'admin', body: 'AdminPasswordReveal' } },
   '/api/ai/status': { get: { summary: 'AI connector (external Ollama): pinned address, models chosen per task and why, testbed, circuit breaker, latency', role: 'operator' } },
   '/api/ai/calls': { get: { summary: 'AI call log (metadata only, never content)', role: 'operator' } },
   '/api/ai/connector': { post: { summary: 'Request set-ai-endpoint: enable or change the Ollama connector (confirmed: true required)', role: 'admin', body: 'AiConnector', status: 202 } },
@@ -267,6 +269,7 @@ export default defineEventHandler(async () => {
         ModuleState: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } },
         ModuleUpdate: { type: 'object', additionalProperties: false, properties: { version: { type: 'string' } } },
         ModuleUninstall: { type: 'object', additionalProperties: false, required: ['keep_data'], properties: { keep_data: { type: 'boolean' } } },
+        AdminPasswordReveal: { type: 'object', additionalProperties: false, required: ['request_id'], properties: { request_id: { type: 'string', format: 'uuid' } } },
         GateCreate: {
           type: 'object', additionalProperties: false, required: ['slug'],
           properties: { slug: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }, copy_from: { type: 'string', format: 'uuid' } },

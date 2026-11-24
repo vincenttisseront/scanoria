@@ -168,6 +168,10 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
       { enabled: true, url: 'https://ollama.exemple.test', model: 'x' },
     ],
   },
+  'reset-service-admin': {
+    valid: [{ id: 'sonarqube' }],
+    invalid: [{}, { id: 'Sonar' }, { id: '../sonarqube' }, { id: 'sonarqube', password: 'x' }],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {

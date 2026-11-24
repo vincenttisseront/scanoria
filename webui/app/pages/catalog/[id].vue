@@ -313,6 +313,14 @@ const testbedDetails = computed(() => {
         </UCard>
       </div>
 
+      <ServiceAdminAccess
+        v-if="inst?.status === 'healthy' && inst.enabled && id === 'sonarqube'"
+        :module-id="id"
+        :name="title"
+        :app-url="appUrl"
+        :is-admin="isAdmin"
+      />
+
       <UCard v-if="inst">
         <template #header>
           <h2 class="font-semibold">

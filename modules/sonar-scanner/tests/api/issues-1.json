@@ -1,0 +1,97 @@
+{
+ "total": 2,
+ "p": 1,
+ "ps": 500,
+ "paging": {
+  "pageIndex": 1,
+  "pageSize": 500,
+  "total": 2
+ },
+ "effortTotal": 7,
+ "issues": [
+  {
+   "key": "issue-0001",
+   "rule": "python:S1481",
+   "severity": "MINOR",
+   "component": "scanoria-testbed:app/db.py",
+   "project": "scanoria-testbed",
+   "line": 10,
+   "hash": "3f1d0f1c0b8a3a7d2d0a6b4c6f6b1d2e",
+   "textRange": {
+    "startLine": 10,
+    "endLine": 10,
+    "startOffset": 4,
+    "endOffset": 10
+   },
+   "flows": [],
+   "status": "OPEN",
+   "message": "Remove the unused local variable \"unused\".",
+   "effort": "5min",
+   "debt": "5min",
+   "tags": [
+    "unused"
+   ],
+   "creationDate": "2026-11-24T14:00:00+0000",
+   "updateDate": "2026-11-24T14:00:00+0000",
+   "type": "CODE_SMELL",
+   "scope": "MAIN",
+   "quickFixAvailable": true,
+   "messageFormattings": [],
+   "codeVariants": [],
+   "cleanCodeAttribute": "CLEAR",
+   "cleanCodeAttributeCategory": "INTENTIONAL",
+   "impacts": [
+    {
+     "softwareQuality": "MAINTAINABILITY",
+     "severity": "LOW"
+    }
+   ],
+   "issueStatus": "OPEN",
+   "prioritizedRule": false
+  },
+  {
+   "key": "issue-0002",
+   "rule": "python:S1192",
+   "severity": "CRITICAL",
+   "component": "scanoria-testbed:app/db.py",
+   "project": "scanoria-testbed",
+   "line": 17,
+   "textRange": {
+    "startLine": 17,
+    "endLine": 17,
+    "startOffset": 11,
+    "endOffset": 40
+   },
+   "status": "OPEN",
+   "message": "Define a constant instead of duplicating this literal \"x\" 3 times.",
+   "tags": [
+    "design"
+   ],
+   "type": "CODE_SMELL",
+   "impacts": [
+    {
+     "softwareQuality": "MAINTAINABILITY",
+     "severity": "HIGH"
+    }
+   ]
+  }
+ ],
+ "components": [
+  {
+   "key": "scanoria-testbed",
+   "qualifier": "TRK",
+   "name": "scanoria-testbed",
+   "longName": "scanoria-testbed",
+   "enabled": true
+  },
+  {
+   "key": "scanoria-testbed:app/db.py",
+   "qualifier": "FIL",
+   "name": "db.py",
+   "longName": "app/db.py",
+   "path": "app/db.py",
+   "enabled": true
+  }
+ ],
+ "facets": []
+}

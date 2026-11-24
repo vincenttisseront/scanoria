@@ -14,7 +14,7 @@ import type pg from 'pg'
 import { GateRules, VerdictDetails, type ErrorClass, type ScanModuleStatus } from '#shared/analysis'
 import { UUID_V4_RE } from '#shared/schemas'
 import { readModulesState } from '../utils/catalog'
-import { scanJobSchema, type JobCredential, type RunnerError, type ScanJob, type ScanResult } from './contract'
+import { gitRef, scanJobSchema, type JobCredential, type RunnerError, type ScanJob, type ScanResult } from './contract'
 import { copyModuleLog, jobPending, listIncomingJobs, readResult, readRunnerState, resultDir, withdrawJob, writeJob } from './files'
 import { pendingGate, type Integrations } from './integrations'
 import {
@@ -289,6 +289,8 @@ export class ScanWorker {
         kind: 'git',
         url: project.repo_url,
         ref: plan.source.ref,
+        // Branche par défaut transmise seulement si elle est valide : elle ne fait jamais refuser la tâche.
+        ...(gitRef.safeParse(project.extra.default_branch).success ? { default_branch: project.extra.default_branch as string } : {}),
         history: plan.source.history,
         credential: await this.credential(client, project.credential_id, project.extra),
         ...(plan.source.commit ? { commit: plan.source.commit } : {}),
@@ -298,6 +300,7 @@ export class ScanWorker {
       schema: 1 as const,
       id: randomUUID(),
       scan_id: scan.id,
+      project_id: scan.project_id,
       created_at: new Date().toISOString(),
       source,
       modules: modules.map(m => ({ id: m.id, version: m.version, options: m.options })),

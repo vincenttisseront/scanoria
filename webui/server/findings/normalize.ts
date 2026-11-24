@@ -192,6 +192,9 @@ const SECRET_CWES = new Set(['CWE-259', 'CWE-321', 'CWE-798'])
  * Catégorie d'un résultat (findings.category) : déduite des étiquettes, des
  * identifiants d'avis et des catégories déclarées par le module.
  */
+/** Préfixe d'étiquette SARIF qui fixe la catégorie d'un résultat (chantier B de la 0.4). */
+export const EXPLICIT_CATEGORY_TAG = 'scanoria-category:'
+
 export function inferCategory(opts: {
   moduleCategories: string[]
   tags: string[]
@@ -203,6 +206,10 @@ export function inferCategory(opts: {
   const mod = opts.moduleCategories
   if (opts.cwe?.some(c => SECRET_CWES.has(c))) return 'secrets'
   if (tags.some(t => t === 'secret' || t === 'secrets') || (mod.length && mod.every(c => c === 'secrets'))) return 'secrets'
+  // Catégorie explicite posée par un convertisseur (« scanoria-category:quality », SonarQube) :
+  // retenue seulement si le module la déclare, jamais au-dessus des secrets.
+  const explicit = tags.find(t => t.startsWith(EXPLICIT_CATEGORY_TAG))?.slice(EXPLICIT_CATEGORY_TAG.length)
+  if (explicit && (mod as string[]).includes(explicit)) return explicit as Category | 'quality'
   if (opts.hasVuln || opts.hasPackage || tags.includes('vulnerability')) return mod.includes('container') && !mod.includes('sca') ? 'container' : 'sca'
   if (tags.some(t => t === 'misconfiguration' || t === 'iac')) return 'iac'
   if (tags.some(t => t === 'license' || t === 'licenses')) return 'licenses'

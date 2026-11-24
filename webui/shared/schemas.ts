@@ -41,6 +41,7 @@ export const REQUEST_TYPES = [
   'set-module-state',
   'update-module',
   'set-ai-endpoint',
+  'reset-service-admin',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -54,6 +55,7 @@ export const RESULT_CODES = [
   'E_ROLLBACK_FAILED', 'E_TIMEOUT', 'E_INTERNAL',
   'E_RESOURCES', 'E_DEPENDENCY', 'E_CONFLICT', 'E_LICENSE', 'E_TESTBED',
   'E_AI_URL', 'E_AI_UNRESOLVED', 'E_AI_FORBIDDEN_ADDRESS', 'E_AI_CA',
+  'E_SONAR_UNAVAILABLE', 'E_SONAR_ADMIN', 'E_SONAR_API',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 
@@ -139,6 +141,7 @@ export const requestParamSchemas = {
     }),
     z.strictObject({ enabled: z.literal(false) }),
   ]),
+  'reset-service-admin': z.strictObject({ id: z.string().regex(MODULE_ID_RE) }),
 } satisfies Record<RequestType, z.ZodType>
 
 export type RequestParams<T extends RequestType> = z.infer<(typeof requestParamSchemas)[T]>

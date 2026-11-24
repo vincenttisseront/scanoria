@@ -32,6 +32,7 @@ export type ApiErrorCode
     | 'E_NO_PREVIOUS' | 'E_NO_UPDATE' | 'E_TOO_LARGE' | 'E_UPLOAD' | 'E_UNAVAILABLE' | 'E_INTERNAL'
     | 'E_CATALOG_UNAVAILABLE' | 'E_PLAN' | 'E_NOT_INSTALLED' | 'E_DEPENDENTS'
     | 'E_MALICIOUS' | 'E_NOT_SECRET'
+    | 'E_PRECONDITION' | 'E_GONE'
 
 export function apiError(statusCode: number, code: ApiErrorCode, extra: Record<string, unknown> = {}) {
   return createError({ statusCode, statusMessage: code, data: { code, ...extra } })

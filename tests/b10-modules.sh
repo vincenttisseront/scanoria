@@ -69,7 +69,8 @@ EOF
 	if [[ "$type" == scanner ]]; then
 		check "$id : sortie native enregistrée conforme aux attentes du banc d'essai" \
 			python3 "$MC" expect "$f" "$ROOT/modules/$id/tests/recorded.sarif"
-		check "$id : réseau coupé pendant l'analyse" jq -e '.scan.network == "none"' "$TMP/m.json"
+		# Seule exception hors DAST : le réseau interne d'un service (contrat 12 de la 0.4, b17).
+		check "$id : réseau coupé pendant l'analyse" jq -e '.scan.network == "none" or (.scan.network | startswith("service:"))' "$TMP/m.json"
 		check "$id : licence vérifiée en amont (date)" jq -e '.license.verified_at | test("^2026-")' "$TMP/m.json"
 	fi
 done
@@ -162,7 +163,7 @@ declare -A WHY=(
 	[id-point-point]=gitleaks [id-majuscules]=GitLeaks [id-trop-long]=ggg [restriction-inconnue]=aucune
 	[licence-url-http]=https [type-inconnu]=plugin [categorie-inconnue]=magie [scanner-sans-banc]=testbed
 	[scanner-sans-sortie]=outputs [sarif-mauvaise-version]=2.1.0 [sortie-hors-out]=passwd
-	[sortie-absente-commande]="absent de scan.command" [reseau-cible-hors-dast]=dast [reseau-hote]=none
+	[sortie-absente-commande]="absent de scan.command" [reseau-cible-hors-dast]=dast [reseau-hote]=network
 	[banc-attente-vide]=expect [banc-attente-sans-regle]=rule [feed-https-sans-https]=https [banc-attente-zero]=minimum [banc-chemin-sortant]=trivy [banc-chemin-absolu]=/etc
 	[appliance-sans-operateur]=0.2.0 [requires-incomplet]=feeds [needs-feeds]="Additional properties" [env-nom-invalide]=LD_PRELOAD
 	[commande-point-point]="chemin avec" [ressources-negatives]=minimum [scanner-avec-hostname]=null

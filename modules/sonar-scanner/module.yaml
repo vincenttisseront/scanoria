@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module sonar-scanner : analyse un dépôt avec le service SonarQube installé
+# et rapatrie ses issues et hotspots en SARIF 2.1.0 (contrat 12 de la 0.4).
+# Image officielle docker.io/sonarsource/sonar-scanner-cli, étiquette
+# 12.5.0.4351_8.5.0 (SonarScanner CLI 8.5.0.16571, amd64), relevée en amont le
+# 2026-11-24 ; LGPL-3.0 (SonarSource/sonar-scanner-cli et -docker).
+# Réseau : uniquement le réseau interne du service sonarqube ; jeton d'analyse
+# par secret Podman. Branche par défaut seulement (Community Build) : sur une
+# autre référence le module est « skipped », sans effet sur le verdict.
+# Orchestration et conversion : outil de l'appliance
+# /usr/lib/scanoria/scan-tools/sonar (python3 de l'image, bibliothèque standard).
+id: sonar-scanner
+name: SonarQube (analyse)
+description:
+  fr: Analyse la branche principale avec SonarQube et rapatrie ses résultats dans la console.
+  en: Analyses the main branch with SonarQube and brings its results into the console.
+type: scanner
+categories: [quality, sast]
+license:
+  spdx: LGPL-3.0-only
+  url: https://github.com/SonarSource/sonar-scanner-cli/blob/master/LICENSE.txt
+  restrictions: none
+  verified_at: "2026-11-24"
+upstream:
+  homepage: https://docs.sonarsource.com/sonarqube-server/analyzing-source-code/scanners/sonarscanner
+  source: https://github.com/SonarSource/sonar-scanner-cli-docker
+image: docker.io/sonarsource/sonar-scanner-cli@sha256:8bb84373f00346f9a579adb7ccb2999f8cd050ab7167fa9ae08a16069de03c84
+version: "8.5.0.16571"
+resources: { min_ram_mb: 2048, min_cpu: 1, disk_mb: 1500 }
+hostname: null
+requires: { modules: [git-fetch, sonarqube], feeds: [], appliance: ">=0.4.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo]
+  command: ["python3", "-I", "/scanoria/sonar_scan.py", "/out/result.sarif"]
+  tool: sonar
+  network: service:sonarqube
+  refs: default-branch
+  timeout_s: 1800
+  exit_codes_ok: [0]
+  severity_map:
+    blocker: critical
+    critical: high
+    high: high
+    major: medium
+    medium: medium
+    minor: low
+    low: low
+    info: info
+outputs:
+  sarif: { path: /out/result.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # Mot de passe en dur (hotspot de sécurité).
+    - { rule: "python:S2068", category: sast, min: 1 }
+    # Requête SQL construite par formatage de chaîne (hotspot de sécurité).
+    - { rule: "python:S2077", category: sast, min: 1 }
+    # Variable locale inutilisée (qualité).
+    - { rule: "python:S1481", category: quality, min: 1 }
+health: { command: ["python3", "--version"] }
+upgrade: { policy: on-demand }
