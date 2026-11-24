@@ -212,9 +212,11 @@ def podman_args(manifest, src, out, feeds):
         "run", "--rm", "--pull=never",
         "--network=none" if scan["network"] == "none" else "--network=slirp4netns",
         "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
-        "--user=65534:65534", f"--memory={max(res['min_ram_mb'], 256) * 2}m",
+        # Mêmes bornes que l'appliance (testbed.confined_args) : le banc
+        # d'essai de la CI doit reproduire exactement celui de l'installation.
+        "--user=65534:65534", f"--memory={max(128, min(res['min_ram_mb'], 65536))}m",
         f"--cpus={max(res['min_cpu'], 1)}", "--pids-limit=512",
-        "--tmpfs=/tmp:rw,nosuid,nodev,size=512m", "--env=HOME=/tmp", "--env=TMPDIR=/tmp",
+        "--tmpfs=/tmp:rw,nosuid,nodev,size=256m,mode=1777", "--env=HOME=/tmp", "--env=TMPDIR=/tmp",
         f"--volume={src}:/src:ro", f"--volume={out}:/out:rw",
     ]
     for feed in manifest["requires"]["feeds"]:
