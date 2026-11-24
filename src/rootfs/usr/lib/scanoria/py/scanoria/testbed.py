@@ -72,11 +72,18 @@ def feed_mounts(manifest):
 
 def run_confined(manifest, command, mounts=(), timeout=DEFAULT_TIMEOUT, env=None):
     """Lance command dans l'image du module ; retourne le code de sortie."""
-    args = confined_args(manifest, list(mounts) + feed_mounts(manifest))
+    import secrets
+    name = "scanoria-run-%s" % secrets.token_hex(8)
+    args = confined_args(manifest, list(mounts) + feed_mounts(manifest), name=name)
+    # Délai appliqué par podman lui-même, et conteneur nommé retiré quoi qu'il arrive.
+    args += ["--timeout", str(int(timeout))]
     for k in sorted(env or {}):
         args += ["--env", "%s=%s" % (k, env[k])]
     args += ["--entrypoint", json.dumps([command[0]]), manifest["image"]] + list(command[1:])
-    r = common.run("podman", args, timeout=timeout, stdout_limit=1 << 20)
+    try:
+        r = common.run("podman", args, timeout=timeout + 60, stdout_limit=1 << 20)
+    finally:
+        common.run("podman", ["rm", "--force", "--ignore", "--time", "0", name], timeout=120)
     return r.returncode
 
 
@@ -179,23 +186,39 @@ def fetch_archive(manifest, dest):
 # Sorties et résultats attendus
 # --------------------------------------------------------------------------
 
-def _out_path(out_dir, declared):
+def _out_rel(declared):
     if not isinstance(declared, str) or not declared.startswith("/out/"):
         raise Fail("E_TESTBED", "declared output must be under /out")
     rel = _member_path(declared[len("/out/"):])
     if rel is None:
         raise Fail("E_TESTBED", "invalid declared output path")
-    return os.path.join(out_dir, rel)
+    return rel
 
 
-def _read_output(path):
+def _open_under(base, rel):
+    """Ouvre base/rel sans suivre aucun lien, à aucun niveau (le scanner écrit /out)."""
+    parts = rel.split("/")
+    dfd = os.open(base, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        for part in parts[:-1]:
+            nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dfd)
+            os.close(dfd)
+            dfd = nfd
+        # O_NONBLOCK : un FIFO ne bloque pas le helper ; vérifié aussitôt par fstat.
+        return os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY, dir_fd=dfd)
+    finally:
+        os.close(dfd)
+
+
+def _read_output(out_dir, rel):
+    try:
+        fd = _open_under(out_dir, rel)
     except OSError:
         raise Fail("E_TESTBED", "declared output missing")
     with os.fdopen(fd, "rb") as f:
         if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
             raise Fail("E_TESTBED", "declared output is not a regular file")
+        os.set_blocking(f.fileno(), True)
         data = f.read(MAX_OUTPUT + 1)
     if len(data) > MAX_OUTPUT:
         raise Fail("E_TESTBED", "output too large")
@@ -271,7 +294,7 @@ def collect(manifest, out_dir):
     for kind, spec in sorted(outputs.items()):
         if not isinstance(spec, dict):
             raise Fail("E_TESTBED", "malformed output declaration")
-        doc = _read_output(_out_path(out_dir, spec.get("path")))
+        doc = _read_output(out_dir, _out_rel(spec.get("path")))
         if kind == "sarif":
             found += sarif_results(doc, spec.get("version", "2.1.0"))
         elif kind == "cyclonedx":

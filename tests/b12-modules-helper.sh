@@ -110,6 +110,10 @@ cat > "$STUBS/podman" <<-EOF
 			prev=\$a
 		done
 		if [[ -z "\$out" ]]; then [[ -e "$FIX/podman-fail-health" ]] && exit 1; exit 0; fi
+		case "\$(cat "$FIX/scan-trick" 2> /dev/null)" in
+		fifo) mkfifo "\$out/result.sarif"; exit 1 ;;
+		dirlink) mkdir -p "$TMP/ailleurs" && cp "$FIX/scan-output" "$TMP/ailleurs/result.sarif" && ln -s "$TMP/ailleurs" "\$out/d"; exit 1 ;;
+		esac
 		[[ -e "$FIX/scan-output" ]] && cp "$FIX/scan-output" "\$out/result.sarif"
 		src=\${out%/out}/src
 		echo "\$(stat -c %a "\$src") \$(stat -c %a "\$src/README")" > "$FIX/src-modes"
@@ -261,10 +265,11 @@ DEPTOP=$(module deptop 1.0.0 scanner '.requires.modules = ["gitleaks"]')
 WOPT=$(module wopt 1.0.0 scanner '.options.properties = {level: {enum: ["low", "high"], default: "low"}}')
 BADSYS=$(module badsys 1.0.0 scanner '.needs.sysctl = {"kernel.core_pattern": 1}')
 TRAP1=$(module trapl 1.0.0 scanner)
+DEEP=$(module deep 1.0.0 scanner '.outputs.sarif.path = "/out/d/result.sarif"')
 TRAP2=$(module trapd 1.0.0 scanner)
 mk_testbed testbed-trapl-1.0.0.tar.zst symlink
 mk_testbed testbed-trapd-1.0.0.tar.zst dotdot
-ALL=$(jq -cn --argjson a "[$GL1,$GL2,$TRIVY,$TDB,$SVC,$SVC2,$BIG,$MANYCPU,$SEMG,$OPEN,$NEWAPP,$DEPTOP,$WOPT,$BADSYS,$TRAP1,$TRAP2]" '$a')
+ALL=$(jq -cn --argjson a "[$GL1,$GL2,$TRIVY,$TDB,$SVC,$SVC2,$BIG,$MANYCPU,$SEMG,$OPEN,$NEWAPP,$DEPTOP,$WOPT,$BADSYS,$TRAP1,$TRAP2,$DEEP]" '$a')
 
 publish 3 "$ALL"
 hx refresh-catalog '{}'
@@ -301,6 +306,9 @@ expect "refresh-catalog : image par étiquette refusée" "$(code)" E_CHECKSUM
 publish 4 "$(jq -c '.[0].id = "../gitleaks"' <<< "$ALL")"
 hx refresh-catalog '{}'
 expect "refresh-catalog : identifiant « ../ » refusé" "$(code)" E_CHECKSUM
+publish 4 "$(jq -c '.[0].scan.env = {"LD_PRELOAD": "/tmp/x.so"}' <<< "$ALL")"
+hx refresh-catalog '{}'
+expect "refresh-catalog : variable LD_* dans scan.env refusée" "$(code)" E_CHECKSUM
 publish 4 "$(jq -c '. + [.[0]]' <<< "$ALL")"
 hx refresh-catalog '{}'
 expect "refresh-catalog : module en double refusé" "$(code)" E_CHECKSUM
@@ -417,6 +425,14 @@ expect "banc d'essai : archive avec lien symbolique refusée" "$(code)/$(mstate 
 hx install-modules "$(inst trapd 1.0.0)"
 expect "banc d'essai : archive avec « .. » refusée" "$(code)/$(mstate trapd)" E_ARCHIVE/absent
 expect "aucun fichier hors du répertoire de travail" "$(find "$T" -name evade.txt | wc -l)" 0
+echo fifo > "$FIX/scan-trick"
+hx install-modules "$(inst wopt 1.0.0)"
+expect "sortie piégée : FIFO refusé sans bloquer le helper" "$(code)/$(mstate wopt)" E_TESTBED/absent
+echo dirlink > "$FIX/scan-trick"
+hx install-modules "$(inst deep 1.0.0)"
+expect "sortie piégée : lien vers un répertoire de l'hôte refusé" "$(code)/$(mstate deep)" E_TESTBED/absent
+rm "$FIX/scan-trick"
+expect "conteneur nommé retiré après chaque exécution" "$(grep -c -F '"podman","rm","--force","--ignore","--time","0","scanoria-run-' "$CALLS")" "$(grep -F '"podman","run"' "$CALLS" | grep -c -F '"--timeout"')"
 touch "$FIX/podman-fail-health"
 hx install-modules "$(inst wopt 1.0.0)"
 expect "santé du scanner en échec → retour arrière" "$(code)/$(mstate wopt)" E_HEALTH_ROLLED_BACK/absent
@@ -460,7 +476,7 @@ expect "Quadlet : image par empreinte" "$(grep -c -F "Image=$(img svc)" "$CONT")
 expect "Quadlet : publié sur 127.0.0.1 seulement" "$(grep -c -E '^PublishPort=127\.0\.0\.1:18[0-9]{3}:9000$' "$CONT")" 1
 expect "Quadlet : aucune capacité" "$(grep -c -x 'DropCapability=ALL' "$CONT")" 1
 expect "Quadlet : démarrage à l'amorçage" "$(grep -c -x 'WantedBy=multi-user.target' "$CONT")" 1
-expect "Quadlet : réseau et volume" "$(find "$UNITS" -maxdepth 1 \( -name scanoria-mod-svc.network -o -name scanoria-mod-svc-data.volume \) | wc -l)" 2
+expect "Quadlet : réseau et volume" "$(find "$UNITS" -maxdepth 1 \( -name scanoria-mod-svc.network -o -name scanoria-mod-svc_data.volume \) | wc -l)" 2
 expect "base PostgreSQL créée" "$(grep -F '"runuser"' "$CALLS" | grep -c -F psql)" 1
 expect "identifiants de base en 0600" "$(stat -c %a "$T/etc/scanoria/modules/svc/db.json")" 600
 expect "fichier d'environnement en 0600 sans gabarit restant" "$(stat -c %a "$T/etc/scanoria/modules/svc/env")/$(grep -c '{' "$T/etc/scanoria/modules/svc/env")" 600/0
@@ -506,7 +522,7 @@ touch "$FIX/systemctl-fail-start"
 hx uninstall-module '{"id": "svc", "keep_data": false}'
 expect "uninstall svc en supprimant les données" "$(code)/$(mstate svc)" OK/absent
 expect "données supprimées : base détruite" "$(grep -F '"runuser"' "$CALLS" | grep -c -F 'psql')" 3
-expect "données supprimées : volume détruit" "$(called '"volume","rm","--force","scanoria-mod-svc-data"')" 1
+expect "données supprimées : volume détruit" "$(called '"volume","rm","--force","scanoria-mod-svc_data"')" 1
 expect "données supprimées : identifiants effacés" "$([[ -e "$T/etc/scanoria/modules/svc" ]] && echo présent || echo effacé)" effacé
 hx install-modules "$(inst svc 1.0.0)"
 expect "install service en échec de démarrage → retour arrière" "$(code)/$(mstate svc)" E_INTERNAL/absent

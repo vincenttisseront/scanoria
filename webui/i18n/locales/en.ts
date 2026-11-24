@@ -112,6 +112,11 @@ export default {
     E_ROLLBACK_FAILED: 'Rollback failed: action needed on the appliance.',
     E_TIMEOUT: 'Timed out.',
     E_INTERNAL: 'System service internal error.',
+    E_RESOURCES: 'Not enough resources (memory, CPUs or kernel setting) for this module.',
+    E_DEPENDENCY: 'Module dependency not met, or module required by another one.',
+    E_CONFLICT: 'This module conflicts with an installed module.',
+    E_LICENSE: 'This module’s license has restrictions that must be accepted explicitly.',
+    E_TESTBED: 'The module’s testbed failed: module not enabled, changes rolled back.',
   },
   request: {
     pending: 'Queued…',

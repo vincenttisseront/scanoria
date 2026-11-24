@@ -40,7 +40,7 @@ MODULE_VERSION_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}\Z")
 IMAGE_RE = re.compile(
     r"[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(:[0-9]{1,5})?/[a-z0-9]([a-z0-9._/-]{0,253}[a-z0-9])?"
     r"(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?@sha256:[0-9a-f]{64}\Z", re.ASCII)
-ENV_KEY_RE = re.compile(r"[A-Z_][A-Z0-9_]{0,63}\Z")
+ENV_KEY_RE = re.compile(r"(?!LD_|PATH\Z|HOME\Z)[A-Z][A-Z0-9_]{0,63}\Z")
 TYPES = ("scanner", "service", "feed", "runner")
 RESTRICTIONS = ("none", "private-code-forbidden", "no-redistribution", "other")
 
@@ -69,18 +69,26 @@ def tag_number(tag):
     return int(m.group(1)) if m else None
 
 
+API_PAGES = 5
+
+
 def _latest_from_api(tmp, repo):
-    code, obj = selfupdate.api_get(tmp, "/repos/%s/releases?per_page=30" % repo)
-    if code == 200 and isinstance(obj, list):
-        best = None
+    """Parcourt jusqu'à API_PAGES pages de 30 releases, jusqu'à trouver une catalog-v<N>."""
+    best, code = None, 0
+    for page in range(1, API_PAGES + 1):
+        suffix = "" if page == 1 else "&page=%d" % page
+        code, obj = selfupdate.api_get(tmp, "/repos/%s/releases?per_page=30%s" % (repo, suffix))
+        if code != 200 or not isinstance(obj, list):
+            return (code if page == 1 else 200), best
         for rel in obj:
             if not isinstance(rel, dict) or rel.get("draft") is not False or selfupdate.rejected(rel.get("name")):
                 continue
             n = tag_number(rel.get("tag_name"))
             if n is not None and (best is None or n > best):
                 best = n
-        return code, best
-    return code, None
+        if best is not None or len(obj) < 30:
+            break
+    return 200, best
 
 
 def _latest_from_atom(tmp, repo):

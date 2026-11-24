@@ -27,9 +27,14 @@ PREFIX = "scanoria-mod-"
 ID_RE = re.compile(r"[a-z0-9][a-z0-9-]{1,40}\Z")
 VOL_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,30}\Z")
 PATH_RE = re.compile(r"/[A-Za-z0-9._/-]{1,200}\Z")
-ENV_KEY_RE = re.compile(r"[A-Z_][A-Z0-9_]{0,63}\Z")
+ENV_KEY_RE = re.compile(r"(?!LD_|PATH\Z|HOME\Z)[A-Z][A-Z0-9_]{0,63}\Z")
 ENV_VALUE_RE = re.compile(r"[A-Za-z0-9._:/@%+=,~-]{0,1024}\Z")
 PLACEHOLDER_RE = re.compile(r"\{([a-z_]{1,32}|opt\.[a-z0-9_]{1,40})\}")
+
+
+def volume_name(mid, name):
+    """Nom du volume podman (et du fichier .volume sans extension) d'un module."""
+    return "%s%s_%s" % (PREFIX, mid, name)
 
 
 def unit_name(mid):
@@ -113,8 +118,8 @@ def render(manifest, host_port, enabled, has_env):
     if manifest.get("type") == "service":
         lines.append("PublishPort=127.0.0.1:%d:%d" % (host_port, port))
     for name, path in volumes(manifest):
-        vfile = "%s-%s.volume" % (base, name)
-        files[vfile] = "[Volume]\nVolumeName=%s-%s\n" % (base, name)
+        vfile = volume_name(mid, name) + ".volume"
+        files[vfile] = "[Volume]\nVolumeName=%s\n" % volume_name(mid, name)
         lines.append("Volume=%s:%s" % (vfile, path))
     if has_env:
         lines.append("EnvironmentFile=%s/%s/env" % ("/etc/scanoria/modules", mid))
@@ -131,17 +136,39 @@ def existing_files(mid):
     except FileNotFoundError:
         return []
     base = PREFIX + mid
+    # « _ » ne peut figurer ni dans un id ni dans un nom de volume : aucun
+    # fichier d'un autre module (« dt » et « dt-api ») ne correspond.
     return sorted(n for n in names if n in (base + ".container", base + ".network")
-                  or (n.startswith(base + "-") and n.endswith(".volume")))
+                  or (n.startswith(base + "_") and n.endswith(".volume")))
+
+
+ENV_KEY = "env"  # clé du fichier d'environnement dans un instantané
 
 
 def snapshot(mid):
-    """Contenu actuel des fichiers du module (pour un retour arrière)."""
+    """Contenu actuel des unités et du fichier d'environnement du module (retour arrière)."""
     snap = {}
     for n in existing_files(mid):
         with open(os.path.join(UNIT_DIR, n), "rb") as f:
             snap[n] = f.read()
+    try:
+        with open(os.path.join(MODULE_ETC, mid, "env"), "rb") as f:
+            snap[ENV_KEY] = f.read()
+    except FileNotFoundError:
+        snap[ENV_KEY] = None
     return snap
+
+
+def restore(mid, snap):
+    """Remet un instantané pris par snapshot()."""
+    units = {k: v for k, v in snap.items() if k != ENV_KEY}
+    write(mid, units)
+    envf = os.path.join(MODULE_ETC, mid, "env")
+    if snap.get(ENV_KEY) is not None:
+        os.makedirs(os.path.dirname(envf), mode=0o700, exist_ok=True)
+        common.atomic_write(envf, snap[ENV_KEY], 0o600, group_scanoria=False)
+    elif os.path.exists(envf):
+        os.unlink(envf)
 
 
 def write(mid, files):

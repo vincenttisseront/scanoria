@@ -49,6 +49,7 @@ SYSCTL_ALLOWED = {
     "fs.inotify.max_user_instances": (128, 1 << 16),
     "net.core.somaxconn": (128, 65535),
 }
+OPTION_NAME_RE = re.compile(r"[a-z][a-z0-9_]{0,40}\Z")
 HEALTH_PATH_RE = re.compile(r"/[A-Za-z0-9._~/?=&%-]{0,200}\Z")
 APPLIANCE_REQ_RE = re.compile(r"(>=|<=|==|=|>|<)?\s*((?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3}))\Z")
 
@@ -210,6 +211,8 @@ def resolve_options(m, given):
     props = sch.get("properties", {})
     opts = {}
     for k, p in props.items():
+        if not OPTION_NAME_RE.match(k):
+            raise Fail("E_PRECONDITION", "%s: invalid option name" % m["id"])
         if not isinstance(p, dict) or "default" not in p:
             raise Fail("E_PRECONDITION", "%s: option %s has no default" % (m["id"], k))
         opts[k] = p["default"]
@@ -395,8 +398,10 @@ def remove_data(m):
     if (m.get("needs") or {}).get("postgres"):
         drop_database(mid)
     for name, _ in quadlet.volumes(m):
-        podman("volume", "rm", "--force", "%s%s-%s" % (quadlet.PREFIX, mid, name), timeout=300)
+        podman("volume", "rm", "--force", quadlet.volume_name(mid, name), timeout=300)
     shutil.rmtree(os.path.join(quadlet.MODULE_ETC, mid), ignore_errors=True)
+    if m["type"] == "feed":
+        shutil.rmtree(os.path.join(testbed.FEEDS, mid), ignore_errors=True)
 
 
 def env_values(m, cred, host_port, options):
@@ -437,10 +442,17 @@ def scanner_health(m, timeout):
 
 
 def alloc_port(reg):
+    import socket
     used = {e.get("host_port") for e in reg["modules"].values()}
     for p in HOST_PORTS:
-        if p not in used:
-            return p
+        if p in used:
+            continue
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as so:
+            try:
+                so.bind(("127.0.0.1", p))
+            except OSError:
+                continue  # port déjà pris par un autre processus
+        return p
     raise Fail("E_RESOURCES", "no free internal port")
 
 
@@ -467,8 +479,11 @@ def start_service(m, entry, timeout):
     mid = m["id"]
     systemctl("daemon-reload")
     systemctl("start", quadlet.unit_name(mid), timeout=min(timeout, 900))
-    svc = m.get("service") or {}
-    wait_http(entry["host_port"], svc.get("health_path") or "/", min(timeout, HEALTH_TIMEOUT))
+    if systemctl("is-active", "--quiet", quadlet.unit_name(mid), check=False) != 0:
+        raise Fail("E_HEALTH_ROLLED_BACK", "unit of %s is not active" % mid)
+    if m["type"] == "service":
+        svc = m.get("service") or {}
+        wait_http(entry["host_port"], svc.get("health_path") or "/", min(timeout, HEALTH_TIMEOUT))
 
 
 def write_units(m, entry, options, cred):
@@ -596,6 +611,8 @@ def undo_install(reg, mid):
         shutil.rmtree(os.path.join(quadlet.MODULE_ETC, mid), ignore_errors=True)
     elif os.path.exists(os.path.join(quadlet.MODULE_ETC, mid, "env")):
         os.unlink(os.path.join(quadlet.MODULE_ETC, mid, "env"))
+    if m["type"] == "feed":
+        shutil.rmtree(os.path.join(testbed.FEEDS, mid), ignore_errors=True)
     del reg["modules"][mid]
     remove_image(reg, m.get("image"))
     apply_sysctl(reg)
@@ -660,6 +677,14 @@ def rollback_installs(reg, done):
 # uninstall-module
 # --------------------------------------------------------------------------
 
+def as_fail(exc, what):
+    """Toute exception devient un Fail (journalisée si imprévue) : l'opération est toujours close."""
+    if isinstance(exc, Fail):
+        return exc
+    common.log("%s: %r" % (what, exc))
+    return Fail("E_INTERNAL", "internal error")
+
+
 def get_entry(reg, mid):
     e = reg["modules"].get(mid)
     if e is None:
@@ -695,11 +720,12 @@ def act_uninstall_module(c):
         if m["type"] == "service":
             op.step("route", 90)
             route(reg)
-    except Fail as err:
+    except Exception as exc:  # noqa: BLE001 — l'opération est close dans tous les cas
+        err = as_fail(exc, "uninstall-module")
         if mid in reg["modules"]:
             reg["modules"][mid].update(status="failed", enabled=False, last_error=err.message)
         op.finish(False, err.message)
-        raise
+        raise err
     op.finish(True, "removed")
     return {"id": mid, "version": m["version"], "data_kept": keep}
 
@@ -745,17 +771,18 @@ def act_set_module_state(c):
         if m["type"] == "service":
             op.step("route", 90)
             route(reg)
-    except Fail as err:
+    except Exception as exc:  # noqa: BLE001
+        err = as_fail(exc, "set-module-state")
         e["enabled"] = not enabled
         e["status"] = "healthy" if not enabled else "disabled"
         e["last_error"] = err.message
         if m["type"] in ("service", "runner"):
             if enabled:
                 stop_service(mid)
-            quadlet.write(mid, {k: v.decode() for k, v in snap.items()})
+            quadlet.restore(mid, snap)
             systemctl("daemon-reload", check=False)
         op.finish(False, err.message)
-        raise
+        raise err
     op.finish(True, "enabled" if enabled else "disabled")
     return {"id": mid, "enabled": enabled, "changed": True}
 
@@ -778,17 +805,35 @@ def backup(m):
     d = os.path.join(BACKUPS, "%s-%s-%s" % (mid, m["version"], common.now().strftime("%Y%m%dT%H%M%SZ")))
     os.makedirs(d, mode=0o700)
     if (m.get("needs") or {}).get("postgres"):
-        r = common.run("runuser", ["-u", "postgres", "--", "/usr/bin/pg_dump", "-Fc", db_name(mid)],
-                       timeout=1800, stdout_limit=8 << 30)
-        if r.returncode != 0:
+        if run_to_file("runuser", ["-u", "postgres", "--", "/usr/bin/pg_dump", "-Fc", db_name(mid)],
+                       os.path.join(d, "db.dump"), timeout=1800) != 0:
             raise Fail("E_INTERNAL", "database backup failed")
-        common.atomic_write(os.path.join(d, "db.dump"), r.stdout, 0o600, group_scanoria=False)
     for name, _ in quadlet.volumes(m):
         if podman("volume", "export", "--output", os.path.join(d, "volume-%s.tar" % name),
-                  "%s%s-%s" % (quadlet.PREFIX, mid, name), timeout=1800) != 0:
+                  quadlet.volume_name(mid, name), timeout=1800) != 0:
             raise Fail("E_INTERNAL", "volume backup failed")
     prune_backups(mid)
     return d
+
+
+def run_to_file(name, args, dest, timeout):
+    """Comme common.run, mais la sortie va dans dest (0600) au lieu de la mémoire."""
+    import subprocess
+    exe = common.resolve(name)
+    if exe is None:
+        common.run(name, args, timeout=timeout)  # bouchon du mode test : journalisé
+        common.atomic_write(dest, b"", 0o600, group_scanoria=False)
+        return 0
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as out:
+        try:
+            p = subprocess.run([exe] + list(args), stdin=subprocess.DEVNULL, stdout=out, env=common.child_env(),
+                               timeout=timeout, cwd="/", close_fds=True, check=False)
+        except subprocess.TimeoutExpired:
+            raise Fail("E_TIMEOUT", "%s timed out" % name)
+        out.flush()
+        os.fsync(out.fileno())
+    return p.returncode
 
 
 def prune_backups(mid):
@@ -812,7 +857,7 @@ def restore(m, d):
             raise Fail("E_ROLLBACK_FAILED", "database restore failed")
     for name, _ in quadlet.volumes(m):
         f = os.path.join(d, "volume-%s.tar" % name)
-        if os.path.exists(f) and podman("volume", "import", "%s%s-%s" % (quadlet.PREFIX, mid, name), f,
+        if os.path.exists(f) and podman("volume", "import", quadlet.volume_name(mid, name), f,
                                         timeout=1800) != 0:
             raise Fail("E_ROLLBACK_FAILED", "volume restore failed")
 
@@ -857,9 +902,13 @@ def act_update_module(c):
         if is_svc:
             op.step("backup", 10)
             bdir = backup(old)
-        op.step("pull", 25)
-        pull(new, c.left())
-        if is_svc:
+        declarative = new["type"] == "feed" and not new.get("image")
+        if not declarative:
+            op.step("pull", 25)
+            pull(new, c.left())
+        if declarative:
+            pass
+        elif is_svc:
             op.step("units", 40)
             stop_service(mid)
             cred = _cred(mid) if (new.get("needs") or {}).get("postgres") else None
@@ -874,31 +923,34 @@ def act_update_module(c):
             scanner_health(new, c.left())
         op.step("testbed", 75)
         tb = testbed.run(new, timeout=c.left())
-    except Fail as err:
+    except Exception as exc:  # noqa: BLE001
+        err = as_fail(exc, "update-module")
         op.step("rollback", op.rec["progress"])
         try:
             if is_svc:
                 stop_service(mid)
                 if bdir:
                     restore(old, bdir)
-                quadlet.write(mid, {k: v.decode() for k, v in snap.items()})
+                quadlet.restore(mid, snap)
                 systemctl("daemon-reload")
                 apply_sysctl(reg)
                 if e["enabled"]:
                     start_service(old, e, max(60, c.left()))
-            remove_image(reg, new["image"])
+            remove_image(reg, new.get("image"))
         except Exception as rb:  # noqa: BLE001
             common.log("update rollback of %s failed: %r" % (mid, rb))
-            e.update(status="failed", enabled=False, last_error="update failed and rollback failed: " + err.message)
+            e.update(status="failed", enabled=False,
+                     last_error=("update failed and rollback failed: " + err.message)[:2000])
             op.finish(False, err.message)
             raise Fail("E_ROLLBACK_FAILED", "update failed (%s) and rollback failed" % err.message)
-        e["last_error"] = "update to %s failed: %s" % (version, err.message)
+        e["last_error"] = ("update to %s failed: %s" % (version, err.message))[:2000]
         op.finish(False, err.message)
         save_registry(reg)
-        code = err.code if err.code in ("E_NETWORK", "E_TESTBED", "E_DISK_SPACE", "E_TIMEOUT") else "E_HEALTH_ROLLED_BACK"
+        # Le code d'origine est gardé ; une erreur interne devient « retour arrière fait ».
+        code = "E_HEALTH_ROLLED_BACK" if err.code == "E_INTERNAL" else err.code
         raise Fail(code, "update of %s to %s failed, previous version kept: %s" % (mid, version, err.message), err.output)
     e.update(manifest=new, options=options, testbed=tb, last_error=None)
-    remove_image(reg, old["image"])
+    remove_image(reg, old.get("image"))
     apply_sysctl(reg)
     if old["type"] == "service":
         op.step("route", 90)
