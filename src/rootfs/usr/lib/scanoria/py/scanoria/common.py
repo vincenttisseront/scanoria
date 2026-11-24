@@ -379,8 +379,12 @@ class Result:
         return self.stdout.decode("utf-8", "replace")
 
 
-def run(name, args=(), *, input=None, timeout=600, env=None, stdout_limit=8 << 20, cwd="/"):
-    """Lance une commande connue ; stderr va au journal."""
+def run(name, args=(), *, input=None, timeout=600, env=None, stdout_limit=8 << 20, cwd="/",
+        stderr_tail=0):
+    """Lance une commande connue ; stderr va au journal.
+
+    stderr_tail > 0 : stderr est aussi recopié (borné) dans le journal, et ses
+    derniers octets sont rendus dans Result.stderr pour le diagnostic."""
     exe = resolve(name)
     argv = [str(a) for a in args]
     if exe is None:
@@ -390,15 +394,23 @@ def run(name, args=(), *, input=None, timeout=600, env=None, stdout_limit=8 << 2
     try:
         proc = subprocess.Popen(
             [exe] + argv, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=None, env=child_env(env), cwd=cwd,
-            start_new_session=True, close_fds=True)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE if stderr_tail else None,
+            env=child_env(env), cwd=cwd, start_new_session=True, close_fds=True)
     except OSError as e:
         return Result(127, b"", str(e).encode())
     try:
-        out, _ = proc.communicate(input=input, timeout=timeout)
+        out, err = proc.communicate(input=input, timeout=timeout)
     except subprocess.TimeoutExpired:
         kill_group(proc)
         raise Fail("E_TIMEOUT", "%s timed out after %ss" % (name, timeout))
+    if stderr_tail:
+        err = err or b""
+        try:
+            sys.stderr.buffer.write(err[-(64 << 10):])
+            sys.stderr.flush()
+        except (OSError, ValueError, AttributeError):
+            pass
+        return Result(proc.returncode, out[:stdout_limit], err[-stderr_tail:])
     return Result(proc.returncode, out[:stdout_limit])
 
 

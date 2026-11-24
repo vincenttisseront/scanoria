@@ -116,8 +116,19 @@ def feed_mounts(manifest):
     return res
 
 
-def run_confined(manifest, command, mounts=(), timeout=DEFAULT_TIMEOUT, env=None):
-    """Lance command dans l'image du module ; retourne le code de sortie."""
+def stderr_hint(raw, limit=400):
+    """Fin lisible de stderr pour un message d'erreur : une ligne, caractères
+    imprimables seulement. Les bancs d'essai ne contiennent que des données
+    factices, et la sortie est quand même bornée."""
+    text = (raw or b"").decode("utf-8", "replace")
+    text = re.sub(r"[^\x20-\x7e\u00a0-\u024f]+", " ", text)
+    text = re.sub(r" {2,}", " ", text).strip()
+    return text[-limit:]
+
+
+def run_confined(manifest, command, mounts=(), timeout=DEFAULT_TIMEOUT, env=None, with_stderr=False):
+    """Lance command dans l'image du module ; retourne le code de sortie
+    (ou (code, fin de stderr) avec with_stderr)."""
     import secrets
     name = "scanoria-run-%s" % secrets.token_hex(8)
     args = confined_args(manifest, list(mounts) + feed_mounts(manifest), name=name)
@@ -127,9 +138,12 @@ def run_confined(manifest, command, mounts=(), timeout=DEFAULT_TIMEOUT, env=None
         args += ["--env", "%s=%s" % (k, env[k])]
     args += ["--entrypoint", json.dumps([command[0]]), manifest["image"]] + list(command[1:])
     try:
-        r = common.run("podman", args, timeout=timeout + 60, stdout_limit=1 << 20)
+        r = common.run("podman", args, timeout=timeout + 60, stdout_limit=1 << 20,
+                       stderr_tail=4096 if with_stderr else 0)
     finally:
         common.run("podman", ["rm", "--force", "--ignore", "--time", "0", name], timeout=120)
+    if with_stderr:
+        return r.returncode, stderr_hint(r.stderr)
     return r.returncode
 
 
@@ -395,10 +409,11 @@ def run(manifest, timeout=None):
         t = scan.get("timeout_s") if isinstance(scan.get("timeout_s"), int) else DEFAULT_TIMEOUT
         t = max(10, min(t, timeout or DEFAULT_TIMEOUT))
         cmd = render_command(scan["command"], option_defaults(manifest))
-        rc = run_confined(manifest, cmd, [(src, "/src", "ro"), (out, "/out", "rw")], timeout=t,
-                          env=scan.get("env"))
+        rc, hint = run_confined(manifest, cmd, [(src, "/src", "ro"), (out, "/out", "rw")], timeout=t,
+                                env=scan.get("env"), with_stderr=True)
         if rc not in (scan.get("exit_codes_ok") or SCANNER_OK_RC):
-            raise Fail("E_TESTBED", "scanner exited with code %d on its testbed" % rc)
+            msg = "scanner %s exited with code %d on its testbed" % (manifest["id"], rc)
+            raise Fail("E_TESTBED", msg + (": " + hint if hint else ""))
         details = check_expect(collect(manifest, out), tb["expect"])
         bad = [d for d in details if not d["ok"]]
         if bad:
