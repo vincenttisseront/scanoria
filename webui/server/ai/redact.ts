@@ -8,7 +8,7 @@
 // agressif : mieux vaut masquer un identifiant inoffensif que laisser passer
 // un jeton.
 
-import { entropy, looksRandom as engineLooksRandom, maskSecrets } from '../findings/redact'
+import { entropy, looksRandom as engineLooksRandom, maskSecrets, URL_SECRET_TYPE } from '../findings/redact'
 
 export interface Redaction {
   text: string
@@ -16,7 +16,7 @@ export interface Redaction {
 }
 
 /** Noms des types tels que l'IA les reçoit depuis la 0.3. */
-const AI_TYPES: Record<string, string> = { 'url-password': 'url-credentials', 'api-key': 'stripe-key' }
+const AI_TYPES: Record<string, string> = { [URL_SECRET_TYPE]: 'url-credentials', 'api-key': 'stripe-key' }
 
 /** Jeu de caractères d'une valeur, sans rien en révéler d'autre. */
 export function charset(value: string): string {

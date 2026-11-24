@@ -125,10 +125,10 @@ export async function findingRow(db: Queryable, ctx: TaskContext, extra = ''): P
 export function pathHints(path: string | null): { test: boolean, vendored: boolean, example: boolean, generated: boolean } {
   const p = (path ?? '').toLowerCase()
   return {
-    test: /(^|\/)(tests?|__tests__|spec|specs|testdata|test-data|fixtures?|mocks?)(\/|$)|[._-](test|spec)\.[a-z0-9]+$|(^|\/)test_[^/]+$/.test(p),
+    test: /(?:(?:^|\/)(?:tests?|__tests__|spec|specs|testdata|test-data|fixtures?|mocks?)(?:\/|$))|(?:[._-](?:test|spec)\.[a-z0-9]+$)|(?:(?:^|\/)test_[^/]+$)/.test(p),
     vendored: /(^|\/)(vendor|third[_-]?party|node_modules|external)(\/|$)/.test(p),
-    example: /(^|\/)(examples?|samples?|demo|docs?)(\/|$)|\.(example|sample|dist|template)(\.|$)/.test(p),
-    generated: /(^|\/)(dist|build|generated|gen)(\/|$)|\.(min\.js|pb\.go|generated\.[a-z]+)$/.test(p),
+    example: /(?:(?:^|\/)(?:examples?|samples?|demo|docs?)(?:\/|$))|(?:\.(?:example|sample|dist|template)(?:\.|$))/.test(p),
+    generated: /(?:(?:^|\/)(?:dist|build|generated|gen)(?:\/|$))|(?:\.(?:min\.js|pb\.go|generated\.[a-z]+)$)/.test(p),
   }
 }
 

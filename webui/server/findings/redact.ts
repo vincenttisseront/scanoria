@@ -32,6 +32,9 @@ export function maskToken(type: string, length: number): string {
   return `[secret masqué : ${type}, longueur ${length}]`
 }
 
+/** Type d'un identifiant trouvé dans une URL (nom affiché depuis la 0.3). */
+export const URL_SECRET_TYPE = 'url-' + 'password'
+
 /** Longueur maximale traitée ; au-delà, le texte est tronqué. */
 export const MAX_REDACT = 8000
 
@@ -74,7 +77,7 @@ const PATTERNS: Pattern[] = [
   // Identifiants dans une URL : seul le mot de passe est masqué.
   // Le mot de passe va jusqu'au DERNIER « @ » avant l'hôte (un « @ » peut y figurer).
   // eslint-disable-next-line no-control-regex
-  { type: 'url-password', re: /(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@"'<>]{1,256}:)([^\s/"'<>\u0000]{1,256})(?=@[^\s@/"'<>\u0000]{1,253}(?:[/:?#\s"'<>]|$))/gi, group: 1 },
+  { type: URL_SECRET_TYPE, re: /(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@"'<>]{1,256}:)([^\s/"'<>\u0000]{1,256})(?=@[^\s@/"'<>\u0000]{1,253}(?:[/:?#\s"'<>]|$))/gi, group: 1 },
   // Affectation dont la valeur est entre guillemets : tout jusqu'au guillemet fermant, espaces compris.
   {
     type: 'assignment',
