@@ -33,7 +33,7 @@ export default defineEventHandler(async (event) => {
       const group = await groupOf(db, id)
       // Tous les membres (sans le plafond d'affichage), verrouillés dans l'ordre des id :
       // deux tris simultanés du même groupe ne s'interbloquent pas.
-      const ids = [...new Set([id, ...(await groupMemberIds(db, id) ?? [])])].sort()
+      const ids = [...new Set([id, ...(await groupMemberIds(db, id) ?? [])])].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
       for (const fid of ids) {
         const { before } = await setFindingStatus(db, fid, { status: body.status, reason: body.reason ?? null, until }, auth.user.id)
         await writeAudit(db, {
