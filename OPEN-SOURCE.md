@@ -99,3 +99,13 @@ Les outils du catalogue (scanners, SonarQube, Dependency-Track…) **ne sont pas
 dans l'ISO** : ils s'installent après coup, chacun dans son conteneur, non
 modifié. Chaque module déclare sa licence dans son manifeste, et la console
 l'affiche. L'AGPL de l'appliance ne les couvre pas.
+
+### Données de vulnérabilités
+
+Les bases `epss` et `kev` ne sont pas dans l'ISO : l'appliance les télécharge
+après installation du module correspondant.
+
+| Données | Fournisseur | Conditions |
+|---|---|---|
+| EPSS (probabilité d'exploitation) | FIRST.org | Diffusion gratuite, sans inscription ; attribution demandée dans les produits : « EPSS, FIRST.org », affichée dans les Résultats et la page À propos |
+| Known Exploited Vulnerabilities | CISA | CC0-1.0 |
