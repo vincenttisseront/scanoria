@@ -324,10 +324,31 @@ jobs:
       - name: tests/b12-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b12-live.sh
 
+  runner-live:
+    name: runner-live (podman et nftables réels, b14-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dépendances (podman, nftables, jq, python3-yaml)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark nftables python3-yaml git curl openssl
+          sudo podman --version
+          sudo podman info --format '{{.Host.NetworkBackend}}'
+      # Machine jetable : le runner tourne en root avec le vrai podman et le vrai
+      # nftables (§ 6.4, réseau de récupération limité à la forge).
+      - name: tests/b14-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b14-live.sh
+
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

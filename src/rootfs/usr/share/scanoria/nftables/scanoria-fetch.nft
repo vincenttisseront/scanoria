@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Table « inet scanoria_fetch » : réseau de récupération des sources (ARCHITECTURE
+# § 12.4), chargée par scanoria-runner si elle manque. Le réseau podman
+# « scanoria-fetch » (@SUBNET@) ne sort que vers les triplets (conteneur,
+# adresse de la forge, port) ajoutés par le runner pour la durée d'un clone,
+# puis retirés. Tout le reste venant de ce réseau est rejeté, vers l'extérieur
+# comme vers l'appliance. Aucune autre table n'est modifiée.
+table inet scanoria_fetch {
+	set allow4 {
+		type ipv4_addr . ipv4_addr . inet_service
+	}
+
+	chain forward {
+		type filter hook forward priority filter - 5; policy accept;
+		ip saddr @SUBNET@ ip saddr . ip daddr . tcp dport @allow4 accept
+		ip saddr @SUBNET@ drop
+	}
+
+	chain input {
+		type filter hook input priority filter - 5; policy accept;
+		ip saddr @SUBNET@ ip saddr . ip daddr . tcp dport @allow4 accept
+		ip saddr @SUBNET@ drop
+	}
+}

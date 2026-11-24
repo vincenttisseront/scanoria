@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Service root : tâches d'analyse déposées par scanoria-worker (ARCHITECTURE § 12).
+# Il ne fait confiance à rien dans la tâche (principe 4) et lance chaque module
+# dans un conteneur jetable confiné (CLAUDE.md § 6.4). File propre, distincte
+# de celle du helper : une analyse ne bloque jamais une demande d'administration.
+[Unit]
+Description=Scanoria scan runner
+After=local-fs.target systemd-tmpfiles-setup.service network-online.target scanoria-firewall.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/scanoria-runner
+Restart=on-failure
+RestartSec=5
+UMask=0027
+PrivateTmp=yes
+ProtectHome=read-only
+# Les conteneurs d'analyse en cours sont arrêtés avec le service ; les tâches
+# interrompues sont publiées en erreur infra au redémarrage (E_RUNNER_RESTARTED).
+KillMode=mixed
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
