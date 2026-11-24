@@ -97,6 +97,18 @@ grep -q '^NoNewPrivileges=yes' "$W" && grep -q '^ProtectSystem=strict' "$W" && g
 	&& grep -q '^PartOf=scanoria-console.service' "$W" && grep -q '^IPAddressDeny=any' "$W" \
 	&& grep -q '^Wants=scanoria-worker.service' "$RF/usr/lib/systemd/system/scanoria-console.service" \
 	&& ok "worker : utilisateur scanoria, durcissement, lié à la console" || ko "worker : durcissement"
+# Renommage tmp/ → incoming/ : les deux doivent être sous un même montage
+# ReadWritePaths (sinon EXDEV sur l'appliance, invisible hors systemd).
+for u in scanoria-console.service scanoria-worker.service; do
+	if grep -E '^ReadWritePaths=.*/(tmp|incoming)( |$)' "$RF/usr/lib/systemd/system/$u" >/dev/null; then
+		ko "$u : tmp/ et incoming/ montés séparément (renommage EXDEV)"
+	else
+		ok "$u : tmp/ et incoming/ sous un même montage"
+	fi
+done
+grep -q '^ReadWritePaths=/var/lib/scanoria/requests$' "$RF/usr/lib/systemd/system/scanoria-console.service" \
+	&& grep -q '^ReadWritePaths=/var/lib/scanoria/scans/jobs$' "$W" \
+	&& ok "dépôt des demandes et des tâches : répertoire parent ouvert en écriture" || ko "ReadWritePaths des demandes ou des tâches"
 
 # --- 3. Pare-feu --------------------------------------------------------------------------
 T="$TMP/root"
