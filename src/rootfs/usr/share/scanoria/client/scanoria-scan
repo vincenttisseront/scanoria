@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Vincent Tisseront
 #
 # scanoria-scan : client CI de l'appliance Scanoria (ARCHITECTURE § 12.8).
-# POSIX sh, curl et jq seulement. Téléchargeable depuis la console :
+# sh POSIX, avec curl, jq, mktemp, head et date (coreutils, busybox). Téléchargeable depuis la console :
 #   curl -fsSo scanoria-scan https://<appliance>/api/gates/client
 #
 #   SCANORIA_TOKEN=scn_… scanoria-scan --url https://analyse.exemple.test \
@@ -160,7 +160,8 @@ if [ -z "$SCAN" ]; then
     api_error "$status"
     exit 3
   fi
-  SCAN=$(jq -r '.scan_id' "$TMP/body")
+  SCAN=$(jq -r '.scan_id // empty' "$TMP/body")
+  printf '%s' "$SCAN" | grep -Eq "$UUID_RE" || die 3 "réponse inattendue de la console" "unexpected console response"
   number=$(jq -r '.number' "$TMP/body")
   path=$(jq -r '.url' "$TMP/body")
   info "scanoria-scan: analyse n° $number déposée pour $REF : $URL$path" "scanoria-scan: scan #$number queued for $REF: $URL$path"
@@ -183,7 +184,8 @@ while :; do
   case $status in
     200)
       failures=0
-      state=$(jq -r '.status' "$TMP/body")
+      state=$(jq -r '.status // empty' "$TMP/body" 2>/dev/null)
+      [ -n "$state" ] || die 3 "réponse inattendue de la console" "unexpected console response"
       verdict=$(jq -r '.verdict // empty' "$TMP/body")
       case $state in
         done|error|cancelled) break ;;

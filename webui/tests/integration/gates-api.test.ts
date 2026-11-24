@@ -27,13 +27,13 @@ import { evaluateGate, ScanNotFoundError } from '../../server/gates/evaluate'
 import { badTokenLimiter, publicLimiter, tokenLimiter } from '../../server/middleware/api-token'
 import { VerdictDetails } from '#shared/analysis'
 
-const enqueued = vi.hoisted(() => ({ calls: [] as Record<string, unknown>[], fail: false }))
+const enqueued = vi.hoisted(() => ({ calls: [] as Record<string, unknown>[], fail: '' as string }))
 vi.mock('../../server/scans/enqueue', async () => {
   const { getPool } = await import('../../server/utils/db')
   return {
     enqueueScan: async (_db: unknown, p: Record<string, unknown>) => {
       enqueued.calls.push(p)
-      if (enqueued.fail) throw new Error('project archived')
+      if (enqueued.fail) throw Object.assign(new Error('refusée'), { code: enqueued.fail })
       const pool = getPool()
       const res = await pool.query<{ id: string, number: number }>(
         `INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id, api_token_id, requested_by)
@@ -208,7 +208,7 @@ describe.skipIf(!DATABASE_URL)('quality gates et API de la CI (PostgreSQL réel)
 
   beforeEach(() => {
     enqueued.calls.length = 0
-    enqueued.fail = false
+    enqueued.fail = ''
     tokenLimiter.reset('x')
   })
 
@@ -375,8 +375,19 @@ describe.skipIf(!DATABASE_URL)('quality gates et API de la CI (PostgreSQL réel)
         expect((await call(`/api/projects/${projectA}/scans`, { method: 'POST', bearer: tok.value, json: body })).status).toBe(400)
       }
       expect((await call(`/api/projects/${projectA}/scans`, { method: 'POST', bearer: tok.value, json: { ref: 'main', profile: 'inconnu' } })).status).toBe(400)
-      enqueued.fail = true
-      expect(code(await call(`/api/projects/${projectA}/scans`, { method: 'POST', bearer: tok.value, json: { ref: 'main' } }))).toBe('E_SCAN_REFUSED')
+      const refused = async (reason: string) => {
+        enqueued.fail = reason
+        return call(`/api/projects/${projectA}/scans`, { method: 'POST', bearer: tok.value, json: { ref: 'main' } })
+      }
+      const source = await refused('E_SCAN_SOURCE')
+      expect(source.status).toBe(409)
+      expect(source.data.data).toMatchObject({ code: 'E_SCAN_REFUSED', reason: 'E_SCAN_SOURCE' })
+      expect(code(await refused('E_SCAN_PROJECT_ARCHIVED'))).toBe('E_PROJECT_ARCHIVED')
+      expect((await refused('E_SCAN_PROJECT_NOT_FOUND')).status).toBe(404)
+      expect((await refused('E_SCAN_REF')).data.data.issues[0]).toEqual({ path: 'ref', code: 'E_SCAN_REF' })
+      expect((await refused('E_SCAN_PROFILE')).status).toBe(400)
+      expect((await refused('inattendue')).status).toBe(500)
+      enqueued.fail = ''
 
       const audit = await db.pool.query<{ actor_username: string }>('SELECT actor_username FROM audit_log WHERE action = \'scan.request\' ORDER BY id')
       expect(audit.rows.map(r => r.actor_username)).toEqual([`api-token:${tok.prefix}`, 'goperator'])
@@ -422,7 +433,9 @@ describe.skipIf(!DATABASE_URL)('quality gates et API de la CI (PostgreSQL réel)
 
       const ip = nextIp()
       for (let i = 0; i < 30; i++) badTokenLimiter.hit(ip)
-      expect((await call(`/api/scans/${scan}/verdict`, { bearer: tok.value, ip })).status).toBe(429)
+      expect((await call(`/api/scans/${scan}/verdict`, { bearer: `scn_${'B'.repeat(40)}`, ip })).status).toBe(429)
+      // Un jeton valide de la même adresse passe toujours.
+      expect((await call(`/api/scans/${scan}/verdict`, { bearer: tok.value, ip })).status).toBe(200)
       badTokenLimiter.reset(ip)
     })
   })

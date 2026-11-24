@@ -56,14 +56,15 @@ export default defineEventHandler(async (event) => {
   }
 
   const ip = clientAddress(event) ?? 'unknown'
-  if (badTokenLimiter.isBlocked(ip)) throw tooMany(event, badTokenLimiter, ip)
   const route = CI_ROUTES.find(r => r.method === method && r.re.test(path))
   if (!route) throw gateError(403, 'E_TOKEN_SCOPE')
 
   const presented = authz.replace(/^bearer\s+/i, '').trim()
   const check = await verifyApiToken(getPool(), presented)
   if (!check.ok) {
-    badTokenLimiter.hit(ip)
+    // Seuls les refus sont limités par adresse : un jeton valide derrière le
+    // même NAT n'est jamais bloqué par le mauvais jeton d'un voisin.
+    if (!badTokenLimiter.hit(ip)) throw tooMany(event, badTokenLimiter, ip)
     throw gateError(401, check.code)
   }
   if (!tokenLimiter.hit(check.token.id)) throw tooMany(event, tokenLimiter, check.token.id)

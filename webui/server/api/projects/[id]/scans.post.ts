@@ -38,8 +38,15 @@ export default defineEventHandler(async (event) => {
     })
   }
   catch (err) {
-    console.error('[gates] enqueueScan refused:', (err as Error).message)
-    throw gateError(409, 'E_SCAN_REFUSED')
+    // EnqueueScanError (chantier C) : code E_SCAN_* stable, jamais le message brut.
+    const reason = (err as { code?: unknown }).code
+    if (reason === 'E_SCAN_PROJECT_NOT_FOUND') throw apiError(404, 'E_NOT_FOUND')
+    if (reason === 'E_SCAN_PROJECT_ARCHIVED') throw gateError(409, 'E_PROJECT_ARCHIVED')
+    if (reason === 'E_SCAN_PROFILE' || reason === 'E_SCAN_REF') {
+      throw apiError(400, 'E_VALIDATION', { issues: [{ path: reason === 'E_SCAN_REF' ? 'ref' : 'profile', code: reason }] })
+    }
+    if (typeof reason === 'string' && /^E_SCAN_[A-Z_]{1,40}$/.test(reason)) throw gateError(409, 'E_SCAN_REFUSED', { reason })
+    throw err
   }
   await writeAudit(pool, {
     actor: caller.kind === 'user'

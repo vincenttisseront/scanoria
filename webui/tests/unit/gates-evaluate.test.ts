@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { computeVerdict, familyOf, globToRegExp, rulesFromPlan, type GateException, type GateFinding, type GateInput, type GateModule } from '../../server/gates/evaluate'
+import { computeVerdict, familyOf, globToRegExp, planModuleIds, rulesFromPlan, type GateException, type GateFinding, type GateInput, type GateModule } from '../../server/gates/evaluate'
 import { validRef, gateCreateSchema, scanCreateSchema, tokenCreateSchema } from '../../server/gates/gates'
 import { generateToken, hashToken, tokenPrefix } from '../../server/gates/tokens'
 import { badgeSvg } from '../../server/gates/badge'
@@ -210,6 +210,25 @@ describe('computeVerdict', () => {
       expect(v.verdict).toBe('failed')
       expect(v.reasons.map(r => r.code)).toEqual(['vuln', 'module-error'])
     })
+  })
+
+  it('module du plan sans ligne scan_modules → absent, non concluant', () => {
+    const v = run({ modules: [ok('gitleaks')], planModules: ['gitleaks', 'trivy'] })
+    expect(v.verdict).toBe('inconclusive')
+    expect(v.reasons[0]).toMatchObject({ code: 'module-missing', module: 'trivy', blocking: true })
+    expect(planModuleIds({ modules: [{ id: 'trivy' }, { module_id: 'gitleaks' }, { id: 'Bad!' }, null, { id: 'trivy' }] })).toEqual(['trivy', 'gitleaks'])
+    expect(planModuleIds(null)).toEqual([])
+    expect(planModuleIds({ modules: 'x' })).toEqual([])
+  })
+
+  it('secret classé faux positif dans le suivi F7 : écarté', () => {
+    expect(run({ findings: [finding({ category: 'secrets', secret_type: 'generic', secret_state: 'false-positive' })] }).verdict).toBe('passed')
+    expect(run({ findings: [finding({ category: 'secrets', secret_type: 'generic', secret_state: 'to-revoke' })] }).verdict).toBe('failed')
+  })
+
+  it('glob à plus de 8 jokers : exception ignorée', () => {
+    const f = finding({ path: 'a/b.js' })
+    expect(run({ findings: [f], exceptions: [exc('path', { glob: '*/*/*/*/*/*/*/*/*' })] }).verdict).toBe('failed')
   })
 
   it('couverture : trous signalés sans bloquer', () => {

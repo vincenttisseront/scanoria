@@ -39,6 +39,8 @@ export interface GateFinding {
   package_name: string | null
   malicious: boolean
   secret_type: string | null
+  /** Suivi F7 : un secret classé faux positif n'est plus compté. */
+  secret_state?: string | null
   status: string
   status_until: string | null
   is_new: boolean
@@ -61,6 +63,8 @@ export interface GateInput {
   gateId: string
   rules: GateRules
   modules: GateModule[]
+  /** Modules figés dans le plan (G11) : un module du plan sans ligne scan_modules est absent. */
+  planModules?: string[]
   findings: GateFinding[]
   exceptions: GateException[]
   coverage?: unknown
@@ -135,6 +139,8 @@ function compileException(e: GateException, today: string): CompiledException | 
   const base = { source: e, kind, module: null }
   switch (kind) {
     case 'path': {
+      // Au plus 8 jokers : borne le retour arrière de l'expression (chemins ≤ 1024).
+      if ((t.glob!.match(/[*?]/g) ?? []).length > 8) return null
       const re = globToRegExp(normalizePath(t.glob!))
       return { ...base, matchFinding: f => !!f.path && toolOk(f) && re.test(normalizePath(f.path)) }
     }
@@ -159,6 +165,7 @@ function compileException(e: GateException, today: string): CompiledException | 
 /** Triés : un tri humain qui écarte le résultat (faux positif, accepté encore valide, corrigé). */
 function triagedOut(f: GateFinding, today: string): boolean {
   if (f.status === 'false-positive' || f.status === 'fixed') return true
+  if (f.secret_state === 'false-positive') return true
   return f.status === 'accepted' && !!f.status_until && f.status_until >= today
 }
 
@@ -264,7 +271,9 @@ export function computeVerdict(input: GateInput): VerdictDetails {
   if (input.modules.length === 0) {
     moduleReasons.push({ code: 'module-missing', blocking: true, count: 0, severity: null, module: null, finding_ids: [], actions: ['install-module'] })
   }
-  for (const m of [...input.modules].sort((a, b) => a.module_id.localeCompare(b.module_id))) {
+  const seen = new Set(input.modules.map(m => m.module_id))
+  const absent = (input.planModules ?? []).filter(id => !seen.has(id)).map(id => ({ module_id: id, status: 'missing' }))
+  for (const m of [...input.modules, ...absent].sort((a, b) => a.module_id.localeCompare(b.module_id))) {
     const r = MODULE_REASON[m.status]
     if (!r) continue
     const ex = exceptions.find(e => e.module === m.module_id)
@@ -276,6 +285,8 @@ export function computeVerdict(input: GateInput): VerdictDetails {
   const gaps = coverageGaps(input.coverage)
   if (gaps > 0) infoReasons.push({ code: 'coverage-gap', blocking: false, count: gaps, severity: null, module: null, finding_ids: [], actions: ['install-module'] })
 
+  // Un résultat bloquant donne « failed » même si un module a échoué : le
+  // blocage est déjà certain ; les modules en échec restent listés à la suite.
   const findingBlock = blockingReasons.length > 0
   const moduleBlock = moduleReasons.some(r => r.blocking)
   const verdict = findingBlock ? 'failed' : moduleBlock ? 'inconclusive' : 'passed'
@@ -317,6 +328,17 @@ export function rulesFromPlan(plan: unknown): GateRules | null {
   return parsed.success ? parsed.data : null
 }
 
+/** Identifiants des modules figés dans le plan : plan.modules[].id ou .module_id. */
+export function planModuleIds(plan: unknown): string[] {
+  const list = (plan as { modules?: unknown } | null)?.modules
+  if (!Array.isArray(list)) return []
+  const ids = list.map((m) => {
+    const o = m as { id?: unknown, module_id?: unknown } | null
+    return typeof o?.id === 'string' ? o.id : typeof o?.module_id === 'string' ? o.module_id : null
+  })
+  return [...new Set(ids.filter((id): id is string => !!id && /^[a-z0-9][a-z0-9-]{1,40}$/.test(id)))]
+}
+
 /** Contrat 6 : évalue le quality gate d'une analyse (sans l'enregistrer : C le fait). */
 export async function evaluateGate(db: Queryable, scanId: string, now = new Date()): Promise<VerdictDetails> {
   const scan = await db.query<{ project_id: string, gate_id: string, plan: unknown, coverage: unknown, gate_rules: unknown, today: string }>(
@@ -334,7 +356,7 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
     db.query<GateModule>('SELECT module_id, status FROM scan_modules WHERE scan_id = $1', [scanId]),
     db.query<GateFinding>(
       `SELECT f.id, f.tool, f.rule_id, f.category, f.severity, f.path, f.vuln_ids,
-              f.package->>'name' AS package_name, f.malicious, f.secret_type, f.status,
+              f.package->>'name' AS package_name, f.malicious, f.secret_type, f.secret_state, f.status,
               to_char(f.status_until, 'YYYY-MM-DD') AS status_until, sf.is_new
          FROM scan_findings sf JOIN findings f ON f.id = sf.finding_id
         WHERE sf.scan_id = $1`,
@@ -352,6 +374,7 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
     gateId: row.gate_id,
     rules,
     modules: modules.rows,
+    planModules: planModuleIds(row.plan),
     findings: findings.rows,
     exceptions: exceptions.rows,
     coverage: row.coverage,
