@@ -415,7 +415,7 @@ hx uninstall-module '{"id": "app", "keep_data": true}'
 expect "uninstall app en gardant les données" "$(code)/$(mstate app)" OK/absent
 expect "données gardées : secrets et sauvegardes" "$([[ -f "$SECDIR/db-password" && -d "$T/var/lib/scanoria/backups/modules/app" ]] && echo gardées)" gardées
 expect "pg_hba : accès retiré" "$(grep -c mod_app "$T/etc/postgresql/16/main/scanoria-modules-hba.conf" || true)" 0
-expect "secrets Podman retirés" "$(called '"secret","rm","scanoria-mod-app-db-password"')" 1
+expect "secrets Podman retirés" "$(grep -F 'scanoria-mod-app-db-password' "$CALLS" | tail -1 | grep -c '"secret","rm"')" 1
 expect "aucun fichier sysctl restant" "$(find "$T/etc/sysctl.d" -name '60-scanoria-*.conf' | wc -l)" 0
 hx install-modules "$(inst app 1.2.0)"
 expect "réinstallation : mot de passe gardé repris" "$(code)/$([[ "$(cat "$SECDIR/db-password")" == "$PW" ]] && echo même)" OK/même
