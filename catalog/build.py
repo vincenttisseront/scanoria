@@ -380,9 +380,25 @@ def check_testbed_archive(path):
 
 # --- Dépendances, conflits, packs (G1, F11) ------------------------------------------
 
+def check_variants(m):
+    """Variantes d'un service (service.variants) : déclarations cohérentes et
+    compatibles avec la version du module (même majeure.mineure, même base)."""
+    from scanoria import common as _common, variants  # noqa: PLC0415
+    try:
+        variants.optional_features(m)
+        for v in variants.declared(m):
+            why = variants.incompatibility(m, v)
+            if why:
+                raise BuildError("%s : variante %s incompatible (%s)" % (m["id"], v["feature"], why))
+    except _common.Fail as f:
+        raise BuildError("%s : %s" % (m["id"], f.message))
+
+
 def check_graph(modules, packs):
     """modules : {id: entrée}. Refuse dépendances introuvables, cycles et conflits."""
     for mid, m in modules.items():
+        if m["type"] == "service":
+            check_variants(m)
         req = m["requires"]
         for r in req.get("modules", []):
             if r == mid:

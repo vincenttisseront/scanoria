@@ -440,6 +440,54 @@ hx install-modules "$(inst app 1.2.0)"
 expect "secret Podman impossible → retour arrière complet" "$(code)/$(mstate app)/$([[ -e "$T/var/lib/scanoria/modules/app" ]] && echo reste || echo propre)/$(grep -c 'DROP ROLE' "$SQL")" E_INTERNAL/absent/propre/1
 rm "$FIX/secret-fail"
 
+# === 9 bis. Variantes d'image (option « branches », plugin de branches) =====
+VIMG="registry.exemple.test/scanoria/brv-plugin@sha256:$(printf '%064d' 0 | tr 0 b)"
+BRV_OPT='.needs = {sysctl: {}, postgres: false} | .service.secrets = [] | .service.env = {} | .service.backup = null
+	| .options.properties = {branches: {type: "boolean", default: true}} | .service.features = ["branches"]'
+BRV_VAR='.service.variants = [{feature: "branches", option: "branches", image: $v, version: "2.0.7", base_version: "2.0.0",
+	license: {spdx: "LGPL-3.0-only", url: "https://exemple.test/l", verified_at: "2026-11-24"},
+	upstream: {source: "https://exemple.test/s"},
+	leaves: [{volume: "data", dir: "plugins", prefix: "brv-plugin"}]}]'
+BRV1=$(svc brv 2.0.0 "$BRV_OPT | .service.variants = []")
+BRV1V=$(jq -c --arg v "$VIMG" "$BRV_VAR" <<< "$BRV1")
+BRV2=$(svc brv 2.1.0 "$BRV_OPT | .service.variants = []")
+publish $((CATN + 2)) "$(jq -cn --argjson a "[$APP1,$APP2,$APP3,$SMALL,$HUGE,$SCAN_LIMIT,$BRV1]" '$a')"
+hx refresh-catalog '{}'
+hx install-modules "$(inst brv 2.0.0)"
+BCONT="$UNITS/scanoria-mod-brv.container"
+feat() { jq -r '.modules[] | select(.id=="brv") | .features.branches | (.active|tostring) + "/" + (.code // "-")' "$STATE"; }
+expect "variante : sans plugin compatible, image d'origine" "$(code)/$(mstate brv)/$(grep -c -F "Image=$(img brv-2.0.0)" "$BCONT")" OK/healthy/true/2.0.0/1
+expect "variante : fonction indisponible publiée avec sa raison" "$(feat)" false/unavailable
+hx update-module '{"id": "brv", "version": "2.0.0"}'
+expect "variante : même version sans changement d'image refusée" "$(code)" E_VERSION
+publish $((CATN + 3)) "$(jq -cn --argjson a "[$APP1,$APP2,$APP3,$SMALL,$HUGE,$SCAN_LIMIT,$BRV1V,$BRV2]" '$a')"
+hx refresh-catalog '{}'
+: > "$CALLS"
+hx update-module '{"id": "brv", "version": "2.0.0"}'
+expect "variante devenue compatible : appliquée comme mise à jour" "$(code)/$(mstate brv)" OK/healthy/true/2.0.0
+expect "variante : image du plugin tirée puis utilisée" "$(called "\"pull\",\"--quiet\",\"$VIMG\"")/$(grep -c -F "Image=$VIMG" "$BCONT")" 1/1
+expect "variante : sauvegarde avant le changement d'image" "$(jq -r '.output.log[0] | startswith("backup ")' <<< "$R")" true
+expect "variante : fonction active" "$(feat)" true/-
+expect "variante : image d'origine retirée" "$(called "\"rmi\",\"--ignore\",\"$(img brv-2.0.0)\"")" 1
+hx update-module '{"id": "brv", "version": "2.0.0"}'
+expect "variante déjà appliquée : rien à mettre à jour" "$(code)" E_VERSION
+: > "$CALLS"
+hx update-module '{"id": "brv", "version": "2.1.0"}'
+expect "nouvelle version sans plugin compatible : image d'origine" "$(code)/$(mstate brv)/$(grep -c -F "Image=$(img brv-2.1.0)" "$BCONT")" OK/healthy/true/2.1.0/1
+expect "fichiers du plugin cherchés dans le volume avant le démarrage" "$(called '"volume","inspect","--format","{{.Mountpoint}}","scanoria-mod-brv_data"')" 1
+expect "fonction de nouveau indisponible" "$(feat)" false/unavailable
+expect "image du plugin retirée" "$(called "\"rmi\",\"--ignore\",\"$VIMG\"")" 1
+hx uninstall-module '{"id": "brv", "keep_data": false}'
+hx install-modules "$(jq -cn '{modules: [{id: "brv", version: "2.0.0", options: {branches: false}}], accept_licenses: []}')"
+expect "option « branches » à false : image d'origine même avec variante" "$(code)/$(grep -c -F "Image=$(img brv-2.0.0)" "$BCONT")/$(feat)" OK/1/false/disabled
+hx uninstall-module '{"id": "brv", "keep_data": false}'
+expect "variante : désinstallation" "$(code)/$(mstate brv)" OK/absent
+CATN=$((CATN + 3))
+# Écartée dès la vérification du catalogue (check_module) : introuvable ensuite.
+hostile "variante non épinglée" "$BRV_OPT"' | .service.variants = [{feature: "branches", option: "branches", image: "registry.exemple.test/x:latest",
+	version: "1.0.1", base_version: "1.0.0", license: {spdx: "MIT", url: "https://exemple.test", verified_at: "2026-11-24"},
+	upstream: {source: "https://exemple.test"}}]' E_NOT_FOUND
+
 # === 10. Fichiers livrés ====================================================
 for f in backup-module restore-module; do
 	expect "schéma de demande $f chargeable" "$(pyrun '

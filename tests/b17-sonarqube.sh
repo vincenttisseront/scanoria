@@ -16,7 +16,12 @@
 #      absent ou jeton manquant (missing, G13), jeton masqué partout ;
 #   5. mise en service (provision.py) contre le faux serveur : mot de passe
 #      admin remplacé, compte et jeton d'analyse, réglages, idempotence,
-#      migration de base, reprise, réinitialisation affichée une seule fois.
+#      migration de base, reprise, réinitialisation affichée une seule fois ;
+#   6. branches et PR (option « branches », plugin de branches) : variantes
+#      d'image (compatibilité majeure.mineure, base, fichiers laissés retirés
+#      sans suivre de lien), paramètres sonar.branch.name / sonar.pullrequest.*,
+#      lecture des résultats filtrée ; runner : SCANORIA_BRANCH seulement si la
+#      fonction est active et la référence n'est pas la branche par défaut.
 # Dépendances : bash, python3, jq.
 
 # shellcheck disable=SC2016,SC2015
@@ -59,7 +64,10 @@ check "sonarqube : manifeste conforme" python3 "$MC" manifest "$ROOT/modules/son
 yq "$ROOT/modules/sonar-scanner/module.yaml" > "$TMP/scanner.json"
 yq "$ROOT/modules/sonarqube/module.yaml" > "$TMP/service.json"
 expect "sonar-scanner : réseau du service sonarqube seulement" "$(jq -r .scan.network "$TMP/scanner.json")" "service:sonarqube"
-expect "sonar-scanner : branche par défaut seulement" "$(jq -r .scan.refs "$TMP/scanner.json")" "default-branch"
+expect "sonar-scanner : branche par défaut, sauf fonction active" "$(jq -r .scan.refs "$TMP/scanner.json")" "default-branch"
+expect "sonar-scanner : autres branches avec la fonction « branches »" "$(jq -r .scan.refs_feature "$TMP/scanner.json")" "branches"
+expect "sonarqube : option « branches » activée par défaut (principe 8)" "$(jq -r .options.properties.branches.default "$TMP/service.json")" true
+expect "sonarqube : fonction « branches » déclarée" "$(jq -c .service.features "$TMP/service.json")" '["branches"]'
 expect "sonar-scanner : dépend du service (G1)" "$(jq -r '.requires.modules | index("sonarqube") != null' "$TMP/scanner.json")" true
 expect "sonar-scanner : catégories qualité et SAST (G7)" "$(jq -c .categories "$TMP/scanner.json")" '["quality","sast"]'
 [[ -f "$TOOL/$(jq -r .scan.tool "$TMP/scanner.json" | sed 's/^sonar$/sonar_scan.py/')" ]] \
@@ -90,6 +98,7 @@ cases = {
     "réseau service: vide": ("network", "service:"),
     "réseau hôte": ("network", "host"),
     "refs inconnue": ("refs", "all"),
+    "refs_feature hostile": ("refs_feature", "../x"),
     "outil ../x": ("tool", "../x"),
     "outil /etc": ("tool", "/etc"),
 }
@@ -261,6 +270,29 @@ scan 3 "jeton malformé"
 printf '%s\n' "$SCANTOK" > "$TMP/c/secrets/scan-token"
 scan 3 "serveur injoignable" SCANORIA_SERVICE_URL="http://127.0.0.1:1"
 
+# Branches et PR : paramètres de sonar-scanner et lecture filtrée.
+args_has() { jq -e --arg a "$1" '.args | index($a) != null' "$TMP/c/scanner-args.json" > /dev/null; }
+args_none() { jq -e --arg p "$1" '[.args[] | select(startswith($p))] | length == 0' "$TMP/c/scanner-args.json" > /dev/null; }
+scan 0 "branche principale : aucun paramètre de branche"
+args_none "-Dsonar.branch." && args_none "-Dsonar.pullrequest." && ok "sonar_scan : branche principale sans sonar.branch.* ni sonar.pullrequest.*" || ko "sonar_scan : paramètre de branche inattendu"
+: > "$TMP/sonar.log"
+scan 0 "branche feature/x" SCANORIA_BRANCH=feature/x
+args_has "-Dsonar.branch.name=feature/x" && ok "sonar_scan : sonar.branch.name transmis" || ko "sonar_scan : sonar.branch.name absent"
+expect "sonar_scan : issues lues sur la branche" "$(jq -s '[.[] | select(.p == "api/issues/search") | .keys | index("branch") != null] | all and length > 0' "$TMP/sonar.log")" true
+expect "sonar_scan : hotspots lus sur la branche" "$(jq -s '[.[] | select(.p == "api/hotspots/search") | .keys | index("branch") != null] | all and length > 0' "$TMP/sonar.log")" true
+: > "$TMP/sonar.log"
+scan 0 "PR 42" SCANORIA_PR_KEY=42 SCANORIA_PR_BRANCH=feature/y SCANORIA_PR_BASE=main
+args_has "-Dsonar.pullrequest.key=42" && args_has "-Dsonar.pullrequest.branch=feature/y" && args_has "-Dsonar.pullrequest.base=main" \
+	&& ok "sonar_scan : paramètres sonar.pullrequest.* transmis" || ko "sonar_scan : paramètres de PR absents"
+args_none "-Dsonar.branch." && ok "sonar_scan : PR sans sonar.branch.name" || ko "sonar_scan : PR avec sonar.branch.name"
+expect "sonar_scan : issues lues sur la PR" "$(jq -s '[.[] | select(.p == "api/issues/search") | .keys | index("pullRequest") != null] | all and length > 0' "$TMP/sonar.log")" true
+for b in "-Dsonar.x=1" "a..b" "a b" "x;rm" "feature/" "$(printf 'a\nb')"; do
+	scan 2 "branche hostile « $b »" SCANORIA_BRANCH="$b"
+done
+scan 2 "branche et PR à la fois" SCANORIA_BRANCH=x SCANORIA_PR_KEY=1 SCANORIA_PR_BRANCH=y SCANORIA_PR_BASE=main
+scan 2 "PR hostile" SCANORIA_PR_KEY='1 -Dx' SCANORIA_PR_BRANCH=y SCANORIA_PR_BASE=main
+scan 2 "PR sans base" SCANORIA_PR_KEY=7 SCANORIA_PR_BRANCH=y
+
 # --- 4. Runner (mode test) -----------------------------------------------------------------
 T="$TMP/root"
 STUBS="$TMP/stubs"
@@ -331,10 +363,10 @@ chmod 0755 "$STUBS/podman" "$STUBS/nft"
 IMG="docker.io/sonarsource/sonar-scanner-cli@sha256:$(printf 'faux' | sha256sum | cut -d' ' -f1)"
 SIMG="docker.io/library/sonarqube@sha256:$(printf 'sq' | sha256sum | cut -d' ' -f1)"
 GIMG="docker.io/exemple/git@sha256:$(printf 'git' | sha256sum | cut -d' ' -f1)"
-registry() { # statut_service actif_service
-	python3 - "$T/var/lib/scanoria/modules/installed.json" "$TMP/scanner.json" "$IMG" "$SIMG" "$GIMG" "$1" "$2" <<'EOF'
+registry() { # statut_service actif_service [fonction_active]
+	python3 - "$T/var/lib/scanoria/modules/installed.json" "$TMP/scanner.json" "$IMG" "$SIMG" "$GIMG" "$1" "$2" "${3:-}" <<'EOF'
 import json, sys
-path, scanner, img, simg, gimg, sstatus, senabled = sys.argv[1:8]
+path, scanner, img, simg, gimg, sstatus, senabled, feat = sys.argv[1:9]
 sc = json.load(open(scanner))
 sc["image"] = img
 sc["version"] = "1.0.0"
@@ -351,6 +383,8 @@ svc = {"id": "sonarqube", "name": "SonarQube", "type": "service", "version": "26
        "requires": {"modules": [], "feeds": []}, "conflicts": [], "hostname": "sonarqube",
        "options": {"type": "object", "additionalProperties": False, "properties": {}},
        "service": {"port": 9000, "health_path": "/api/system/status", "units": [{}]}}
+if feat:
+    svc["active_variant"] = {"feature": feat, "version": "26.11.0", "option": feat}
 reg = {"modules": {
     "sonar-scanner": {"manifest": sc, "status": "healthy", "enabled": True, "options": {}},
     "git-fetch": {"manifest": git, "status": "healthy", "enabled": True, "options": {}},
@@ -447,6 +481,148 @@ mv "$T/usr/lib/scanoria/scan-tools/sonar" "$T/usr/lib/scanoria/scan-tools/autre"
 id=$(uuid); drop "$id" "$(job "$id")"; run_runner
 expect "runner : outil de l'appliance absent → missing" "$(mod "$id")" "missing/E_MODULE_INVALID"
 mv "$T/usr/lib/scanoria/scan-tools/autre" "$T/usr/lib/scanoria/scan-tools/sonar"
+
+# Branches (fonction « branches » du service) : SCANORIA_BRANCH transmis.
+branch_env() { jq -r '.[] | select(startswith("SCANORIA_BRANCH="))' "$TMP/scan-args.json"; }
+registry healthy true branches
+id=$(uuid); drop "$id" "$(job "$id" feature/x)"; run_runner
+expect "runner branches : autre branche → ok" "$(mod "$id")" "ok/-"
+expect "runner branches : SCANORIA_BRANCH=feature/x" "$(branch_env)" "SCANORIA_BRANCH=feature/x"
+id=$(uuid); drop "$id" "$(job "$id" refs/heads/release/2.0)"; run_runner
+expect "runner branches : refs/heads/… raccourci" "$(branch_env)" "SCANORIA_BRANCH=release/2.0"
+id=$(uuid); drop "$id" "$(job "$id" refs/tags/v1.2.0)"; run_runner
+expect "runner branches : étiquette analysée comme branche" "$(branch_env)" "SCANORIA_BRANCH=v1.2.0"
+id=$(uuid); drop "$id" "$(job "$id" main)"; run_runner
+expect "runner branches : branche par défaut → ok" "$(mod "$id")" "ok/-"
+expect "runner branches : branche par défaut sans SCANORIA_BRANCH" "$(branch_env)" ""
+id=$(uuid); drop "$id" "$(job "$id" refs/heads/main main)"; run_runner
+expect "runner branches : refs/heads/<défaut> sans SCANORIA_BRANCH" "$(branch_env)" ""
+id=$(uuid); drop "$id" "$(job "$id" feature/x -)"; run_runner
+expect "runner branches : branche par défaut inconnue → skipped" "$(mod "$id")" "skipped/E_REF_NOT_DEFAULT"
+id=$(uuid); drop "$id" "$(job "$id" refs/pull/3/head)"; run_runner
+expect "runner branches : référence hors heads/tags → skipped" "$(mod "$id")" "skipped/E_REF_NOT_DEFAULT"
+registry healthy true autre
+id=$(uuid); drop "$id" "$(job "$id" feature/x)"; run_runner
+expect "runner : autre fonction active → skipped" "$(mod "$id")" "skipped/E_REF_NOT_DEFAULT"
+res "$id" | jq -r '.modules[0].error.message' | grep -q "branches is not active" && ok "runner : raison « branches is not active »" || ko "runner : raison absente"
+registry healthy true
+
+# Variantes d'image (helper) : compatibilité, manifeste effectif, fichiers laissés.
+cat > "$TMP/variant.py" <<'EOF'
+import copy
+IMG = "docker.io/mc1arke/sonarqube-with-community-branch-plugin@sha256:" + "a" * 64
+def with_variant(base, **kw):
+    m = copy.deepcopy(base)
+    v = {"feature": "branches", "option": "branches", "image": IMG, "version": "26.11.0",
+         "base_version": m["version"],
+         "license": {"spdx": "LGPL-3.0-only", "url": "https://exemple.test/l", "verified_at": "2026-11-24"},
+         "upstream": {"source": "https://exemple.test/s"},
+         "leaves": [{"volume": "extensions", "dir": "plugins", "prefix": "sonarqube-community-branch-plugin"}]}
+    v.update(kw)
+    m["service"]["variants"] = [v]
+    return m
+EOF
+check "variantes : choix, compatibilité, manifeste effectif" python3 -I - "$PYLIB" "$TMP/service.json" "$TMP" <<'EOF'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[3])
+from scanoria import variants
+from scanoria.common import Fail
+from variant import IMG, with_variant
+base = json.load(open(sys.argv[2]))
+assert base["service"]["variants"] == [], "aucune variante sans plugin compatible publié"
+st = variants.features(base, {"branches": True})["branches"]
+assert st["active"] is False and st["code"] == "unavailable", st
+assert variants.features(base, {"branches": False})["branches"]["code"] == "disabled"
+assert variants.effective(base, {"branches": True})["image"] == base["image"]
+m = with_variant(base)
+e = variants.effective(m, {"branches": True})
+assert e["image"] == IMG and e["active_variant"]["feature"] == "branches", e.get("active_variant")
+assert variants.active_features(e) == {"branches"}
+assert variants.features(m, {"branches": True})["branches"] == {"active": True, "version": "26.11.0", "code": None, "reason": None}
+off = variants.effective(m, {"branches": False})
+assert off["image"] == base["image"] and "active_variant" not in off and variants.active_features(off) == set()
+assert m["image"] == base["image"], "manifeste du catalogue modifié"
+# Plugin d'une autre majeure.mineure : image officielle gardée, raison donnée.
+old = with_variant(base, version="26.10.0")
+assert variants.effective(old, {"branches": True})["image"] == base["image"]
+assert variants.features(old, {"branches": True})["branches"]["code"] == "incompatible"
+# Image construite sur un autre SonarQube : écartée de même.
+assert variants.effective(with_variant(base, base_version="26.10.0.133078"), {"branches": True})["image"] == base["image"]
+for label, kw in {"image non épinglée": {"image": "docker.io/mc1arke/x:latest"},
+                  "fonction non déclarée": {"feature": "autre", "option": "autre"},
+                  "option différente": {"option": "autre"},
+                  "volume inconnu": {"leaves": [{"volume": "etc", "dir": "plugins", "prefix": "abcdef"}]},
+                  "répertoire ..": {"leaves": [{"volume": "extensions", "dir": "..", "prefix": "abcdef"}]},
+                  "répertoire avec /": {"leaves": [{"volume": "extensions", "dir": "a/b", "prefix": "abcdef"}]}}.items():
+    try:
+        variants.declared(with_variant(base, **kw))
+    except Fail:
+        continue
+    raise SystemExit("variante hostile acceptée : " + label)
+EOF
+check "variantes : catalogue refusé si la variante est incompatible" python3 -I - "$ROOT" "$TMP/service.json" "$TMP" <<'EOF'
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/catalog")
+sys.path.insert(0, sys.argv[3])
+import build
+from variant import with_variant
+base = json.load(open(sys.argv[2]))
+build.check_variants(with_variant(base))
+for kw in ({"version": "26.10.0"}, {"base_version": "26.10.0.133078"}):
+    try:
+        build.check_variants(with_variant(base, **kw))
+    except build.BuildError:
+        continue
+    raise SystemExit("variante incompatible acceptée : %r" % kw)
+EOF
+
+# Fichiers d'une variante inactive : retirés du volume, sans suivre de lien.
+cp "$STUBS/podman" "$TMP/podman.stub"
+cat > "$STUBS/podman" <<'EOF'
+#!/bin/sh
+[ "$1 $2" = "volume inspect" ] && { echo "/vol"; exit 0; }
+exit 1
+EOF
+chmod 0755 "$STUBS/podman"
+mkdir -p "$T/vol/plugins" "$TMP/ailleurs"
+printf jar > "$T/vol/plugins/sonarqube-community-branch-plugin-26.11.0.jar"
+printf autre > "$T/vol/plugins/sonar-autre-plugin.jar"
+printf cible > "$TMP/ailleurs/sonarqube-community-branch-plugin-cible"
+ln -s "$TMP/ailleurs/sonarqube-community-branch-plugin-cible" "$T/vol/plugins/sonarqube-community-branch-plugin-lien.jar"
+check "variantes : fichiers d'une variante inactive retirés, liens non suivis" python3 -I - "$PYLIB" "$TMP/service.json" "$TMP" "$T" <<'EOF'
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[3])
+from scanoria import variants
+from variant import with_variant
+m = with_variant(json.load(open(sys.argv[2])))
+T, TMP = sys.argv[4], sys.argv[3]
+assert variants.remove_leaves(variants.effective(m, {"branches": True})) == [], "variante active : rien à retirer"
+assert os.path.exists(T + "/vol/plugins/sonarqube-community-branch-plugin-26.11.0.jar")
+removed = sorted(variants.remove_leaves(variants.effective(m, {"branches": False})))
+assert removed == ["plugins/sonarqube-community-branch-plugin-26.11.0.jar",
+                   "plugins/sonarqube-community-branch-plugin-lien.jar"], removed
+assert os.path.exists(T + "/vol/plugins/sonar-autre-plugin.jar"), "autre plugin retiré"
+assert os.path.exists(TMP + "/ailleurs/sonarqube-community-branch-plugin-cible"), "cible du lien retirée"
+EOF
+rm -rf "$T/vol/plugins" && ln -s "$TMP/ailleurs" "$T/vol/plugins"
+check "variantes : répertoire du volume en lien symbolique jamais suivi" python3 -I - "$PYLIB" "$TMP/service.json" "$TMP" <<'EOF'
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[3])
+from scanoria import variants
+from scanoria.common import Fail
+from variant import with_variant
+m = with_variant(json.load(open(sys.argv[2])))
+try:
+    variants.remove_leaves(m)
+except Fail:
+    pass
+assert os.path.exists(sys.argv[3] + "/ailleurs/sonarqube-community-branch-plugin-cible"), "lien suivi"
+EOF
+rm -rf "$T/vol" "$TMP/ailleurs"
+cp "$TMP/podman.stub" "$STUBS/podman"
 
 # --- 5. Mise en service (provision.py) -----------------------------------------------------
 reset_state admin '.starting = 3'

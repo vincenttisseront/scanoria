@@ -15,7 +15,13 @@
 #  4. banc d'essai de sonar-scanner lancé comme par le runner (svcnet : jeton
 #     en secret Podman, réseau interne seul, outil monté en lecture seule) :
 #     SARIF conforme au schéma officiel 2.1.0, attentes du banc d'essai ;
-#  5. sans service sain : le scanner ne peut pas joindre SonarQube.
+#  5. sans service sain : le scanner ne peut pas joindre SonarQube ;
+#  6. plugin de branches (option « branches ») : la Community Build seule
+#     refuse une analyse de branche (d'où « skipped » sans la fonction) ; avec
+#     l'image de la variante, le plugin est chargé, la branche est analysée et
+#     ses résultats sont lus sur cette branche seulement. Tant qu'aucune
+#     variante compatible n'est déclarée dans le manifeste, l'essai porte sur
+#     la dernière image publiée du plugin (BRANCH_TEST_IMAGE, épinglée).
 # Base embarquée de SonarQube (H2) : le branchement PostgreSQL relève du moteur
 # des services (b12-live). La RAM de la machine est mesurée et affichée.
 # Dépendances : podman, curl, jq, python3, python3-yaml, python3-jsonschema.
@@ -49,6 +55,11 @@ ko() { FAIL=$((FAIL + 1)); printf 'FAIL %s\n' "$1"; }
 expect() { [[ "$2" == "$3" ]] && ok "$1" || ko "$1 (obtenu « $2 », attendu « $3 »)"; }
 yq() { python3 -c 'import json, sys, yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1], encoding="utf-8"))))' "$1"; }
 
+# Image de l'auteur du plugin (SonarQube 26.10.0.133078 + plugin 26.10.0),
+# relevée sur Docker Hub le 2026-11-24 (mc1arke/sonarqube-with-community-branch-plugin,
+# étiquette 26.10.0.133078-community) : sert seulement à éprouver le mécanisme
+# tant que le plugin n'est pas publié pour la version du manifeste.
+BRANCH_TEST_IMAGE=docker.io/mc1arke/sonarqube-with-community-branch-plugin@sha256:c92397790a5bf959df7d80825272c48a64d0e894a8461ef7a55da0b94affb7eb
 SARIF_COMMIT=1742a253eb654bf8a4ed7c60eaef7412b2c23553
 SARIF_SHA256=c3b4bb2d6093897483348925aaa73af03b3e3f4bd4ca38cef26dcb4212a2682e
 curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$WORK/sarif-schema.json" \
@@ -149,6 +160,10 @@ if [[ -s "$sarif" ]]; then
 	expect "aucun résultat tronqué" "$(jq -r '.runs[0].properties.scanoria.truncated' "$sarif")" false
 	grep -qF -- "$TOKEN" "$sarif" && ko "jeton dans la sortie" || ok "jeton absent de la sortie"
 	[[ ! -e "$out/.work" ]] && ok "répertoire de travail supprimé" || ko "répertoire de travail laissé"
+	# Community Build seule : une analyse de branche est refusée par SonarQube.
+	rm -rf "$WORK/out-nobranch" && mkdir -p "$WORK/out-nobranch" && chmod 0777 "$WORK/out-nobranch"
+	rc=$(python3 -I "$LIVE" scan "$WORK/sonarqube.json" "$WORK/sonar-scanner.json" "$src" "$WORK/out-nobranch" "$TIMEOUT" "b17-nob-$$" feature/b17 | tail -n 1)
+	expect "sans plugin : analyse de branche refusée (code 4)" "$rc" 4
 	echo "Résultats : $(jq -c '[.runs[0].results[] | {r: .ruleId, l: .level}]' "$sarif")"
 	# Diagnostic : ce que le serveur connaît du projet du banc d'essai.
 	for q in "issues/search?components=scanoria-testbed" "issues/search?projects=scanoria-testbed" \
@@ -171,6 +186,44 @@ expect "réseau interne : aucune sortie" "$(reach "$NET" "https://example.com/")
 podman stop -t 30 "$CT" > /dev/null
 rc=$(python3 -I "$LIVE" scan "$WORK/sonarqube.json" "$WORK/sonar-scanner.json" "$src" "$out" 120 "b17-scan2-$$" | tail -n 1 || true)
 expect "service arrêté : serveur indisponible (code 3)" "$rc" 3
+
+# --- 6. Plugin de branches -------------------------------------------------------------------
+B_IMAGE=$(jq -r '[.service.variants[]? | select(.feature == "branches")][0].image // empty' "$WORK/sonarqube.json")
+[[ -n "$B_IMAGE" ]] || { B_IMAGE=$BRANCH_TEST_IMAGE; echo "Aucune variante compatible déclarée : essai sur $B_IMAGE"; }
+echo "::group::SonarQube avec le plugin de branches"
+podman rm -f "$CT" > /dev/null
+rm -rf "$SEC"
+podman pull -q "$B_IMAGE" > /dev/null
+podman run -d --name "$CT" --network "$PUB" --network "$NET" -p "127.0.0.1:$PORT:9000" \
+	--ulimit "nofile=$NOFILE:$NOFILE" --ulimit "nproc=$NPROC:$NPROC" \
+	--env SONAR_TELEMETRY_ENABLE=false --env SONAR_UPDATECENTER_ACTIVATE=false \
+	-v b17-extensions-$$:/opt/sonarqube/extensions "$B_IMAGE" > /dev/null
+t0=$SECONDS
+python3 -I "$LIVE" provision "$WORK/sonarqube.json" "$PORT" install > "$WORK/prov-b.json" \
+	|| { podman logs --tail 80 "$CT" || true; ko "plugin : mise en service"; }
+echo "SonarQube (plugin) prêt en $((SECONDS - t0)) s"
+echo "::endgroup::"
+BPW=$(cat "$SEC/admin-password" 2>/dev/null || true)
+api() { curl -s -u "admin:$BPW" "http://127.0.0.1:$PORT/api/$1"; }
+expect "plugin : chargé par SonarQube" "$(api plugins/installed | jq -r '[.plugins[].key] | map(test("communityBranch"; "i")) | any')" true
+for ref in main feature/b17; do
+	o="$WORK/out-$(tr / - <<< "$ref")"
+	rm -rf "$o" && mkdir -p "$o" && chmod 0777 "$o"
+	if [[ "$ref" == main ]]; then
+		rc=$(python3 -I "$LIVE" scan "$WORK/sonarqube.json" "$WORK/sonar-scanner.json" "$src" "$o" "$TIMEOUT" "b17-b-$$" | tail -n 1)
+	else
+		rc=$(python3 -I "$LIVE" scan "$WORK/sonarqube.json" "$WORK/sonar-scanner.json" "$src" "$o" "$TIMEOUT" "b17-b-$$" "$ref" | tail -n 1)
+	fi
+	expect "plugin : analyse de $ref (code 0)" "$rc" 0
+	[[ -s "$o/result.sarif" ]] && python3 "$MC" expect "$ROOT/modules/sonar-scanner/module.yaml" "$o/result.sarif" \
+		&& ok "plugin : attentes du banc d'essai sur $ref" || ko "plugin : attentes du banc d'essai sur $ref"
+done
+expect "plugin : branche feature/b17 connue de SonarQube" \
+	"$(api "project_branches/list?project=scanoria-testbed" | jq -r '[.branches[].name] | index("feature/b17") != null')" true
+expect "plugin : issues de la branche lues sur la branche" \
+	"$(api "issues/search?components=scanoria-testbed&branch=feature/b17&resolved=false" | jq -r '.total > 0')" true
+podman rm -f "$CT" > /dev/null
+podman volume rm -f "b17-extensions-$$" > /dev/null 2>&1 || true
 
 printf '\nb17-live : %d réussis, %d échecs\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

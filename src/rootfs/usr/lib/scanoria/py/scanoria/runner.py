@@ -399,7 +399,9 @@ def plan(reg, job):
                 "E_NETWORK_UNSUPPORTED", "input", "networked scanners are not supported yet"), m), None))
             continue
         # Contrat 12 (0.4) : branche par défaut seulement, puis service joignable.
-        reason = svcnet.refs_skip(m, job["source"])
+        # Branches et PR (option « branches » du service) : sinon branche par défaut seulement.
+        feats = svcnet.service_features(reg, m)
+        reason = svcnet.refs_skip(m, job["source"], feats)
         if reason:
             out.append((_module_entry(mid, ver, "skipped", _err("E_REF_NOT_DEFAULT", "input", reason), m), None))
             continue
@@ -411,7 +413,7 @@ def plan(reg, job):
                     out.append((_module_entry(mid, ver, "skipped", _err(
                         "E_PROJECT_UNKNOWN", "input", "the project of this scan is unknown to the runner"), m), None))
                     continue
-                svc = dict(svcnet.resolve(reg, m), key=key)
+                svc = dict(svcnet.resolve(reg, m), key=key, branch=svcnet.branch_of(m, job["source"], feats))
         except svcnet.Unavailable as u:
             # Service absent, inactif ou sans jeton : module « missing », verdict non concluant (G13).
             out.append((_module_entry(mid, ver, "missing", _err(u.code, "input", u.message), m), None))

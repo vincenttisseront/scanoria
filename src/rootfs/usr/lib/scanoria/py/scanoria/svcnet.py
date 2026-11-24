@@ -14,7 +14,10 @@ sonarqube) est la seule exception à --network=none hors DAST :
   - la clé de projet du service vient du projet Scanoria (scanoria-<uuid court>).
 scan.tool monte en lecture seule l'outil livré avec l'appliance
 (/usr/lib/scanoria/scan-tools/<tool>) sur /scanoria.
-scan.refs: default-branch limite le module à la branche par défaut du projet.
+scan.refs: default-branch limite le module à la branche par défaut du projet ;
+scan.refs_feature: branches l'étend aux autres branches quand le service a la
+fonction « branches » active (variante du module, plugin de branches de SonarQube) : la
+branche est alors transmise par SCANORIA_BRANCH.
 """
 
 import os
@@ -86,9 +89,51 @@ def _branch(ref):
     return ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
 
 
-def refs_skip(m, source):
+def service_features(reg, m):
+    """Fonctions actives du service visé par m (manifeste effectif du registre)."""
+    from . import variants
+    try:
+        sid = service_of(m)
+    except Unavailable:
+        return set()
+    e = (reg.get("modules") or {}).get(sid) if sid else None
+    return variants.active_features(e.get("manifest")) if isinstance(e, dict) else set()
+
+
+def _short(ref):
+    for p in ("refs/heads/", "refs/tags/"):
+        if ref.startswith(p):
+            return ref[len(p):]
+    return ref
+
+
+def branch_of(m, source, features=()):
+    """Branche à transmettre (SCANORIA_BRANCH) : None pour la branche par défaut,
+    pour un module sans scan.refs_feature ou un service sans cette fonction."""
+    scan = m.get("scan") or {}
+    feat = scan.get("refs_feature")
+    if scan.get("refs") != "default-branch" or not isinstance(feat, str) or feat not in features:
+        return None
+    if source.get("kind") != "git":
+        return None
+    ref, default = source.get("ref"), source.get("default_branch")
+    if not isinstance(ref, str) or not REF_RE.match(ref) or ref.startswith("refs/") and not \
+            ref.startswith(("refs/heads/", "refs/tags/")):
+        return None
+    # Branche par défaut inconnue : impossible de savoir si ref l'est, rien n'est transmis.
+    if not isinstance(default, str) or not REF_RE.match(default) or _branch(ref) == _branch(default):
+        return None
+    name = _short(ref)
+    return name if REF_RE.match(name) and not name.endswith((".", "/")) else None
+
+
+def refs_skip(m, source, features=()):
     """Raison de « skipped » si scan.refs l'impose et que la référence n'est pas la branche par défaut."""
-    if (m.get("scan") or {}).get("refs", "any") != "default-branch":
+    scan = m.get("scan") or {}
+    if scan.get("refs", "any") != "default-branch":
+        return None
+    feat = scan.get("refs_feature")
+    if branch_of(m, source, features) is not None:
         return None
     if source.get("kind") != "git":
         return "default branch only: an uploaded archive is not the default branch"
@@ -96,6 +141,8 @@ def refs_skip(m, source):
     if not isinstance(default, str) or not REF_RE.match(default):
         return "default branch only: the default branch of the project is unknown"
     if not isinstance(ref, str) or _branch(ref) != _branch(default):
+        if isinstance(feat, str):
+            return "default branch only (%s): %s is not active on the service" % (_branch(default), feat)
         return "default branch only (%s)" % _branch(default)
     return None
 
@@ -192,6 +239,11 @@ class Attachment:
                "--env", "SCANORIA_PROJECT_KEY=" + self.key]
         if self.budget_s:
             out += ["--env", "SCANORIA_BUDGET_S=%d" % int(self.budget_s)]
+        branch = self.svc.get("branch")
+        if branch:
+            if not isinstance(branch, str) or not REF_RE.match(branch):
+                raise Unavailable(E_MODULE_INVALID, "invalid branch name")
+            out += ["--env", "SCANORIA_BRANCH=" + branch]
         return out
 
     def __exit__(self, *exc):

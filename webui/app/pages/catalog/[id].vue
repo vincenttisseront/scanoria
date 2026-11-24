@@ -29,7 +29,7 @@ interface ModuleDetail {
 
 const route = useRoute()
 const id = computed(() => String(route.params.id ?? ''))
-const { t } = useI18n()
+const { t, te } = useI18n()
 const session = useSession()
 const isAdmin = computed(() => session.can('admin'))
 const fmt = useFormat()
@@ -64,6 +64,16 @@ useHead({ title })
 
 const m = computed(() => detail.value?.module ?? null)
 const inst = computed(() => detail.value?.installed ?? null)
+
+/** Fonction optionnelle d'un service (plugin de branches…) : état et raison. */
+function featureText(name: string, st: { active: boolean, version: string | null, code?: string | null, reason: string | null }) {
+  const key = `catalog.detail.featureNames.${name}`
+  const label = te(key) ? t(key) : name
+  if (st.active) return t('catalog.detail.featureActive', { name: label, version: st.version ?? '' })
+  if (st.code === 'disabled') return t('catalog.detail.featureDisabled', { name: label })
+  if (st.code === 'incompatible') return t('catalog.detail.featureIncompatible', { name: label, reason: st.reason ?? '' })
+  return t('catalog.detail.featureUnavailable', { name: label })
+}
 const names = computed(() => Object.fromEntries((catalog.value?.modules ?? []).map(x => [x.id, x.name])))
 const installedIds = computed(() => (catalog.value?.modules ?? []).filter(x => x.installed).map(x => x.id))
 const appUrl = computed(() => {
@@ -371,6 +381,13 @@ const testbedDetails = computed(() => {
             class="text-error"
           >
             {{ t('catalog.detail.lastError') }} : {{ text.lastError(inst) }}
+          </li>
+          <li
+            v-for="(st, name) in inst.features ?? {}"
+            :key="name"
+            :class="st.active ? '' : 'text-muted'"
+          >
+            {{ featureText(String(name), st) }}
           </li>
           <li v-if="detail.update_available">
             {{ t('catalog.list.updateAvailable', { version: detail.update_available }) }}
