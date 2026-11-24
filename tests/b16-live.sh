@@ -71,11 +71,19 @@ export SCANORIA_TEST_ROOT="$T" SCANORIA_TEST_BIN="$STUBS" SCANORIA_TEST_HEALTH_T
 echo 0.4.0 > "$T/opt/scanoria/current/VERSION"
 cp /proc/meminfo "$T/proc/meminfo" && grep '^processor' /proc/cpuinfo > "$T/proc/cpuinfo"
 echo '{"repo": "exemple/scanoria"}' > "$T/etc/scanoria/catalog.json"
+echo '{"fqdn": "analyse.exemple.test"}' > "$T/etc/scanoria/appliance.json"
 openssl genpkey -algorithm ed25519 -out "$TMP/sign.key" 2> /dev/null
 openssl pkey -in "$TMP/sign.key" -pubout -out "$T/etc/scanoria/update-pubkey.pem"
 
 # Vrais outils, sauf curl : la release du catalogue est servie depuis le disque.
-for c in podman systemctl sysctl runuser; do ln -s "$(command -v "$c")" "$STUBS/$c"; done
+for c in podman sysctl runuser; do ln -s "$(command -v "$c")" "$STUBS/$c"; done
+# systemctl réel, sauf pour nginx et la vérification DNS (absents du runner).
+cat > "$STUBS/systemctl" <<-EOF
+	#!/bin/bash
+	case " \$* " in *" nginx.service "*|*" scanoria-dns-check."*) exit 0 ;; esac
+	exec $(command -v systemctl) "\$@"
+EOF
+chmod 0755 "$STUBS/systemctl"
 cat > "$STUBS/curl" <<-EOF
 	#!/usr/bin/env python3
 	import os, shutil, sys
@@ -96,8 +104,11 @@ cat > "$STUBS/curl" <<-EOF
 	    shutil.copyfile(src, out)
 	sys.stdout.write(wo.replace("%{http_code}", str(code)).replace("%{redirect_url}", ""))
 EOF
+# Le proxy inverse n'est pas sous test ici : sites écrits dans la racine de test,
+# « nginx -t » et le rechargement neutralisés ; le service est joint sur son port local.
 printf '#!/bin/bash\nexit 0\n' > "$STUBS/scanoria-state"
-chmod 0755 "$STUBS/curl" "$STUBS/scanoria-state"
+printf '#!/bin/bash\nexit 0\n' > "$STUBS/nginx"
+chmod 0755 "$STUBS/curl" "$STUBS/scanoria-state" "$STUBS/nginx"
 
 systemctl start postgresql.service
 PGHBA_BACKUP="$TMP/pg_hba.conf.orig"
