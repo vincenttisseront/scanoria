@@ -38,7 +38,7 @@ LEVELS = {"blocker": "error", "critical": "error", "high": "error", "major": "wa
 RULE_RE = re.compile(r"[A-Za-z0-9_.:-]{1,200}\Z")
 KEY_RE = re.compile(r"[A-Za-z0-9_.:-]{1,100}\Z")
 TAG_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,49}\Z")
-CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f‪-‮⁦-⁩]")
+CTRL_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u202a-\u202e\u2066-\u2069]")
 
 
 def clean_text(v, limit=MAX_TEXT):

@@ -33,7 +33,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sonar_sarif  # noqa: E402
 
 TOKEN_FILE = os.environ.get("SCANORIA_TOKEN_FILE", "/run/secrets/scan-token")
-HOST_RE = re.compile(r"http://[a-z0-9][a-z0-9._-]{0,100}(:[0-9]{1,5})?\Z")
+# Réseau interne Internal=true du service, sans sortie : HTTP en clair (contrat 12).
+HOST_RE = re.compile(r"http:/{2}[a-z0-9][a-z0-9._-]{0,100}(:[0-9]{1,5})?\Z")
 PROJECT_KEY_RE = re.compile(r"scanoria-([0-9a-f]{12}|testbed)\Z")
 TASK_RE = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
 PAGE_SIZE = 500
@@ -145,7 +146,7 @@ def wait_task(api, task, deadline):
         if st == "SUCCESS":
             return
         if st in ("FAILED", "CANCELED"):
-            raise Failure(4, "computation task %s" % st.lower())
+            raise Failure(4, "computation task %s" % str(st).lower())
         if time.monotonic() > deadline:
             raise Failure(4, "computation task still %s at the deadline" % (st or "unknown"))
         time.sleep(delay)

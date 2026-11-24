@@ -42,6 +42,8 @@ TOOLS = common.p("/usr/lib/scanoria/scan-tools")
 E_MODULE_INVALID, E_SERVICE_MISSING, E_SERVICE_TOKEN = "E_MODULE_INVALID", "E_SERVICE_MISSING", "E_SERVICE_TOKEN"
 TOKEN_NAME = "scan-token"
 TESTBED_KEY = "scanoria-testbed"
+# Réseau interne Internal=true (ni passerelle, ni sortie) : le service y répond en HTTP.
+INTERNAL_SCHEME = "http"
 NOBODY = 65534
 
 
@@ -134,7 +136,7 @@ def resolve(reg, m):
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
         raise Unavailable(E_SERVICE_MISSING, "service %s has no valid port" % sid)
     return {"service": sid, "network": network_name(sid), "token": read_token(sid),
-            "url": "http://%s:%d" % (container_name(sid), port)}
+            "url": "%s://%s:%d" % (INTERNAL_SCHEME, container_name(sid), port)}
 
 
 def tool_mount(m):
