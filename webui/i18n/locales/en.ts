@@ -129,6 +129,10 @@ export default {
     E_AI_UNRESOLVED: 'The AI server name does not resolve (or resolves to too many addresses).',
     E_AI_FORBIDDEN_ADDRESS: 'The AI server resolves to a forbidden address (loopback, link-local, multicast, reserved or the appliance itself).',
     E_AI_CA: 'The CA certificate provided for the AI server cannot be read or contains a private key.',
+    E_SERVICE_RESOURCES: 'Not enough resources for this service (memory, CPUs or disk, installed modules included): the details say what is missing.',
+    E_BACKUP_FAILED: 'The module backup or restore failed; the module is put back in its previous state when possible.',
+    E_BACKUP_NOT_FOUND: 'This module backup does not exist (any more).',
+    E_BACKUP_INVALID: 'Unusable backup: incomplete, altered (checksum mismatch) or made with another version of the module.',
   },
   request: {
     pending: 'Queued…',

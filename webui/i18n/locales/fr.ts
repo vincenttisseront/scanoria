@@ -129,6 +129,10 @@ export default {
     E_AI_UNRESOLVED: 'Le nom du serveur IA ne résout pas (ou vers trop d’adresses).',
     E_AI_FORBIDDEN_ADDRESS: 'Le serveur IA résout vers une adresse interdite (bouclage, lien local, multidiffusion, réservée ou adresse de l’appliance).',
     E_AI_CA: 'Le certificat d’AC fourni pour le serveur IA est illisible ou contient une clé privée.',
+    E_SERVICE_RESOURCES: 'Ressources insuffisantes pour ce service (mémoire, processeurs ou disque, modules déjà installés compris) : le détail indique ce qui manque.',
+    E_BACKUP_FAILED: 'La sauvegarde ou la restauration du module a échoué ; le module est remis dans son état précédent quand c’est possible.',
+    E_BACKUP_NOT_FOUND: 'Cette sauvegarde du module n’existe pas (ou plus).',
+    E_BACKUP_INVALID: 'Sauvegarde inutilisable : incomplète, altérée (empreinte différente) ou faite avec une autre version du module.',
   },
   request: {
     pending: 'En file d’attente…',

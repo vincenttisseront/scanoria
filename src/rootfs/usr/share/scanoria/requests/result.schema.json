@@ -55,7 +55,9 @@
             "uninstall-module",
             "set-module-state",
             "update-module",
-            "set-ai-endpoint"
+            "set-ai-endpoint",
+            "backup-module",
+            "restore-module"
           ]
         }
       ]
@@ -115,7 +117,11 @@
         "E_AI_URL",
         "E_AI_UNRESOLVED",
         "E_AI_FORBIDDEN_ADDRESS",
-        "E_AI_CA"
+        "E_AI_CA",
+        "E_SERVICE_RESOURCES",
+        "E_BACKUP_FAILED",
+        "E_BACKUP_NOT_FOUND",
+        "E_BACKUP_INVALID"
       ]
     },
     "message": {

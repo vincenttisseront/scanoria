@@ -150,6 +150,16 @@ def selftest():
     return None
 
 
+def modules_usage():
+    """Relevés des modules permanents (contrat 11 de la 0.4), recopiés par la console."""
+    try:
+        from . import modules, services
+        return services.usage(modules.load_registry())
+    except Exception as e:  # noqa: BLE001 — l'état est publié même sans relevé
+        common.log("modules usage unavailable: %r" % e)
+        return []
+
+
 def build():
     return {
         "version": 1,
@@ -162,6 +172,7 @@ def build():
         "services": services(),
         "disks": disks(),
         "selftest": selftest(),
+        "modules_usage": modules_usage(),
     }
 
 

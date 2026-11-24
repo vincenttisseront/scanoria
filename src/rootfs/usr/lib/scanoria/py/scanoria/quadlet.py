@@ -3,10 +3,16 @@
 """Unités Quadlet des modules permanents (types service et runner).
 
 Un module <id> produit, dans /etc/containers/systemd/ :
-  scanoria-mod-<id>.network          réseau propre au module ;
+  scanoria-mod-<id>.network          réseau propre au module, /24 fixe (services.py),
+                                     passerelle = accès à PostgreSQL ;
+  scanoria-mod-<id>_scan.network     (type service) réseau interne sans sortie,
+                                     où le runner rattache les scanners reliés
+                                     au service (contrat 12) ;
   scanoria-mod-<id>-<nom>.volume     un par volume déclaré (service.volumes) ;
   scanoria-mod-<id>.container        le conteneur, publié sur 127.0.0.1 seulement.
-Le générateur Quadlet de systemd en tire scanoria-mod-<id>.service. Un module
+Les secrets générés par le helper (services.py) sont passés par des secrets
+Podman, jamais écrits dans une unité. Le générateur Quadlet de systemd en tire
+scanoria-mod-<id>.service. Un module
 désactivé garde ses fichiers sans section [Install] : il ne démarre plus au
 démarrage de la machine.
 
@@ -29,6 +35,8 @@ VOL_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,30}\Z")
 PATH_RE = re.compile(r"/[A-Za-z0-9._/-]{1,200}\Z")
 ENV_KEY_RE = re.compile(r"(?!LD_|PATH\Z|HOME\Z)[A-Z][A-Z0-9_]{0,63}\Z")
 ENV_VALUE_RE = re.compile(r"[A-Za-z0-9._:/@%+=,~-]{0,1024}\Z")
+SECRET_RE = re.compile(r"scanoria-mod-[a-z0-9][a-z0-9-]{1,40}-[a-z][a-z0-9-]{0,40}\Z")
+SECRET_SHORT_RE = re.compile(r"[a-z][a-z0-9-]{0,40}\Z")
 PLACEHOLDER_RE = re.compile(r"\{([a-z_]{1,32}|opt\.[a-z0-9_]{1,40})\}")
 
 
@@ -82,8 +90,12 @@ def volumes(manifest):
     return res
 
 
-def render(manifest, host_port, enabled, has_env):
-    """Contenu des fichiers Quadlet : {nom de fichier: texte}."""
+def render(manifest, host_port, enabled, has_env, subnet=None, secrets=(), ulimits=None):
+    """Contenu des fichiers Quadlet : {nom de fichier: texte}.
+
+    subnet : ipaddress.IPv4Network du réseau du module (None : laissé à Podman) ;
+    secrets : [(nom du secret Podman, nom court, variable ou None)] ;
+    ulimits : {nofile|nproc: valeur} déjà validées (services.requirements)."""
     mid = _need(ID_RE, manifest.get("id"), "module id")
     image = manifest.get("image")
     from .catalogverify import IMAGE_RE
@@ -98,7 +110,13 @@ def render(manifest, host_port, enabled, has_env):
     res = manifest.get("resources") or {}
     ram = res.get("min_ram_mb") if isinstance(res.get("min_ram_mb"), int) else 512
     base = PREFIX + mid
-    files = {base + ".network": "[Network]\nNetworkName=%s\n" % base}
+    net = "[Network]\nNetworkName=%s\n" % base
+    if subnet is not None:
+        net += "Subnet=%s\nGateway=%s\n" % (subnet, subnet.network_address + 1)
+    files = {base + ".network": net}
+    is_service = manifest.get("type") == "service"
+    if is_service:
+        files[base + "_scan.network"] = "[Network]\nNetworkName=%s_scan\nInternal=true\n" % base
     lines = [
         "# Généré par scanoria-helper : ne pas modifier.",
         "[Unit]",
@@ -111,6 +129,7 @@ def render(manifest, host_port, enabled, has_env):
         "Image=%s" % image,
         "Pull=never",
         "Network=%s.network" % base,
+    ] + (["Network=%s_scan.network" % base] if is_service else []) + [
         "NoNewPrivileges=true",
         "DropCapability=ALL",
         "PodmanArgs=--memory=%dm --pids-limit=4096" % max(256, int(ram) * 2),
@@ -121,8 +140,21 @@ def render(manifest, host_port, enabled, has_env):
         vfile = volume_name(mid, name) + ".volume"
         files[vfile] = "[Volume]\nVolumeName=%s\n" % volume_name(mid, name)
         lines.append("Volume=%s:%s" % (vfile, path))
+    for pname, short, env in secrets:
+        _need(SECRET_RE, pname, "secret name")
+        _need(SECRET_SHORT_RE, short, "secret name")
+        if env is None:
+            lines.append("Secret=%s,type=mount,target=%s" % (pname, short))
+        else:
+            _need(ENV_KEY_RE, env, "secret variable")
+            lines.append("Secret=%s,type=env,target=%s" % (pname, env))
+    for k in sorted(ulimits or {}):
+        v = ulimits[k]
+        if k not in ("nofile", "nproc") or not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= 1 << 22:
+            raise Fail("E_INVALID_PARAM", "invalid unit limit")
+        lines.append("Ulimit=%s=%d:%d" % (k, v, v))
     if has_env:
-        lines.append("EnvironmentFile=%s/%s/env" % ("/etc/scanoria/modules", mid))
+        lines.append("EnvironmentFile=%s/%s/env" % (MODULE_ETC, mid))
     lines += ["", "[Service]", "Restart=on-failure", "TimeoutStartSec=900"]
     if enabled:
         lines += ["", "[Install]", "WantedBy=multi-user.target"]
@@ -138,7 +170,7 @@ def existing_files(mid):
     base = PREFIX + mid
     # « _ » ne peut figurer ni dans un id ni dans un nom de volume : aucun
     # fichier d'un autre module (« dt » et « dt-api ») ne correspond.
-    return sorted(n for n in names if n in (base + ".container", base + ".network")
+    return sorted(n for n in names if n in (base + ".container", base + ".network", base + "_scan.network")
                   or (n.startswith(base + "_") and n.endswith(".volume")))
 
 

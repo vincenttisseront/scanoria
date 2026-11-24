@@ -11,6 +11,11 @@ G1 ; ressources ; licences ; options, G3) sont faites avant le premier
 changement. Ensuite, au moindre échec (image, santé, banc d'essai F12,
 routage), tout ce que l'opération a posé est retiré : retour arrière complet.
 
+Modules permanents (0.4, contrat 10) : base PostgreSQL et secrets
+(pgadmin.py, services.py), réglages noyau par module, sauvegarde et
+restauration (backup.py), mise à jour toujours précédée d'une sauvegarde, et
+mise en service propre au module (provision.py, facultatif) après la santé.
+
 Registre interne : /var/lib/scanoria/modules/installed.json (root, 0600), qui
 garde le manifeste de chaque module installé. État publié pour la console :
 /var/lib/scanoria/modules/state.json (root:scanoria 0640), conforme à
@@ -19,21 +24,17 @@ modules-state.schema.json, avec la progression des opérations.
 
 import os
 import re
-import secrets
 import shutil
 import time
 import uuid
 
-from . import catalogverify, common, quadlet, schema, testbed
+from . import backup, catalogverify, common, pgadmin, quadlet, schema, services, testbed
 from .common import Fail
 
 MODULES_DIR = common.VARLIB + "/modules"
 REGISTRY = MODULES_DIR + "/installed.json"
 STATE = MODULES_DIR + "/state.json"
-BACKUPS = common.VARLIB + "/backups/modules"
-SYSCTL_FILE = common.p("/etc/sysctl.d/60-scanoria-modules.conf")
 MAX_OPERATIONS = 20
-KEEP_BACKUPS = 2
 HOST_PORTS = range(18000, 19000)
 # Mémoire laissée au système, à PostgreSQL et à la console (plancher D6 : 4 Go).
 RESERVED_RAM_MB = 3072
@@ -42,13 +43,6 @@ HEALTH_TIMEOUT = 600
 if common.TEST_ROOT and os.environ.get("SCANORIA_TEST_HEALTH_TIMEOUT", "").isdigit():
     HEALTH_TIMEOUT = int(os.environ["SCANORIA_TEST_HEALTH_TIMEOUT"])
 SCANNER_HEALTH_TIMEOUT = 120
-SYSCTL_ALLOWED = {
-    "vm.max_map_count": (65530, 1 << 30),
-    "fs.file-max": (8192, 1 << 31),
-    "fs.inotify.max_user_watches": (8192, 1 << 24),
-    "fs.inotify.max_user_instances": (128, 1 << 16),
-    "net.core.somaxconn": (128, 65535),
-}
 OPTION_NAME_RE = re.compile(r"[a-z][a-z0-9_]{0,40}\Z")
 HEALTH_PATH_RE = re.compile(r"/[A-Za-z0-9._~/?=&%-]{0,200}\Z")
 APPLIANCE_REQ_RE = re.compile(r"(>=|<=|==|=|>|<)?\s*((?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3}))\Z")
@@ -111,9 +105,12 @@ def save_registry(reg):
 
 def public_entry(mid, e):
     m = e["manifest"]
-    return {"id": mid, "version": m["version"], "type": m["type"], "status": e["status"],
-            "enabled": e["enabled"], "installed_at": e["installed_at"], "options": e["options"],
-            "testbed": e.get("testbed"), "route": e.get("route"), "last_error": e.get("last_error")}
+    out = {"id": mid, "version": m["version"], "type": m["type"], "status": e["status"],
+           "enabled": e["enabled"], "installed_at": e["installed_at"], "options": e["options"],
+           "testbed": e.get("testbed"), "route": e.get("route"), "last_error": e.get("last_error")}
+    if m["type"] in ("service", "runner"):
+        out["backups"] = backup.list_backups(mid)
+    return out
 
 
 def publish(reg):
@@ -265,42 +262,40 @@ def _res(m, key):
 
 
 def check_resources(installed, planned, freed=()):
-    """installed, planned : manifestes ; freed : manifestes remplacés (mise à jour)."""
+    """installed, planned : manifestes ; freed : manifestes remplacés (mise à jour).
+
+    La mémoire compte tous les modules permanents déjà installés (CLAUDE.md
+    § 11) ; un refus qui concerne un module « service » porte le code
+    E_SERVICE_RESOURCES et dit quelle ressource manque, de combien."""
     freed_ids = {(m["id"], m["version"]) for m in freed}
     keep = [m for m in installed if (m["id"], m["version"]) not in freed_ids]
     allm = keep + list(planned)
+    svc = [m["id"] for m in planned if m["type"] == "service"]
+
+    def refuse(code, message, out):
+        if svc:
+            code = "E_SERVICE_RESOURCES"
+            out = dict(out, modules=svc)
+        raise Fail(code, message, out)
+
     perm = sum(_res(m, "min_ram_mb") for m in allm if m["type"] in ("service", "runner"))
     trans = max([_res(m, "min_ram_mb") for m in allm if m["type"] in ("scanner", "feed")] or [0])
     need, have = RESERVED_RAM_MB + perm + trans, _meminfo_mb()
     if need > have:
-        raise Fail("E_RESOURCES", "not enough memory: %d MB needed, %d MB available" % (need, have),
-                   {"resource": "ram", "needed_mb": int(need), "available_mb": have})
+        refuse("E_RESOURCES", "not enough memory: %d MB needed, %d MB available" % (need, have),
+               {"resource": "ram", "needed_mb": int(need), "available_mb": have,
+                "installed_mb": int(sum(_res(m, "min_ram_mb") for m in keep if m["type"] in ("service", "runner")))})
     cpu = max([_res(m, "min_cpu") for m in planned] or [0])
     if cpu > _cpus():
-        raise Fail("E_RESOURCES", "not enough CPUs: %s needed, %d available" % (cpu, _cpus()),
-                   {"resource": "cpu", "needed": cpu, "available": _cpus()})
+        refuse("E_RESOURCES", "not enough CPUs: %s needed, %d available" % (cpu, _cpus()),
+               {"resource": "cpu", "needed": cpu, "available": _cpus()})
     disk = sum(_res(m, "disk_mb") for m in planned)
     free = _free_disk_mb()
     if disk + RESERVED_DISK_MB > free:
-        raise Fail("E_DISK_SPACE", "not enough disk space: %d MB needed, %d MB free" % (disk + RESERVED_DISK_MB, free),
-                   {"resource": "disk", "needed_mb": int(disk + RESERVED_DISK_MB), "available_mb": free})
+        refuse("E_DISK_SPACE", "not enough disk space: %d MB needed, %d MB free" % (disk + RESERVED_DISK_MB, free),
+               {"resource": "disk", "needed_mb": int(disk + RESERVED_DISK_MB), "available_mb": free})
     for m in planned:
-        sysctl_of(m)
-
-
-def sysctl_of(m):
-    req = (m.get("needs") or {}).get("sysctl") or {}
-    if not isinstance(req, dict):
-        raise Fail("E_RESOURCES", "%s: invalid sysctl requirement" % m["id"])
-    out = {}
-    for k, v in req.items():
-        if k not in SYSCTL_ALLOWED:
-            raise Fail("E_RESOURCES", "%s: kernel setting %s is not allowed" % (m["id"], k))
-        lo, hi = SYSCTL_ALLOWED[k]
-        if not isinstance(v, int) or isinstance(v, bool) or not lo <= v <= hi:
-            raise Fail("E_RESOURCES", "%s: kernel setting %s out of range" % (m["id"], k))
-        out[k] = v
-    return out
+        services.requirements(m)
 
 
 def check_license(m, accepted):
@@ -337,79 +332,43 @@ def remove_image(reg, image):
 
 
 def apply_sysctl(reg, extra=()):
-    want = {}
-    for m in [e["manifest"] for e in reg["modules"].values()] + list(extra):
-        for k, v in sysctl_of(m).items():
-            want[k] = max(v, want.get(k, 0))
-    if not want:
-        if os.path.exists(SYSCTL_FILE):
-            os.unlink(SYSCTL_FILE)
-        return
-    os.makedirs(os.path.dirname(SYSCTL_FILE), mode=0o755, exist_ok=True)
-    text = "# Généré par scanoria-helper (réglages exigés par les modules installés).\n"
-    text += "".join("%s = %d\n" % (k, want[k]) for k in sorted(want))
-    common.atomic_write(SYSCTL_FILE, text, 0o644, group_scanoria=False)
-    if common.run("sysctl", ["-q", "-p", "/etc/sysctl.d/60-scanoria-modules.conf"], timeout=60).returncode != 0:
-        raise Fail("E_RESOURCES", "kernel settings could not be applied")
+    """Réglages noyau de tous les modules installés (et de extra, mise à jour en cours)."""
+    ids = {m["id"] for m in extra}
+    mans = [e["manifest"] for k, e in reg["modules"].items() if k not in ids] + list(extra)
+    services.apply_sysctl(mans)
 
 
-def db_name(mid):
-    return "scanoria_mod_" + mid.replace("-", "_")
+def is_permanent(m):
+    return m["type"] in ("service", "runner")
 
 
-def _psql(sql, timeout=300):
-    r = common.run("runuser", ["-u", "postgres", "--", "/usr/bin/psql", "-X", "-q", "-v", "ON_ERROR_STOP=1",
-                               "-d", "postgres"], input=sql.encode(), timeout=timeout)
-    if r.returncode != 0:
-        raise Fail("E_INTERNAL", "PostgreSQL command failed")
-
-
-def db_file(mid):
-    return os.path.join(quadlet.MODULE_ETC, mid, "db.json")
-
-
-def ensure_database(mid):
-    """Crée (ou reprend, si ses données ont été gardées) la base du module. Retourne (identifiants, créée)."""
-    name = db_name(mid)
-    try:
-        cred = common.load_json_file(db_file(mid), 4096)
-        existed = isinstance(cred, dict) and re.fullmatch(r"[0-9a-f]{48}", str(cred.get("password", ""))) is not None
-    except (OSError, common.JsonError):
-        existed = False
-    if not existed:
-        cred = {"name": name, "user": name, "password": secrets.token_hex(24)}
-    pw = cred["password"]
-    _psql("DO $$BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s') THEN "
-          "CREATE ROLE \"%s\" LOGIN PASSWORD '%s'; ELSE ALTER ROLE \"%s\" LOGIN PASSWORD '%s'; END IF; END$$;\n"
-          "SELECT 'CREATE DATABASE \"%s\" OWNER \"%s\"' WHERE NOT EXISTS "
-          "(SELECT FROM pg_database WHERE datname = '%s')\\gexec\n" % (name, name, pw, name, pw, name, name, name))
-    os.makedirs(os.path.dirname(db_file(mid)), mode=0o700, exist_ok=True)
-    common.write_json(db_file(mid), {"name": name, "user": name, "password": pw}, 0o600, group_scanoria=False)
-    return cred, not existed
-
-
-def drop_database(mid):
-    name = db_name(mid)
-    _psql('DROP DATABASE IF EXISTS "%s" WITH (FORCE);\nDROP ROLE IF EXISTS "%s";\n' % (name, name))
+def uses_db(m):
+    return bool((m.get("needs") or {}).get("postgres"))
 
 
 def remove_data(m):
+    """Désinstallation sans conservation : base, volumes, secrets et sauvegardes."""
     mid = m["id"]
-    if (m.get("needs") or {}).get("postgres"):
-        drop_database(mid)
+    if uses_db(m):
+        pgadmin.drop_database(mid)
     for name, _ in quadlet.volumes(m):
         podman("volume", "rm", "--force", quadlet.volume_name(mid, name), timeout=300)
     shutil.rmtree(os.path.join(quadlet.MODULE_ETC, mid), ignore_errors=True)
+    if is_permanent(m):
+        services.remove_module_dir(mid)
+        shutil.rmtree(backup.module_root(mid), ignore_errors=True)
     if m["type"] == "feed":
         shutil.rmtree(os.path.join(testbed.FEEDS, mid), ignore_errors=True)
 
 
-def env_values(m, cred, host_port, options):
-    vals = {"host_port": host_port, "hostname": m.get("hostname") or ""}
-    if cred:
-        vals.update(db_host="host.containers.internal", db_port=5432, db_name=cred["name"],
-                    db_user=cred["user"], db_password=cred["password"],
-                    db_url_jdbc="jdbc:postgresql://host.containers.internal:5432/" + cred["name"])
+def env_values(m, entry, options):
+    """Valeurs des gabarits de service.env : jamais de secret (contrat 10)."""
+    vals = {"host_port": entry.get("host_port") or 0, "hostname": m.get("hostname") or ""}
+    if uses_db(m):
+        gw = services.gateway(entry["subnet"])
+        name = pgadmin.db_name(m["id"])
+        vals.update(db_host=gw, db_port=5432, db_name=name, db_user=name,
+                    db_url_jdbc="jdbc:postgresql://%s:5432/%s" % (gw, name))
     for k, v in options.items():
         if isinstance(v, (str, int, float)) and not isinstance(v, bool):
             vals["opt." + k] = v
@@ -458,18 +417,18 @@ def alloc_port(reg):
 
 def route(reg):
     """Régénère l'aiguillage par nom (chantier routage) ; journalise son absence."""
-    services = [{"id": k, "hostname": e["manifest"].get("hostname"), "port": e.get("host_port"),
-                 "enabled": bool(e["enabled"] and e["status"] == "healthy")}
-                for k, e in sorted(reg["modules"].items()) if e["manifest"]["type"] == "service"]
+    svcs = [{"id": k, "hostname": e["manifest"].get("hostname"), "port": e.get("host_port"),
+             "enabled": bool(e["enabled"] and e["status"] == "healthy")}
+            for k, e in sorted(reg["modules"].items()) if e["manifest"]["type"] == "service"]
     try:
         from . import routing
     except ImportError:
         common.log("routing module not available: name-based routing not applied")
         return
-    if not services and routing.appliance_fqdn() is None:
+    if not svcs and routing.appliance_fqdn() is None:
         # Aucun service et pas encore de nom (premier démarrage) : rien à aiguiller.
         return
-    res = routing.apply(None, services) or []
+    res = routing.apply(None, svcs) or []
     by_id = {r["id"]: r for r in res if isinstance(r, dict) and isinstance(r.get("id"), str)}
     for k, e in reg["modules"].items():
         if e["manifest"]["type"] == "service":
@@ -489,17 +448,51 @@ def start_service(m, entry, timeout):
         wait_http(entry["host_port"], svc.get("health_path") or "/", min(timeout, HEALTH_TIMEOUT))
 
 
-def write_units(m, entry, options, cred):
+def provision(m, entry, phase, timeout):
+    """Mise en service propre au module (provision.py, chantier SonarQube), après
+    la santé et avant le banc d'essai. Sans fichier provision.py : rien."""
+    try:
+        from . import provision as prov
+    except ImportError:
+        return
+    prov.run(m, {"host_port": entry.get("host_port"), "secrets_dir": services.secrets_dir(m["id"]),
+                 "network": quadlet.PREFIX + m["id"], "timeout": max(1, int(timeout)), "phase": phase})
+
+
+def write_units(m, entry, options):
+    """Secrets Podman, fichier d'environnement et unités Quadlet du module."""
+    mid = m["id"]
+    secs = services.secrets_of(m)
+    if secs:
+        services.register_podman_secrets(m)
     has_env = False
     tpl = (m.get("service") or {}).get("env")
     if tpl:
-        quadlet.write_env(m["id"], quadlet.render_env(tpl, env_values(m, cred, entry["host_port"], options)))
+        quadlet.write_env(mid, quadlet.render_env(tpl, env_values(m, entry, options)))
         has_env = True
-    quadlet.write(m["id"], quadlet.render(m, entry["host_port"], entry["enabled"], has_env))
+    _, ulimits = services.requirements(m)
+    sub = services.subnet(entry["subnet"]) if isinstance(entry.get("subnet"), int) else None
+    quadlet.write(mid, quadlet.render(m, entry["host_port"], entry["enabled"], has_env, subnet=sub,
+                                      secrets=[(services.podman_secret(mid, n), n, env) for n, env in secs],
+                                      ulimits=ulimits))
 
 
 def stop_service(mid):
     systemctl("stop", quadlet.unit_name(mid), check=False)
+
+
+def is_running(mid):
+    return systemctl("is-active", "--quiet", quadlet.unit_name(mid), check=False) == 0
+
+
+def prepare_permanent(reg, m, entry):
+    """Réseau, secrets, base et accès PostgreSQL d'un module permanent."""
+    mid = m["id"]
+    entry["subnet"] = services.alloc_subnet(reg, mid)
+    services.ensure_secrets(m)
+    if uses_db(m):
+        pgadmin.apply_access(reg)
+        entry["created_db"] = pgadmin.ensure_database(m)
 
 
 # --------------------------------------------------------------------------
@@ -546,6 +539,11 @@ def plan_install(reg, mods, wanted, accepted):
             de = reg["modules"].get(d)
             if de is not None and not de["enabled"]:
                 raise Fail("E_DEPENDENCY", "%s requires %s, which is disabled" % (m["id"], d))
+        if is_permanent(m):
+            # Déclarations du manifeste revalidées avant le premier changement.
+            services.secrets_of(m)
+            quadlet.volumes(m)
+            backup.backup_volumes(m)
     for m in installed:
         for c in conflicts_of(m):
             if c in plan:
@@ -567,7 +565,8 @@ def install_one(c, reg, op, m, options, frac):
     mid = m["id"]
     entry = {"manifest": m, "status": "installing", "enabled": True, "installed_at": common.iso(common.now()),
              "options": options, "testbed": None, "route": None, "last_error": None,
-             "accepted": m["license"]["restrictions"], "host_port": None, "created_db": False}
+             "accepted": m["license"]["restrictions"], "host_port": None, "created_db": False,
+             "created_dir": is_permanent(m) and not os.path.exists(services.module_dir(mid))}
     reg["modules"][mid] = entry
     if m["type"] == "feed" and not m.get("image"):
         # Feed déclaratif (0.2) : sa base est posée sous /var/lib/scanoria/feeds/<id>.
@@ -577,18 +576,18 @@ def install_one(c, reg, op, m, options, frac):
         return
     op.step("pull", frac(0.05), mid)
     pull(m, c.left())
-    if m["type"] in ("service", "runner"):
-        cred = None
-        if (m.get("needs") or {}).get("postgres"):
-            op.step("database", frac(0.3), mid)
-            cred, entry["created_db"] = ensure_database(mid)
+    if is_permanent(m):
+        op.step("database" if uses_db(m) else "secrets", frac(0.3), mid)
+        prepare_permanent(reg, m, entry)
         op.step("sysctl", frac(0.35), mid)
         apply_sysctl(reg)
         entry["host_port"] = alloc_port(reg) if m["type"] == "service" else None
         op.step("units", frac(0.4), mid)
-        write_units(m, entry, options, cred)
+        write_units(m, entry, options)
         op.step("health", frac(0.5), mid)
         start_service(m, entry, c.left())
+        op.step("provision", frac(0.6), mid)
+        provision(m, entry, "install", c.left())
     else:
         op.step("health", frac(0.4), mid)
         scanner_health(m, c.left())
@@ -605,18 +604,24 @@ def undo_install(reg, mid):
     if e is None:
         return
     m = e["manifest"]
-    if m["type"] in ("service", "runner"):
+    if is_permanent(m):
         stop_service(mid)
         quadlet.remove(mid)
         systemctl("daemon-reload", check=False)
+        services.unregister_podman_secrets(m)
     if e.get("created_db"):
-        drop_database(mid)
+        pgadmin.drop_database(mid)
+    if e.get("created_db") or e.get("created_dir"):
         shutil.rmtree(os.path.join(quadlet.MODULE_ETC, mid), ignore_errors=True)
     elif os.path.exists(os.path.join(quadlet.MODULE_ETC, mid, "env")):
         os.unlink(os.path.join(quadlet.MODULE_ETC, mid, "env"))
+    if e.get("created_dir"):
+        services.remove_module_dir(mid)
     if m["type"] == "feed":
         shutil.rmtree(os.path.join(testbed.FEEDS, mid), ignore_errors=True)
     del reg["modules"][mid]
+    if uses_db(m) and isinstance(e.get("subnet"), int):
+        pgadmin.apply_access(reg)
     remove_image(reg, m.get("image"))
     apply_sysctl(reg)
 
@@ -706,17 +711,20 @@ def act_uninstall_module(c):
     op = Op(reg, "uninstall", mid, c.req["id"])
     try:
         e["status"] = "removing"
-        if m["type"] in ("service", "runner"):
+        if is_permanent(m):
             op.step("units", 20)
             stop_service(mid)
             quadlet.remove(mid)
             systemctl("daemon-reload")
+            services.unregister_podman_secrets(m)
         if not keep:
             op.step("data", 50)
             remove_data(m)
         elif os.path.exists(os.path.join(quadlet.MODULE_ETC, mid, "env")):
             os.unlink(os.path.join(quadlet.MODULE_ETC, mid, "env"))
         del reg["modules"][mid]
+        if uses_db(m):
+            pgadmin.apply_access(reg)
         op.step("image", 70)
         remove_image(reg, m.get("image"))
         apply_sysctl(reg)
@@ -759,13 +767,14 @@ def act_set_module_state(c):
     snap = quadlet.snapshot(mid)
     try:
         e["enabled"] = enabled
-        if m["type"] in ("service", "runner"):
+        if is_permanent(m):
             op.step("units", 30)
-            cred = _cred(mid) if (m.get("needs") or {}).get("postgres") else None
-            write_units(m, e, e["options"], cred)
+            write_units(m, e, e["options"])
             if enabled:
                 op.step("health", 50)
                 start_service(m, e, c.left())
+                op.step("provision", 70)
+                provision(m, e, "enable", c.left())
             else:
                 stop_service(mid)
                 systemctl("daemon-reload")
@@ -779,7 +788,7 @@ def act_set_module_state(c):
         e["enabled"] = not enabled
         e["status"] = "healthy" if not enabled else "disabled"
         e["last_error"] = err.message
-        if m["type"] in ("service", "runner"):
+        if is_permanent(m):
             if enabled:
                 stop_service(mid)
             quadlet.restore(mid, snap)
@@ -790,80 +799,88 @@ def act_set_module_state(c):
     return {"id": mid, "enabled": enabled, "changed": True}
 
 
-def _cred(mid):
+# --------------------------------------------------------------------------
+# backup-module, restore-module
+# --------------------------------------------------------------------------
+
+def _stop_for_backup(mid):
+    """Arrête le module s'il tourne ; True si c'était le cas."""
+    if not is_running(mid):
+        return False
+    stop_service(mid)
+    return True
+
+
+def take_backup(c, e, reason):
+    m = e["manifest"]
+    mid = m["id"]
+    if not is_permanent(m):
+        raise Fail("E_PRECONDITION", "only permanent modules have backups")
+    return backup.create(m, e, reason, lambda: _stop_for_backup(mid),
+                         lambda: start_service(m, e, max(60, c.left())), timeout=max(60, c.left()))
+
+
+def act_backup_module(c):
+    reg = load_registry()
+    mid = c.params["id"]
+    e = get_entry(reg, mid)
+    if e["status"] not in ("healthy", "disabled"):
+        raise Fail("E_PRECONDITION", "module %s is %s" % (mid, e["status"]))
+    if not is_permanent(e["manifest"]):
+        raise Fail("E_PRECONDITION", "only permanent modules have backups")
+    op = Op(reg, "backup", mid, c.req["id"])
     try:
-        cred = common.load_json_file(db_file(mid), 4096)
-    except (OSError, common.JsonError):
-        raise Fail("E_PRECONDITION", "database credentials of %s missing" % mid)
-    return cred
+        op.step("backup", 20)
+        stamp = take_backup(c, e, "manual")
+    except Exception as exc:  # noqa: BLE001
+        err = as_fail(exc, "backup-module")
+        if err.code == "E_INTERNAL":
+            err = Fail("E_BACKUP_FAILED", "backup of %s failed" % mid)
+        op.finish(False, err.message)
+        raise err
+    op.finish(True, "backup %s" % stamp)
+    return {"id": mid, "backup": stamp}
+
+
+def act_restore_module(c):
+    reg = load_registry()
+    mid, stamp = c.params["id"], c.params["backup"]
+    e = get_entry(reg, mid)
+    m = e["manifest"]
+    if e["status"] not in ("healthy", "disabled", "failed"):
+        raise Fail("E_PRECONDITION", "module %s is %s" % (mid, e["status"]))
+    if not is_permanent(m):
+        raise Fail("E_PRECONDITION", "only permanent modules have backups")
+    d, man = backup.verify(mid, stamp)
+    if man["module_version"] != m["version"]:
+        raise Fail("E_BACKUP_INVALID", "backup %s was made with %s %s, %s is installed"
+                   % (stamp, mid, man["module_version"], m["version"]),
+                   {"backup_version": man["module_version"], "installed_version": m["version"]})
+    op = Op(reg, "restore", mid, c.req["id"])
+    try:
+        op.step("stop", 10)
+        stop_service(mid)
+        op.step("restore", 30)
+        backup.restore_data(m, d, man, timeout=max(60, c.left()))
+        if e["enabled"]:
+            op.step("health", 70)
+            start_service(m, e, c.left())
+        e.update(status="healthy" if e["enabled"] else "disabled", last_error=None)
+        if m["type"] == "service":
+            op.step("route", 90)
+            route(reg)
+    except Exception as exc:  # noqa: BLE001
+        err = as_fail(exc, "restore-module")
+        e.update(status="failed", last_error=("restore of %s failed: %s" % (stamp, err.message))[:2000])
+        op.finish(False, err.message)
+        raise err
+    op.finish(True, "restored %s" % stamp)
+    return {"id": mid, "backup": stamp, "version": m["version"]}
 
 
 # --------------------------------------------------------------------------
 # update-module
 # --------------------------------------------------------------------------
-
-def backup(m):
-    """Sauvegarde de la base et des volumes avant mise à jour ; retourne le répertoire."""
-    mid = m["id"]
-    d = os.path.join(BACKUPS, "%s-%s-%s" % (mid, m["version"], common.now().strftime("%Y%m%dT%H%M%SZ")))
-    os.makedirs(d, mode=0o700)
-    if (m.get("needs") or {}).get("postgres"):
-        if run_to_file("runuser", ["-u", "postgres", "--", "/usr/bin/pg_dump", "-Fc", db_name(mid)],
-                       os.path.join(d, "db.dump"), timeout=1800) != 0:
-            raise Fail("E_INTERNAL", "database backup failed")
-    for name, _ in quadlet.volumes(m):
-        if podman("volume", "export", "--output", os.path.join(d, "volume-%s.tar" % name),
-                  quadlet.volume_name(mid, name), timeout=1800) != 0:
-            raise Fail("E_INTERNAL", "volume backup failed")
-    prune_backups(mid)
-    return d
-
-
-def run_to_file(name, args, dest, timeout):
-    """Comme common.run, mais la sortie va dans dest (0600) au lieu de la mémoire."""
-    import subprocess
-    exe = common.resolve(name)
-    if exe is None:
-        common.run(name, args, timeout=timeout)  # bouchon du mode test : journalisé
-        common.atomic_write(dest, b"", 0o600, group_scanoria=False)
-        return 0
-    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "wb") as out:
-        try:
-            p = subprocess.run([exe] + list(args), stdin=subprocess.DEVNULL, stdout=out, env=common.child_env(),
-                               timeout=timeout, cwd="/", close_fds=True, check=False)
-        except subprocess.TimeoutExpired:
-            raise Fail("E_TIMEOUT", "%s timed out" % name)
-        out.flush()
-        os.fsync(out.fileno())
-    return p.returncode
-
-
-def prune_backups(mid):
-    try:
-        names = sorted(n for n in os.listdir(BACKUPS) if n.startswith(mid + "-"))
-    except FileNotFoundError:
-        return
-    olds = [n for n in names if re.fullmatch(re.escape(mid) + r"-.+-[0-9]{8}T[0-9]{6}Z", n)]
-    olds.sort(key=lambda n: n[-16:])
-    for n in olds[:-KEEP_BACKUPS]:
-        shutil.rmtree(os.path.join(BACKUPS, n), ignore_errors=True)
-
-
-def restore(m, d):
-    mid = m["id"]
-    dump = os.path.join(d, "db.dump")
-    if os.path.exists(dump):
-        r = common.run("runuser", ["-u", "postgres", "--", "/usr/bin/pg_restore", "--clean", "--if-exists",
-                                   "-d", db_name(mid), dump], timeout=1800)
-        if r.returncode != 0:
-            raise Fail("E_ROLLBACK_FAILED", "database restore failed")
-    for name, _ in quadlet.volumes(m):
-        f = os.path.join(d, "volume-%s.tar" % name)
-        if os.path.exists(f) and podman("volume", "import", quadlet.volume_name(mid, name), f,
-                                        timeout=1800) != 0:
-            raise Fail("E_ROLLBACK_FAILED", "volume restore failed")
-
 
 def act_update_module(c):
     reg = load_registry()
@@ -893,32 +910,44 @@ def act_update_module(c):
             raise Fail("E_CONFLICT", "%s conflicts with installed %s" % (mid, k), {"conflicts_with": k})
     if not appliance_ok((new.get("requires") or {}).get("appliance")):
         raise Fail("E_DEPENDENCY", "%s %s requires appliance %s" % (mid, version, new["requires"]["appliance"]))
+    if uses_db(new) != uses_db(old):
+        raise Fail("E_PRECONDITION", "database requirement changed: reinstall the module")
     props = (new.get("options") or {}).get("properties") or {}
     options = resolve_options(new, {k: v for k, v in e["options"].items() if k in props})
     check_resources([x["manifest"] for x in reg["modules"].values()], [new], freed=[old])
+    is_svc = is_permanent(old)
+    if is_svc:
+        services.secrets_of(new)
+        backup.backup_volumes(new)
 
     op = Op(reg, "update", mid, c.req["id"])
-    is_svc = old["type"] in ("service", "runner")
     snap = quadlet.snapshot(mid) if is_svc else {}
-    bdir = None
+    stamp = None
+    log = []
     try:
         if is_svc:
+            # Sauvegarde toujours faite avant tout changement (contrat 10).
             op.step("backup", 10)
-            bdir = backup(old)
+            stamp = take_backup(c, e, "update")
+            log.append("backup %s" % stamp)
         declarative = new["type"] == "feed" and not new.get("image")
         if not declarative:
             op.step("pull", 25)
             pull(new, c.left())
+            log.append("pulled %s" % new.get("image"))
         if declarative:
             pass
         elif is_svc:
             op.step("units", 40)
             stop_service(mid)
-            cred = _cred(mid) if (new.get("needs") or {}).get("postgres") else None
+            services.ensure_secrets(new)
             apply_sysctl(reg, [new])
-            write_units(new, e, options, cred)
+            write_units(new, e, options)
             op.step("health", 55)
             start_service(new, e, c.left())
+            log.append("started %s" % version)
+            op.step("provision", 65)
+            provision(new, e, "update", c.left())
             if not e["enabled"]:
                 stop_service(mid)
         else:
@@ -929,29 +958,35 @@ def act_update_module(c):
     except Exception as exc:  # noqa: BLE001
         err = as_fail(exc, "update-module")
         op.step("rollback", op.rec["progress"])
+        log.append("failed: %s" % err.message[:300])
         try:
             if is_svc:
                 stop_service(mid)
-                if bdir:
-                    restore(old, bdir)
+                if stamp:
+                    d, man = backup.verify(mid, stamp)
+                    backup.restore_data(old, d, man, timeout=max(60, c.left()))
+                    log.append("restored backup %s" % stamp)
                 quadlet.restore(mid, snap)
                 systemctl("daemon-reload")
                 apply_sysctl(reg)
                 if e["enabled"]:
                     start_service(old, e, max(60, c.left()))
+                log.append("previous version %s running" % old["version"])
             remove_image(reg, new.get("image"))
         except Exception as rb:  # noqa: BLE001
             common.log("update rollback of %s failed: %r" % (mid, rb))
             e.update(status="failed", enabled=False,
                      last_error=("update failed and rollback failed: " + err.message)[:2000])
             op.finish(False, err.message)
-            raise Fail("E_ROLLBACK_FAILED", "update failed (%s) and rollback failed" % err.message)
+            raise Fail("E_ROLLBACK_FAILED", "update failed (%s) and rollback failed" % err.message,
+                       {"backup": stamp, "log": log})
         e["last_error"] = ("update to %s failed: %s" % (version, err.message))[:2000]
         op.finish(False, err.message)
         save_registry(reg)
         # Le code d'origine est gardé ; une erreur interne devient « retour arrière fait ».
         code = "E_HEALTH_ROLLED_BACK" if err.code == "E_INTERNAL" else err.code
-        raise Fail(code, "update of %s to %s failed, previous version kept: %s" % (mid, version, err.message), err.output)
+        raise Fail(code, "update of %s to %s failed, previous version kept: %s" % (mid, version, err.message),
+                   dict(err.output, backup=stamp, log=log))
     e.update(manifest=new, options=options, testbed=tb, last_error=None)
     remove_image(reg, old.get("image"))
     apply_sysctl(reg)
@@ -959,7 +994,7 @@ def act_update_module(c):
         op.step("route", 90)
         route(reg)
     op.finish(True, "updated to %s" % version)
-    return {"id": mid, "previous": old["version"], "version": new["version"], "backup": bool(bdir)}
+    return {"id": mid, "previous": old["version"], "version": new["version"], "backup": stamp, "log": log}
 
 
 # --------------------------------------------------------------------------
