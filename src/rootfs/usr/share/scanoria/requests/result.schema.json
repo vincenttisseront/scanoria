@@ -63,7 +63,8 @@
             "package-dates",
             "self-sbom",
             "run-canaries",
-            "start-trial"
+            "start-trial",
+            "prefetch-images"
           ]
         }
       ]
@@ -140,7 +141,9 @@
         "E_TRIAL_INVALID",
         "E_TRIAL_IMAGE",
         "E_SELFSBOM_IMAGE",
-        "E_SELFSBOM_OUTPUT"
+        "E_SELFSBOM_OUTPUT",
+        "E_PREFETCH_FAILED",
+        "E_PREFETCH_UNKNOWN_IMAGE"
       ]
     },
     "message": {

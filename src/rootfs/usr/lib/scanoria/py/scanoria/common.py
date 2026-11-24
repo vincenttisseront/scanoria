@@ -69,6 +69,7 @@ REQUEST_TYPES = (
     "reset-service-admin",
     "package-dates",
     "self-sbom", "run-canaries", "start-trial",
+    "prefetch-images",
 )
 REJECT_CODES = frozenset((
     "E_INVALID_NAME", "E_NOT_REGULAR_FILE", "E_BAD_OWNER", "E_TOO_LARGE", "E_INVALID_JSON",
@@ -87,6 +88,7 @@ ERROR_CODES = frozenset((
     "E_DTRACK_UNAVAILABLE", "E_DTRACK_ADMIN", "E_DTRACK_API",
     "E_EXPORT_FAILED",
     "E_CANARY_FAILED", "E_TRIAL_INVALID", "E_TRIAL_IMAGE", "E_SELFSBOM_IMAGE", "E_SELFSBOM_OUTPUT",
+    "E_PREFETCH_FAILED", "E_PREFETCH_UNKNOWN_IMAGE",
 ))
 ALL_CODES = frozenset(("OK",)) | REJECT_CODES | ERROR_CODES
 
@@ -343,6 +345,9 @@ SYSTEM_CMDS = {
     "resolvectl": "/usr/bin/resolvectl",
     "podman": "/usr/bin/podman",
     "sysctl": "/usr/sbin/sysctl",
+    # 0.6 (V9) : tmpfs de l'espace de travail d'une analyse.
+    "mount": "/usr/bin/mount",
+    "umount": "/usr/bin/umount",
 }
 # Commandes sans effet sur le système, exécutées réellement en mode test.
 TEST_PASSTHROUGH = ("openssl", "zstd")

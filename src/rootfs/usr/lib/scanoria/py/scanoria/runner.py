@@ -35,8 +35,8 @@ import urllib.parse
 
 import contextlib
 
-from . import applicability, catalogverify, common, feeds, fetch, modules, resultcache, sbom, schedule, schema, \
-    svcnet, testbed, vigilance
+from . import applicability, catalogverify, common, feeds, fetch, gitmirror, modules, resultcache, sbom, \
+    schedule, schema, svcnet, testbed, vigilance, workspace
 from .common import Fail
 
 
@@ -54,6 +54,11 @@ WORK = JOBS + "/work"
 RESULTS = SCANS + "/results"
 WORKSPACES = SCANS + "/workspaces"
 STATE = _test_path("SCANORIA_RUNNER_STATE", common.RUN + "/runner.json")
+# Projets existants, publiés par le worker dans jobs/tmp (seul répertoire de la
+# file où il écrit hors des tâches) : purge des miroirs V2 et des caches V10.
+LIVE_PROJECTS = TMP + "/live-projects.json"
+# Caches persistants par module et par projet (scan.cache, V10).
+SCAN_CACHE = common.VARLIB + "/scan-cache"
 
 MAX_JOB = 256 << 10
 RESULT_TTL = 24 * 3600
@@ -340,8 +345,11 @@ def recover():
                                                        "the runner restarted while the job was running"),
                                  source_kind=kind))
             common.log("runner: job %s interrupted by a restart" % job_id)
+    # Travail en mémoire (V9) : tmpfs démontés avant tout retrait.
+    workspace.unmount_all(WORKSPACES)
     for n in os.listdir(WORKSPACES) if os.path.isdir(WORKSPACES) else []:
         shutil.rmtree(os.path.join(WORKSPACES, n), ignore_errors=True)
+    feeds.release_all()
     shutil.rmtree(fetch.CRED_DIR, ignore_errors=True)
     svcnet.remove_orphan_secrets()
     fetch.reset_network()
@@ -462,16 +470,28 @@ def plan(reg, job):
     return out
 
 
-def feeds_info(reg, m):
+def feeds_info(reg, m, leases=None):
+    """Bases du module ; avec leases (V7), la version épinglée au début de l'analyse."""
     res = []
     for fid in (m.get("requires") or {}).get("feeds") or []:
         if not isinstance(fid, str) or not catalogverify.MODULE_ID_RE.match(fid):
             continue
         fe = reg["modules"].get(fid)
         ver = (fe.get("manifest") or {}).get("version") if isinstance(fe, dict) else None
-        # Date du dernier téléchargement réussi de la base (feeds.py, 0.3.4).
-        updated = feeds.public_status(fid).get("updated_at")
-        res.append({"id": fid, "version": ver if isinstance(ver, str) else None, "updated_at": updated})
+        # Date du dernier téléchargement réussi de la base (feeds.py, 0.3.4), ou
+        # celle de la version épinglée pour l'analyse (V7).
+        revision = None
+        if leases is not None and isinstance(leases.get(fid), dict):
+            updated = leases[fid].get("updated_at")
+            # G11 : répertoire exact de la base montée pour cette analyse (V7).
+            rev = leases[fid].get("version")
+            revision = rev if isinstance(rev, str) and feeds.VERSION_DIR_RE.match(rev) else None
+        else:
+            updated = feeds.public_status(fid).get("updated_at")
+        entry = {"id": fid, "version": ver if isinstance(ver, str) else None, "updated_at": updated}
+        if revision:
+            entry["revision"] = revision
+        res.append(entry)
     return res
 
 
@@ -561,11 +581,125 @@ def _check_output(data, declared, kind, version):
         raise Fail("E_TESTBED", "unsupported output kind %s" % kind)
 
 
-def run_module(job, entry, spec, ws, rdir, reg, secrets):
-    """Lance un module confiné sur ws/src ; complète entry (statut, sorties, journal, mesures)."""
+# --------------------------------------------------------------------------
+# Caches persistants (scan.cache, V10)
+# --------------------------------------------------------------------------
+# Un module qui déclare scan.cache reçoit /cache, un répertoire propre au
+# module et au projet (jamais partagé entre projets), qui survit à l'analyse.
+# Le conteneur reste jetable : après chaque passage, le runner (root) ne garde
+# du cache que ce que la politique déclarée autorise et dont il a vérifié
+# l'empreinte ; tout le reste est retiré, et un cache douteux (lien, fichier
+# spécial, taille excessive) est vidé entièrement.
+#   sonar-plugins : SONAR_USER_HOME de sonar-scanner, dont seules les extensions
+#   cache/<empreinte>/<nom>.jar sont gardées, l'empreinte (MD5 ou SHA-256 du
+#   fichier, qui sert de clé au scanner) étant recalculée ici.
+
+CACHE_POLICIES = ("sonar-plugins",)
+MAX_CACHE_BYTES = 2 << 30
+CACHE_JAR_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,200}\.jar\Z")
+CACHE_KEY_RE = re.compile(r"[0-9a-f]{32}([0-9a-f]{32})?\Z")
+
+
+def scan_cache_dir(m, job):
+    """Répertoire de cache du module pour le projet de l'analyse, ou None."""
+    policy = (m.get("scan") or {}).get("cache")
+    pid = job.get("project_id")
+    if policy not in CACHE_POLICIES or not isinstance(pid, str) or not common.UUID4_RE.match(pid) \
+            or job.get("trigger") == "trial":
+        return None
+    base = os.path.join(SCAN_CACHE, m["id"])
+    os.makedirs(base, mode=0o700, exist_ok=True)
+    d = os.path.join(base, pid)
+    if os.path.lexists(d) and (os.path.islink(d) or not os.path.isdir(d)):
+        _discard(d)
+    if not os.path.isdir(d):
+        os.mkdir(d, 0o700)
+    testbed._give_to_container(d)
+    return d
+
+
+def _file_digest(path, algo):
+    import hashlib
+    h = hashlib.new(algo)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def _wipe(d):
+    for n in os.listdir(d):
+        _discard(os.path.join(d, n))
+
+
+def verify_cache(m, d):
+    """Ne garde du cache que les fichiers vérifiés de la politique du module."""
+    try:
+        total = 0
+        for root, dirs, names in os.walk(d, followlinks=False):
+            for n in dirs + names:
+                st = os.lstat(os.path.join(root, n))
+                if not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
+                    raise ValueError("unexpected file type")
+                total += st.st_size
+        if total > MAX_CACHE_BYTES:
+            raise ValueError("cache too large")
+        kept = 0
+        for n in os.listdir(d):
+            if n != "cache":
+                _discard(os.path.join(d, n))
+        cdir = os.path.join(d, "cache")
+        for key in os.listdir(cdir) if os.path.isdir(cdir) else []:
+            kd = os.path.join(cdir, key)
+            if not CACHE_KEY_RE.match(key) or not os.path.isdir(kd):
+                _discard(kd)
+                continue
+            algo = "md5" if len(key) == 32 else "sha256"
+            for n in os.listdir(kd):
+                fp = os.path.join(kd, n)
+                if CACHE_JAR_RE.match(n) and os.path.isfile(fp) and _file_digest(fp, algo) == key:
+                    kept += 1
+                else:
+                    _discard(fp)
+            if not os.listdir(kd):
+                os.rmdir(kd)
+        testbed._give_to_container(d)
+        return kept
+    except (OSError, ValueError) as e:
+        common.log("runner: cache of %s emptied (%s)" % (m.get("id"), e))
+        _wipe(d)
+        return 0
+
+
+def drop_project_caches(project_id):
+    """Retire les caches d'un projet supprimé (tous modules)."""
+    for mod in os.listdir(SCAN_CACHE) if os.path.isdir(SCAN_CACHE) else []:
+        _discard(os.path.join(SCAN_CACHE, mod, project_id))
+
+
+def feed_mounts(m, leases):
+    """/feeds/<id> en lecture seule : la version épinglée de l'analyse (V7), sinon le lien actif."""
+    if leases is None:
+        return testbed.feed_mounts(m)
+    out = []
+    for fid in (m.get("requires") or {}).get("feeds") or []:
+        if not isinstance(fid, str) or not catalogverify.MODULE_ID_RE.match(fid):
+            raise Fail("E_DEPENDENCY", "invalid feed id")
+        out.append((leases[fid]["path"], "/feeds/" + fid, "ro"))
+    return out
+
+
+def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
+    """Lance un module confiné sur ws/src ; complète entry (statut, sorties, journal, mesures).
+
+    ctx (0.6) : leases, bases épinglées de l'analyse (V7) ; mirror, miroir Git du
+    projet monté en lecture seule sur /mirror pour l'historique (V2)."""
+    ctx = ctx or {}
+    leases = ctx.get("leases")
     m, mid = spec["manifest"], spec["manifest"]["id"]
     scan = m["scan"]
-    entry["feeds"] = feeds_info(reg, m)
+    entry["feeds"] = feeds_info(reg, m, leases)
     entry["started_at"] = common.iso(common.now())
     t0 = time.monotonic()
     out = os.path.join(ws, "out", mid)
@@ -590,7 +724,13 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
     if common.run("podman", ["image", "exists", m["image"]], timeout=60).returncode != 0:
         return finish("error", _err("E_IMAGE_MISSING", "infra", "image of module %s is missing" % mid))
     try:
-        feeds.require_ready(m)
+        if leases is None:
+            feeds.require_ready(m)
+        else:
+            for fid in (m.get("requires") or {}).get("feeds") or []:
+                if not isinstance(leases.get(fid), dict):
+                    raise Fail("E_FEED_UNAVAILABLE", "database %s is empty: %s cannot run without it; "
+                               "update the database from the Catalog" % (fid, mid))
     except Fail as f:
         # Base vide : message clair plutôt que le code 127 du scanner.
         return finish("error", _err("E_FEED_MISSING", "infra", f.message))
@@ -604,18 +744,26 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
     use_sbom = sbom_dir is not None and sbom.prefers(m) and spec.get("sbom_command") is not None
     # Grype sur le SBOM : il remplace le dépôt sur /src, comme en re-corrélation (contrat 16).
     mounts = [(sbom_dir if use_sbom else os.path.join(ws, "src"), "/src", "ro"), (out, "/out", "rw")]
+    if not use_sbom and (ctx or {}).get("masks") and not workspace.sees_full_tree(m):
+        mounts += workspace.mask_mounts(ws, ctx["masks"])
     if sbom_dir is not None and not use_sbom:
         mounts.append((sbom_dir, sbom.MOUNT, "ro"))
     if spec["history"] and os.path.isdir(os.path.join(ws, "git")):
         mounts.append((os.path.join(ws, "git"), "/git", "ro"))
+        if ctx.get("mirror"):
+            # Objets de l'historique : ceux du miroir (alternates de /git, V2), en lecture seule.
+            mounts.append((ctx["mirror"], "/mirror", "ro"))
     mounts += spec.get("mounts") or []
+    cache = scan_cache_dir(m, job)
+    if cache:
+        mounts.append((cache, "/cache", "rw"))
     if reuse_cached(job, entry, spec, ws, mdir, sbom_dir, use_sbom):
         finish("ok")
         _drop_stats(entry)
         return None
     name = "scanoria-scan-%s-%s" % (job["id"][:8], os.urandom(4).hex())
     try:
-        args = [a for a in testbed.confined_args(m, mounts + testbed.feed_mounts(m), name=name) if a != "--rm"]
+        args = [a for a in testbed.confined_args(m, mounts + feed_mounts(m, leases), name=name) if a != "--rm"]
     except Fail as f:
         return finish("error", _err("E_MODULE_INVALID", "input", f.message))
     svc = spec.get("service")
@@ -635,6 +783,8 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
         args += ["--timeout", str(timeout)]
         for k in sorted(scan.get("env") or {}):
             args += ["--env", "%s=%s" % (k, scan["env"][k])]
+        if cache:
+            args += ["--env", "SCANORIA_CACHE_DIR=/cache"]
         cmd = spec["command"]
         if use_sbom:
             cmd = spec["sbom_command"]
@@ -654,6 +804,8 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
         r = common.run("podman", ["inspect", "--format", "{{.State.OOMKilled}}", name], timeout=60)
         oom = r.returncode == 0 and r.text.strip() == "true"
         common.run("podman", ["rm", "--force", "--ignore", "--time", "0", name], timeout=120)
+        if cache:
+            verify_cache(m, cache)
     stats = entry.setdefault("stats", {})
     if sampler.peak:
         stats["peak_memory_mb"] = int(sampler.peak // (1 << 20))
@@ -760,11 +912,12 @@ def inspect_source(job, ws, source, runnable):
     return kept
 
 
-def run_modules(job, runnable, ws, rdir, reg, secrets):
-    """Modules de la tâche, graphe et budget respectés (V3, V5)."""
+def run_modules(job, runnable, ws, rdir, reg, secrets, ctx=None):
+    """Modules de la tâche, graphe et budget respectés (V3, V5) ; ctx : bases louées,
+    miroir et masques de l'analyse (0.6, chantier C)."""
     def one(ent, spec):
         try:
-            run_module(job, ent, spec, ws, rdir, reg, secrets)
+            run_module(job, ent, spec, ws, rdir, reg, secrets, ctx)
         except Exception as e:  # noqa: BLE001 — une erreur d'un module n'arrête pas les autres
             common.log("runner: module %s failed: %r" % (ent["id"], e))
             ent.update(status="error", error=_err("E_RUNNER_INTERNAL", "infra", "internal runner error"))
@@ -777,6 +930,44 @@ def run_modules(job, runnable, ws, rdir, reg, secrets):
 # --------------------------------------------------------------------------
 # Tâche complète
 # --------------------------------------------------------------------------
+
+def _fetch_source(job, ws, reg, runnable, history, secrets, source):
+    """Récupère la source Git par le miroir du projet (V2), en mémoire si possible
+    (V9), puis applique les exclusions communes ; retourne (session, commit).
+
+    La session reste ouverte (verrou du miroir tenu) : l'appelant la ferme."""
+    pid = job.get("project_id")
+    session = gitmirror.Session(pid, job["source"]["url"], ws)
+    session.__enter__()
+    try:
+        biggest = max([testbed.memory_mb(sp["manifest"]) for _, sp in runnable] or [0])
+        size_mb = workspace.tmpfs_size_mb(workspace.mem_available_mb(), biggest, fetch.FETCH_MEMORY_MB,
+                                          gitmirror.last_tree_bytes(session.project_id))
+        src = os.path.join(ws, "src")
+        tmpfs = size_mb > 0 and workspace.mount_tmpfs(src, size_mb)
+        info = {}
+        log = os.path.join(ws, "logs", "fetch.log")
+        try:
+            commit = fetch.fetch_git(job, ws, reg["modules"], history, log, secrets, mirror=session, info=info,
+                                     extra_memory_mb=size_mb if tmpfs else 0)
+        except fetch.NoSpace:
+            # Arbre plus gros que prévu : repris sur disque, sans nouvelle récupération.
+            common.log("runner: source of job %s does not fit in memory, extracted on disk" % job["id"])
+            workspace.unmount(src)
+            shutil.rmtree(src, ignore_errors=True)
+            tmpfs = False
+            commit = fetch.fetch_git(job, ws, reg["modules"], history, log, secrets, mirror=session, info=info)
+        source["workdir"] = "tmpfs" if tmpfs else "disk"
+        source["mirror"] = info.get("mirror") or "ephemeral"
+        if session.project_id:
+            gitmirror.note_tree(session.project_id, 0, fetch.tree_usage(src))
+        masks, source["excluded"] = workspace.common_exclusions(src)
+        source["masks"] = masks
+        return session, commit
+    except BaseException:
+        session.__exit__(None, None, None)
+        raise
+
 
 def execute(job):
     started = common.iso(common.now())
@@ -805,29 +996,59 @@ def execute(job):
     ws = os.path.join(WORKSPACES, job["id"])
     rdir = result_dir(job["id"])
     os.mkdir(ws, 0o700)          # échoue si l'espace existe déjà : il n'est alors jamais supprimé ici
+    leases = {}
+    session = None
     try:
         os.mkdir(os.path.join(ws, "logs"), 0o700)
+        # V7 : une version de chaque base pour toute l'analyse, épinglée maintenant.
+        for fid in sorted({f for _, sp in runnable for f in (sp["manifest"].get("requires") or {}).get("feeds") or []
+                           if isinstance(f, str) and catalogverify.MODULE_ID_RE.match(f)}):
+            try:
+                leases[fid] = feeds.lease(fid, job["id"])
+            except Fail as f:
+                common.log("runner: %s" % f.message)
+                leases[fid] = None
         try:
             if src["kind"] == "git":
                 with schedule.BUDGET.hold(job["id"], fetch.FETCH_MEMORY_MB, 1):
-                    source["commit"] = fetch.fetch_git(job, ws, reg["modules"], history,
-                                                       os.path.join(ws, "logs", "fetch.log"), secrets)
+                    session, source["commit"] = _fetch_source(job, ws, reg, runnable, history, secrets, source)
                 files, size, skipped = fetch.bound_tree(os.path.join(ws, "src"))
+                if session.project_id and history != "full":
+                    session.__exit__(None, None, None)    # le miroir n'est plus lu : verrou rendu
+                    session = None
             elif src["kind"] == "sbom":
                 files, size, skipped = write_sbom(src["components"], ws)
             else:
                 files, size, skipped = fetch.extract_upload(src["upload_id"], ws)
-        except fetch.SourceError as e:
+                source["masks"], source["excluded"] = workspace.common_exclusions(os.path.join(ws, "src"))
+        except (fetch.SourceError, gitmirror.MirrorError) as e:
+            if isinstance(e, gitmirror.MirrorError):
+                e = fetch.SourceError(e.code, "infra", e.message)
+            source.pop("masks", None)
             for ent, _ in runnable:
                 ent.update(status="skipped", error=None)
             result.update(status="error", error=e.as_error())
             _copy_fetch_log(ws, rdir)
             return result
         source.update(files=files, bytes=size, skipped=skipped)
+        # V9 : exclusions masquées pour les modules hors secrets et SAST seulement ;
+        # jamais écrites dans le résultat (seul leur décompte l'est). Les masques sont
+        # créés avant les modules, qui tournent en parallèle (V5).
+        masks = source.pop("masks", None) or []
+        workspace.mask_mounts(ws, masks)
+        ctx = {"leases": leases, "mirror": session.path if session is not None and history == "full" else None,
+               "masks": masks}
         runnable = inspect_source(job, ws, source, runnable)
         schedule.configure_from(reg)
-        run_modules(job, runnable, ws, rdir, reg, secrets)
+        run_modules(job, runnable, ws, rdir, reg, secrets, ctx)
     finally:
+        if session is not None:
+            session.__exit__(None, None, None)
+        for fid in leases:
+            feeds.release(fid, job["id"])
+        if source.get("workdir") == "tmpfs":
+            workspace.unmount(os.path.join(ws, "src"))
+        workspace.unmount_all(ws)
         shutil.rmtree(ws, ignore_errors=True)
     result["finished_at"] = common.iso(common.now())
     return result
@@ -988,8 +1209,17 @@ class Runner:
         if now - self.last_purge >= PURGE_EVERY_S:
             self.last_purge = now
             purge_results()
+            purge_projects()
             resultcache.prune_attest()
         self.refresh_capacity()
+
+
+def purge_projects():
+    """Miroirs Git (V2) et caches (V10) des projets supprimés, d'après la liste du worker."""
+    try:
+        gitmirror.purge_orphans(gitmirror.live_projects(LIVE_PROJECTS), extra=(drop_project_caches,))
+    except Exception as e:  # noqa: BLE001 — nettoyage : ne bloque jamais la boucle
+        common.log("runner: cannot purge the mirrors of deleted projects: %r" % (e,))
 
 
 def main(argv):

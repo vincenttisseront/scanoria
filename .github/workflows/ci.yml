@@ -345,6 +345,25 @@ jobs:
       - name: tests/b14-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b14-live.sh
 
+  execution-live:
+    name: execution-live (miroir Git, tmpfs, bases louées, images préchargées, b27-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dépendances (podman, nftables, jq, python3-yaml)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark nftables python3-yaml git curl openssl
+          sudo podman --version
+      # Machine jetable : vrais conteneurs, vrai tmpfs, vraie forge HTTPS locale (V1, V2, V7, V9).
+      - name: tests/b27-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b27-live.sh
+
   feeds-live:
     # Le test qui aurait attrapé le code 127 de la 0.3.3 : OSV-Scanner et Trivy
     # installés par le helper à partir de bases vides, téléchargées par
@@ -513,7 +532,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, vigilance-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

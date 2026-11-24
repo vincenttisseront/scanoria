@@ -27,7 +27,7 @@ import tempfile
 import time
 import uuid
 
-from . import aiendpoint, common, modules, netutil, pkgdates, provision, schema, vigilance
+from . import aiendpoint, common, modules, netutil, pkgdates, prefetch, provision, schema, vigilance
 from . import dns as dnscheck
 from .common import Fail
 
@@ -45,6 +45,7 @@ TIMEOUTS = {
     "reset-service-admin": 360,
     "package-dates": 360,
     "self-sbom": 3300, "run-canaries": 3300, "start-trial": 1200,
+    "prefetch-images": 3300,
 }
 # Marge laissée entre l'échéance passée à scanoria-selfupdate et l'arrêt forcé
 # du helper : selfupdate ne franchit le point de non-retour (arrêt de la
@@ -498,6 +499,7 @@ ACTIONS = {
     "self-sbom": vigilance.act_self_sbom,
     "run-canaries": vigilance.act_run_canaries,
     "start-trial": vigilance.act_start_trial,
+    "prefetch-images": prefetch.act_prefetch_images,
 }
 
 

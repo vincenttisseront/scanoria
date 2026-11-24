@@ -33,6 +33,7 @@ import { isRecorrelation, recorrelationPlan, recorrelationSource, reportRecorrel
 import { loadPins } from '../vigilance/pins'
 import { readVigilanceState } from '../vigilance/state'
 import { TRIAL_TRIGGER, concludeTrial, isTrialScan, recordTrialModule } from '../vigilance/trials'
+import { needsPrefetch, requestPrefetch } from './execution'
 import { loadDurations, orderModules } from './order'
 import { recordOrchestration } from './orchestration'
 
@@ -452,6 +453,11 @@ export class ScanWorker {
     const result = redactResult(read.result, redact)
     const infra = result.error?.class === 'infra' ? result.error : result.modules.find(m => m.error?.class === 'infra')?.error
     if (infra && scan.status !== 'ingesting' && scan.attempt <= this.cfg.maxInfraRetries) {
+      // V1 : image absente → préchargement demandé au helper avant la relance.
+      if (needsPrefetch(result)) {
+        await requestPrefetch(this.pool, this.cfg.requestsDir)
+          .catch((e: unknown) => this.log(`prefetch-images not requested: ${(e as Error).message}`))
+      }
       await this.retry(scan, infra)
       return
     }
@@ -571,9 +577,16 @@ export class ScanWorker {
 
   /** Fichiers ignorés par le runner (G15), ajoutés à la couverture ; D la complète. */
   private async mergeSourceCoverage(scanId: string, result: ScanResult): Promise<void> {
-    const source = { files: result.source.files, bytes: result.source.bytes, history: result.source.history, skipped: result.source.skipped }
-    await this.pool.query(`UPDATE scans SET coverage = COALESCE(coverage, '{}'::jsonb) || jsonb_build_object('source', $2::jsonb) WHERE id = $1`,
-      [scanId, JSON.stringify(source)])
+    const source = {
+      files: result.source.files, bytes: result.source.bytes, history: result.source.history, skipped: result.source.skipped,
+      // 0.6 (V2, V9) : miroir Git et répertoire de travail, affichés avec la couverture.
+      ...(result.source.workdir ? { workdir: result.source.workdir } : {}),
+      ...(result.source.mirror ? { mirror: result.source.mirror } : {}),
+    }
+    // Contrat 22 : exclusions communes notées dans la couverture (G15).
+    const excluded = result.source.excluded ?? []
+    await this.pool.query(`UPDATE scans SET coverage = COALESCE(coverage, '{}'::jsonb) || jsonb_build_object('source', $2::jsonb, 'excluded', $3::jsonb) WHERE id = $1`,
+      [scanId, JSON.stringify(source), JSON.stringify(excluded)])
   }
 
   /** Erreur infra (G12) : relance avec recul tant qu'il reste des essais, sinon analyse en erreur. */
