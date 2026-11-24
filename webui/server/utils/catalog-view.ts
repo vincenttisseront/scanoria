@@ -89,8 +89,14 @@ const majorMinor = (v: unknown) => typeof v === 'string' ? v.split('.').slice(0,
 export function variantPending(installed: InstalledModule | undefined, latest: CatalogModule | undefined): boolean {
   if (!installed || !latest || latest.version !== installed.version) return false
   const variants = latest.service?.variants
+  const declared = latest.service?.features
   if (!Array.isArray(variants)) return false
-  return Object.entries(installed.features ?? {}).some(([feature, st]) => !st.active && st.code !== 'disabled'
+  // Installation antérieure à l'option : pas d'état publié, l'option vaut son défaut (vrai).
+  const states: [string, { active: boolean, code?: string | null }][] = Object.entries(installed.features ?? {})
+  for (const f of Array.isArray(declared) ? declared : []) {
+    if (typeof f === 'string' && !installed.features?.[f]) states.push([f, { active: false, code: installed.options[f] === false ? 'disabled' : 'unavailable' }])
+  }
+  return states.some(([feature, st]) => !st.active && st.code !== 'disabled'
     && variants.some((v: unknown) => {
       if (!v || typeof v !== 'object') return false
       const x = v as Record<string, unknown>

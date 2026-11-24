@@ -16,7 +16,8 @@ Branches et PR (option « branches » du module sonarqube, plugin
 sonarqube-community-branch-plugin) : le runner ne transmet SCANORIA_BRANCH
 que pour une référence autre que la branche par défaut, et seulement si le
 service a la fonction active ; SCANORIA_PR_KEY, SCANORIA_PR_BRANCH et
-SCANORIA_PR_BASE décrivent une PR (analyse des PR, G18). L'analyse et la
+SCANORIA_PR_BASE décrivent une PR (prêts pour l'analyse des PR, G18 : le
+runner ne les fournit pas encore). L'analyse et la
 lecture des résultats portent alors sur cette branche ou cette PR seulement.
 
 Le jeton d'analyse arrive par un secret Podman monté en fichier : il n'est

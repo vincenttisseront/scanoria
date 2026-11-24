@@ -19,7 +19,8 @@
 #  6. plugin de branches (option « branches ») : la Community Build seule
 #     refuse une analyse de branche (d'où « skipped » sans la fonction) ; avec
 #     l'image de la variante, le plugin est chargé, la branche est analysée et
-#     ses résultats sont lus sur cette branche seulement. Tant qu'aucune
+#     ses résultats sont lus sur cette branche seulement ; le volume
+#     extensions de l'installation sans plugin est repris (mise à jour). Tant qu'aucune
 #     variante compatible n'est déclarée dans le manifeste, l'essai porte sur
 #     la dernière image publiée du plugin (BRANCH_TEST_IMAGE, épinglée).
 # Base embarquée de SonarQube (H2) : le branchement PostgreSQL relève du moteur
@@ -44,6 +45,7 @@ PORT=19000
 cleanup() {
 	podman rm -f "$CT" > /dev/null 2>&1 || true
 	podman network rm -f "$NET" "$PUB" > /dev/null 2>&1 || true
+	podman volume rm -f "b17-extensions-$$" > /dev/null 2>&1 || true
 	rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -100,7 +102,7 @@ podman network create "$PUB" > /dev/null
 podman run -d --name "$CT" --network "$PUB" --network "$NET" -p "127.0.0.1:$PORT:9000" \
 	--ulimit "nofile=$NOFILE:$NOFILE" --ulimit "nproc=$NPROC:$NPROC" \
 	--env SONAR_TELEMETRY_ENABLE=false --env SONAR_UPDATECENTER_ACTIVATE=false \
-	"$SQ_IMAGE" > /dev/null
+	-v "b17-extensions-$$:/opt/sonarqube/extensions" "$SQ_IMAGE" > /dev/null
 t0=$SECONDS
 python3 -I "$LIVE" provision "$WORK/sonarqube.json" "$PORT" install > "$WORK/prov1.json" \
 	|| { podman logs --tail 80 "$CT" || true; ko "mise en service"; }
@@ -197,7 +199,7 @@ podman pull -q "$B_IMAGE" > /dev/null
 podman run -d --name "$CT" --network "$PUB" --network "$NET" -p "127.0.0.1:$PORT:9000" \
 	--ulimit "nofile=$NOFILE:$NOFILE" --ulimit "nproc=$NPROC:$NPROC" \
 	--env SONAR_TELEMETRY_ENABLE=false --env SONAR_UPDATECENTER_ACTIVATE=false \
-	-v b17-extensions-$$:/opt/sonarqube/extensions "$B_IMAGE" > /dev/null
+	-v "b17-extensions-$$:/opt/sonarqube/extensions" "$B_IMAGE" > /dev/null
 t0=$SECONDS
 python3 -I "$LIVE" provision "$WORK/sonarqube.json" "$PORT" install > "$WORK/prov-b.json" \
 	|| { podman logs --tail 80 "$CT" || true; ko "plugin : mise en service"; }

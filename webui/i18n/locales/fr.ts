@@ -652,7 +652,7 @@ export default {
       installedVersion: 'Version {version}, installée le {date}',
       disabled: 'désactivé',
       lastError: 'Dernière erreur',
-      featureNames: { branches: 'Analyse des branches et des PR' },
+      featureNames: { branches: 'Analyse des branches' },
       featureActive: '{name} : active (plugin {version})',
       featureDisabled: '{name} : désactivée par l’option du module',
       featureUnavailable: '{name} : en attente d’une version du plugin compatible avec cette version ; seule la branche principale est analysée',

@@ -23,8 +23,8 @@
 id: sonarqube
 name: SonarQube Community Build
 description:
-  fr: Qualité du code et SAST, avec son interface web ; branches et PR avec le plugin de branches quand il est disponible.
-  en: Code quality and SAST, with its web interface; branches and pull requests with the branch plugin when available.
+  fr: Qualité du code et SAST, avec son interface web ; toutes les branches avec le plugin de branches quand il est disponible.
+  en: Code quality and SAST, with its web interface; every branch with the branch plugin when available.
 type: service
 categories: [quality, sast]
 license:
@@ -56,12 +56,12 @@ options:
     branches:
       type: boolean
       default: true
-      title: Analyse des branches et des PR
-      description: Ajoute le plugin libre de branches (LGPL-3.0, tiers) quand une version compatible avec ce SonarQube est publiée ; sinon seule la branche principale est analysée.
+      title: Analyse des branches
+      description: Ajoute le plugin libre de branches (LGPL-3.0, tiers) quand une version compatible avec ce SonarQube est publiée ; sinon seule la branche principale est analysée. Les PR suivront avec leur analyse incrémentale (G18).
 options_i18n:
   branches:
-    fr: { title: Analyse des branches et des PR, description: "Ajoute le plugin libre de branches (LGPL-3.0, tiers) quand une version compatible avec ce SonarQube est publiée ; sinon seule la branche principale est analysée." }
-    en: { title: Branch and pull request analysis, description: "Adds the free third-party branch plugin (LGPL-3.0) when a version compatible with this SonarQube is published; otherwise only the main branch is analysed." }
+    fr: { title: Analyse des branches, description: "Ajoute le plugin libre de branches (LGPL-3.0, tiers) quand une version compatible avec ce SonarQube est publiée ; sinon seule la branche principale est analysée. Les PR suivront avec leur analyse incrémentale (G18)." }
+    en: { title: Branch analysis, description: "Adds the free third-party branch plugin (LGPL-3.0) when a version compatible with this SonarQube is published; otherwise only the main branch is analysed. Pull requests will follow with their incremental analysis (G18)." }
 service:
   port: 9000
   health_path: /api/system/status
@@ -77,7 +77,7 @@ service:
   #       image: docker.io/mc1arke/sonarqube-with-community-branch-plugin@sha256:<empreinte de 26.11.0.134175-community>
   #       version: "26.11.0"            # version du plugin
   #       base_version: "26.11.0.134175" # SonarQube embarqué, égal à version
-  #       license: { spdx: LGPL-3.0-only, url: https://github.com/mc1arke/sonarqube-community-branch-plugin/blob/master/LICENSE, verified_at: "AAAA-MM-JJ" }
+  #       license: { spdx: LGPL-3.0-only, url: https://github.com/mc1arke/sonarqube-community-branch-plugin/blob/master/LICENSE, verified_at: "AAAA-MM-JJ", restrictions: none }
   #       upstream: { source: https://github.com/mc1arke/sonarqube-community-branch-plugin }
   #       leaves:
   #         - { volume: extensions, dir: plugins, prefix: sonarqube-community-branch-plugin }

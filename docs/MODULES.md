@@ -277,7 +277,8 @@ Un service peut offrir une **fonction optionnelle** fournie par une extension
 tierce, par exemple l'analyse des branches et des PR de SonarQube Community
 Build par le plugin libre
 [sonarqube-community-branch-plugin](https://github.com/mc1arke/sonarqube-community-branch-plugin)
-(LGPL-3.0, non maintenu par SonarSource).
+(LGPL-3.0, non maintenu par SonarSource). Une variante doit être libre et
+sans restriction (`license.restrictions: none`, principe 1).
 
 - `service.features: [branches]` déclare la fonction ; l'option booléenne du
   même nom (`options.properties.branches`, **vraie par défaut**, principe 8)
@@ -308,9 +309,16 @@ Build par le plugin libre
   active ; le runner passe alors `SCANORIA_BRANCH` (référence raccourcie :
   `refs/heads/` et `refs/tags/` retirés), et `sonar_scan.py` ajoute
   `sonar.branch.name` puis lit issues et hotspots sur cette branche.
-  `SCANORIA_PR_KEY`, `SCANORIA_PR_BRANCH` et `SCANORIA_PR_BASE` donnent
-  `sonar.pullrequest.*` (alimentés par l'analyse des PR, G18). Les appliances
-  antérieures ignorent `refs_feature` et restent sur la branche par défaut.
+  Une étiquette (`refs/tags/v1.2`) est analysée comme une branche du même nom.
+  `sonar_scan.py` sait déjà passer `sonar.pullrequest.*` depuis
+  `SCANORIA_PR_KEY`, `SCANORIA_PR_BRANCH` et `SCANORIA_PR_BASE`, mais le runner
+  ne les fournit pas encore : les PR arrivent avec leur analyse incrémentale
+  (G18, 0.7). Les appliances antérieures ignorent `refs_feature` et restent
+  sur la branche par défaut.
+- Une installation antérieure à l'option (sans état publié) prend le défaut
+  de l'option : la variante devenue compatible est proposée en mise à jour,
+  et les scanners qui dépendent du service (sonar-scanner) reprennent alors le
+  manifeste du catalogue à version et image égales (`refresh_dependents`).
 
 **Épingler une nouvelle version du plugin** : relever l'empreinte de
 `docker.io/mc1arke/sonarqube-with-community-branch-plugin:<version SonarQube>-community`,

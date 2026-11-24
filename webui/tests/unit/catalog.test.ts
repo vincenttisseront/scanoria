@@ -384,5 +384,9 @@ describe('vue du catalogue', () => {
     // Option à false ou fonction déjà active : rien à proposer.
     expect(variantPending(inst({ active: false, version: null, code: 'disabled', reason: 'x' }), latest([variant]))).toBe(false)
     expect(variantPending(inst({ active: true, version: '26.11.0', code: null, reason: null }), latest([variant]))).toBe(false)
+    // Installation antérieure à l'option (0.4.0) : aucun état publié, défaut vrai.
+    const before = { ...waiting, options: {}, features: undefined } as unknown as InstalledModule
+    expect(variantPending(before, latest([variant]))).toBe(true)
+    expect(variantPending({ ...before, options: { branches: false } } as InstalledModule, latest([variant]))).toBe(false)
   })
 })

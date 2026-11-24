@@ -32,7 +32,7 @@ from .common import Fail
 
 FEATURE_RE = re.compile(r"[a-z][a-z0-9_]{0,30}\Z")
 OPTION_RE = re.compile(r"[a-z][a-z0-9_]{0,30}\Z")
-LEAF_DIR_RE = re.compile(r"[A-Za-z0-9._-]{1,64}\Z")
+LEAF_DIR_RE = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}\Z")
 LEAF_PREFIX_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{2,80}\Z")
 MAX_VARIANTS = 4
 
@@ -55,6 +55,11 @@ def declared(m):
                 or not isinstance(v.get("image"), str) or not IMAGE_RE.match(v["image"]) \
                 or not isinstance(v.get("version"), str) or not isinstance(v.get("base_version"), str):
             raise Fail("E_INVALID_PARAM", "%s: invalid service variant" % m.get("id"))
+        # Principe 1 : une variante n'ajoute qu'une extension libre, sans
+        # restriction ; sinon elle demanderait sa propre acceptation de licence.
+        if (v.get("license") or {}).get("restrictions", "none") != "none" or \
+                not isinstance((v.get("license") or {}).get("spdx"), str):
+            raise Fail("E_INVALID_PARAM", "%s: variant license must be free, without restriction" % m.get("id"))
         if v["option"] in seen:
             raise Fail("E_INVALID_PARAM", "%s: two variants for option %s" % (m.get("id"), v["option"]))
         seen.add(v["option"])
@@ -95,8 +100,10 @@ def features(m, options):
     code : null (active), « disabled » (option fausse), « incompatible » (variante
     déclarée mais d'une autre version), « unavailable » (aucune variante encore)."""
     out = {}
+    props = ((m.get("options") or {}).get("properties")) or {}
     for f in optional_features(m):
-        wanted = (options or {}).get(f) is True
+        # Option absente (installation antérieure à l'option) : son défaut.
+        wanted = (options or {}).get(f, (props.get(f) or {}).get("default")) is True
         cands = [v for v in declared(m) if v["feature"] == f]
         ok = [v for v in cands if incompatibility(m, v) is None]
         if not wanted:
@@ -114,8 +121,10 @@ def features(m, options):
 
 def select(m, options):
     """Variante retenue pour ces options, ou None."""
+    props = ((m.get("options") or {}).get("properties")) or {}
     for v in declared(m):
-        if (options or {}).get(v["option"]) is True and incompatibility(m, v) is None:
+        wanted = (options or {}).get(v["option"], (props.get(v["option"]) or {}).get("default"))
+        if wanted is True and incompatibility(m, v) is None:
             return v
     return None
 
@@ -193,13 +202,18 @@ def _remove_in(root, leaf):
             return out
         try:
             for name in os.listdir(dfd):
-                if not name.startswith(leaf["prefix"]):
+                # Le préfixe, suivi d'un séparateur (version, extension) : rien d'autre.
+                if name != leaf["prefix"] and not name.startswith((leaf["prefix"] + "-", leaf["prefix"] + ".")):
                     continue
-                st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
-                if stat.S_ISDIR(st.st_mode):
+                try:
+                    st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+                    if stat.S_ISDIR(st.st_mode):
+                        continue
+                    # unlink ne suit pas un lien : seul le lien est retiré.
+                    os.unlink(name, dir_fd=dfd)
+                except OSError as e:
+                    common.log("%s/%s not removed: %s" % (leaf["dir"], name, e))
                     continue
-                # unlink ne suit pas un lien : seul le lien est retiré.
-                os.unlink(name, dir_fd=dfd)
                 out.append("%s/%s" % (leaf["dir"], name))
         finally:
             os.close(dfd)

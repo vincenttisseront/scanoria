@@ -652,7 +652,7 @@ export default {
       installedVersion: 'Version {version}, installed on {date}',
       disabled: 'disabled',
       lastError: 'Last error',
-      featureNames: { branches: 'Branch and pull request analysis' },
+      featureNames: { branches: 'Branch analysis' },
       featureActive: '{name}: active (plugin {version})',
       featureDisabled: '{name}: turned off by the module option',
       featureUnavailable: '{name}: waiting for a plugin version compatible with this version; only the main branch is analysed',

@@ -924,6 +924,28 @@ def act_restore_module(c):
 # update-module
 # --------------------------------------------------------------------------
 
+def refresh_dependents(reg, mid, log):
+    """Scanners installés qui dépendent du service : manifeste du catalogue repris
+    à version et image égales (ex. sonar-scanner et scan.refs_feature, ajouté
+    après son installation), pour que la fonction devenue active serve."""
+    try:
+        mods = catalog()
+    except Fail:
+        return
+    for k, other in reg["modules"].items():
+        om = other.get("manifest") or {}
+        if k == mid or om.get("type") != "scanner" or mid not in requires_of(om):
+            continue
+        try:
+            cand = lookup(mods, k, om.get("version"))
+            catalogverify.check_module(cand)
+        except Fail:
+            continue
+        if cand.get("image") == om.get("image") and cand != om:
+            other["manifest"] = cand
+            log.append("refreshed %s %s" % (k, cand["version"]))
+
+
 def act_update_module(c):
     reg = load_registry()
     mid, version = c.params["id"], c.params["version"]
@@ -935,9 +957,11 @@ def act_update_module(c):
     props = (new.get("options") or {}).get("properties") or {}
     options = resolve_options(new, {k: v for k, v in e["options"].items() if k in props})
     new = variants.effective(new, options)
-    # Même version, autre image : une variante devenue compatible (plugin publié
-    # après SonarQube) s'applique comme une mise à jour, sauvegarde comprise.
-    same_variant_change = new["version"] == old["version"] and new.get("image") != old.get("image")
+    # Même version : seule une variante devenue compatible (plugin publié après
+    # SonarQube) s'applique, comme une mise à jour, sauvegarde comprise. Jamais
+    # l'inverse ni un simple changement d'empreinte à version égale.
+    same_variant_change = new["version"] == old["version"] and new.get("image") != old.get("image") \
+        and not old.get("active_variant") and bool(new.get("active_variant"))
     if vkey(new["version"]) <= vkey(old["version"]) and not same_variant_change:
         raise Fail("E_VERSION", "%s %s is not newer than the installed %s" % (mid, version, old["version"]))
     if new["type"] != old["type"]:
@@ -1037,6 +1061,8 @@ def act_update_module(c):
         raise Fail(code, "update of %s to %s failed, previous version kept: %s" % (mid, version, err.message),
                    dict(err.output, backup=stamp, log=log))
     e.update(manifest=new, options=options, testbed=tb, last_error=None)
+    if same_variant_change:
+        refresh_dependents(reg, mid, log)
     remove_image(reg, old.get("image"))
     apply_sysctl(reg)
     if old["type"] == "service":

@@ -482,7 +482,39 @@ hx install-modules "$(jq -cn '{modules: [{id: "brv", version: "2.0.0", options: 
 expect "option « branches » à false : image d'origine même avec variante" "$(code)/$(grep -c -F "Image=$(img brv-2.0.0)" "$BCONT")/$(feat)" OK/1/false/disabled
 hx uninstall-module '{"id": "brv", "keep_data": false}'
 expect "variante : désinstallation" "$(code)/$(mstate brv)" OK/absent
-CATN=$((CATN + 3))
+# Installation antérieure à l'option (0.4.0) : ni option ni fonction dans le manifeste.
+BRV0=$(svc brv 2.0.0 '.needs = {sysctl: {}, postgres: false} | .service.secrets = [] | .service.env = {} | .service.backup = null')
+publish $((CATN + 4)) "$(jq -cn --argjson a "[$APP1,$APP2,$APP3,$SMALL,$HUGE,$SCAN_LIMIT,$BRV0]" '$a')"
+hx refresh-catalog '{}'
+hx install-modules "$(inst brv 2.0.0)"
+expect "installation antérieure : sans état de fonction" "$(code)/$(jq -r '.modules[] | select(.id=="brv") | has("features")' "$STATE")" OK/false
+publish $((CATN + 5)) "$(jq -cn --argjson a "[$APP1,$APP2,$APP3,$SMALL,$HUGE,$SCAN_LIMIT,$BRV1V]" '$a')"
+hx refresh-catalog '{}'
+hx update-module '{"id": "brv", "version": "2.0.0"}'
+expect "installation antérieure : variante appliquée (option à son défaut)" "$(code)/$(grep -c -F "Image=$VIMG" "$BCONT")/$(feat)" OK/1/true/-
+publish $((CATN + 6)) "$(jq -cn --argjson a "[$APP1,$APP2,$APP3,$SMALL,$HUGE,$SCAN_LIMIT,$BRV1]" '$a')"
+hx refresh-catalog '{}'
+hx update-module '{"id": "brv", "version": "2.0.0"}'
+expect "même version, variante retirée du catalogue : refusé (jamais de retour silencieux)" "$(code)/$(grep -c -F "Image=$VIMG" "$BCONT")" E_VERSION/1
+hx uninstall-module '{"id": "brv", "keep_data": false}'
+expect "refresh_dependents : scanner dépendant repris à version et image égales" "$(pyrun '
+from scanoria import modules
+img = "registry.exemple.test/scanoria/sc@sha256:" + "c" * 64
+old = {"id": "sc", "type": "scanner", "version": "1.0", "image": img, "requires": {"modules": ["brv"]},
+       "license": {"restrictions": "none"}, "scan": {"command": ["x"], "refs": "default-branch"}}
+new = dict(old, scan={"command": ["x"], "refs": "default-branch", "refs_feature": "branches"})
+other = dict(new, id="other", requires={"modules": []})
+moved = dict(new, image=img.replace("c" * 64, "d" * 64))
+modules.catalog = lambda: [new, dict(other, scan={"command": ["y"]})]
+reg = {"modules": {"sc": {"manifest": old}, "other": {"manifest": other}}}
+log = []
+modules.refresh_dependents(reg, "brv", log)
+ok1 = reg["modules"]["sc"]["manifest"] == new and reg["modules"]["other"]["manifest"] == other
+modules.catalog = lambda: [moved]
+reg2 = {"modules": {"sc": {"manifest": old}}}
+modules.refresh_dependents(reg2, "brv", [])
+print("ok" if ok1 and log == ["refreshed sc 1.0"] and reg2["modules"]["sc"]["manifest"] == old else "ko %r" % log)')" ok
+CATN=$((CATN + 6))
 # Écartée dès la vérification du catalogue (check_module) : introuvable ensuite.
 hostile "variante non épinglée" "$BRV_OPT"' | .service.variants = [{feature: "branches", option: "branches", image: "registry.exemple.test/x:latest",
 	version: "1.0.1", base_version: "1.0.0", license: {spdx: "MIT", url: "https://exemple.test", verified_at: "2026-11-24"},
