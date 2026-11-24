@@ -61,8 +61,10 @@ jobs:
       - name: gitleaks
         run: |
           .github/scripts/install-tools.sh "$RUNNER_TEMP/tools" gitleaks
+          # Tout l'historique du commit testé (pas les autres branches : chacune
+          # est analysée par sa propre CI, et main entière à chaque push).
           "$RUNNER_TEMP/tools/gitleaks" git --config .gitleaks.toml --redact --no-banner \
-            --exit-code 1 --log-opts="--all" .
+            --exit-code 1 --log-opts=HEAD .
 
   osv-scanner:
     name: osv-scanner
