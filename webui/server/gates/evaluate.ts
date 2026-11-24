@@ -321,10 +321,21 @@ export class ScanNotFoundError extends Error {
 }
 
 /** Règles figées dans le plan (G11) si présentes et valides, sinon celles du gate. */
+/**
+ * G11 : un plan figé avant la 0.5 ne connaît pas les règles F8, H3 et H5.
+ * Rejoué, il garde le verdict de l'époque : ces règles y sont désactivées
+ * au lieu de prendre les défauts actuels.
+ */
+const PRE_05_RULES = { license_denied_blocks: false, kev_blocks: false, epss_block_from: null, quarantine_days: 0 } as const
+function isPre05(rules: unknown): rules is Record<string, unknown> {
+  return typeof rules === 'object' && rules !== null && !Array.isArray(rules)
+    && !Object.keys(PRE_05_RULES).some(k => k in rules)
+}
+
 export function rulesFromPlan(plan: unknown): GateRules | null {
   const rules = (plan as { gate?: { rules?: unknown } } | null)?.gate?.rules
   if (rules === undefined) return null
-  const parsed = GateRules.safeParse(rules)
+  const parsed = GateRules.safeParse(isPre05(rules) ? { ...PRE_05_RULES, ...rules } : rules)
   return parsed.success ? parsed.data : null
 }
 

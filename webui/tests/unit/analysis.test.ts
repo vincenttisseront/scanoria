@@ -18,6 +18,8 @@ import { enqueueAiTask } from '../../server/ai/enqueue'
 
 const root = (rel: string) => fileURLToPath(new URL(`../../../${rel}`, import.meta.url))
 const SQL = readFileSync(root('webui/server/db/migrations/003_analyses.sql'), 'utf8')
+const SQL_009 = readFileSync(root('webui/server/db/migrations/009_sbom.sql'), 'utf8')
+const GATE_RULES_05 = JSON.parse(/'(\{[^']*"quarantine_days"[^']*\})'::jsonb/.exec(SQL_009)![1]!)
 const schema = (name: string) => JSON.parse(readFileSync(root(`src/rootfs/usr/share/scanoria/schemas/${name}.schema.json`), 'utf8'))
 const quoted = (values: readonly string[]) => values.map(v => `'${v}'`).join(', ')
 
@@ -50,7 +52,8 @@ describe('contrats des analyses', () => {
 
   it('règles du gate « defaut » valides, H4 et G13 non désactivables', () => {
     const seeded = JSON.parse(/'(\{[^']*"inconclusive_blocks"[^']*\})'::jsonb/.exec(SQL)![1]!)
-    expect(GateRules.parse(seeded)).toEqual(seeded)
+    expect(GateRules.parse(seeded)).toEqual({ ...seeded, ...GATE_RULES_05 })
+    expect(GateRules.parse({ ...GATE_RULES_05, ...seeded })).toEqual({ ...seeded, ...GATE_RULES_05 })
     expect(GateRules.safeParse({ ...seeded, block_malicious: false }).success).toBe(false)
     expect(GateRules.safeParse({ ...seeded, inconclusive_blocks: false }).success).toBe(false)
     expect(GateRules.safeParse({ ...seeded, extra: 1 }).success).toBe(false)

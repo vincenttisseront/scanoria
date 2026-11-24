@@ -1557,6 +1557,11 @@ export default {
       'output-invalid': 'Sortie invalide',
       'coverage-gap': 'Trous de couverture ×{count}',
       'feed-stale': 'Base de vulnérabilités trop ancienne',
+      'license-denied': 'Licences interdites ×{count}',
+      'license-review': 'Licences à revoir ×{count}',
+      'kev': 'Vulnérabilités exploitées activement (KEV) ×{count}',
+      'epss': 'Vulnérabilités à forte probabilité d’exploitation (EPSS) ×{count}',
+      'quarantine': 'Dépendances trop récentes (quarantaine) ×{count}',
     },
     actions: {
       'fix': 'Corriger',
@@ -1564,6 +1569,7 @@ export default {
       'refresh-feed': 'Rafraîchir la base',
       'install-module': 'Installer le module',
       'rerun': 'Relancer',
+      'wait': 'Attendre la fin de la quarantaine',
     },
     panel: {
       pending: 'Verdict en attente : l’analyse n’est pas terminée.',

@@ -64,3 +64,7 @@ CREATE TABLE ai_embeddings (
     created_at    timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (finding_id, model_digest)
 );
+
+-- Contrat 15 : nouvelles règles du quality gate (F8, H3, H5), ajoutées aux
+-- gates existants avec leurs défauts, sans écraser une valeur déjà posée.
+UPDATE gates SET rules = '{"license_denied_blocks": true, "kev_blocks": true, "epss_block_from": 0.1, "quarantine_days": 7}'::jsonb || rules, updated_at = now();

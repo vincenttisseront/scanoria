@@ -1557,6 +1557,11 @@ export default {
       'output-invalid': 'Invalid output',
       'coverage-gap': 'Coverage gaps ×{count}',
       'feed-stale': 'Vulnerability database too old',
+      'license-denied': 'Denied licenses ×{count}',
+      'license-review': 'Licenses to review ×{count}',
+      'kev': 'Known exploited vulnerabilities (KEV) ×{count}',
+      'epss': 'Vulnerabilities likely to be exploited (EPSS) ×{count}',
+      'quarantine': 'Dependencies too recent (quarantine) ×{count}',
     },
     actions: {
       'fix': 'Fix',
@@ -1564,6 +1569,7 @@ export default {
       'refresh-feed': 'Refresh the database',
       'install-module': 'Install the module',
       'rerun': 'Rerun',
+      'wait': 'Wait for the quarantine to end',
     },
     panel: {
       pending: 'Verdict pending: the scan is not finished.',
