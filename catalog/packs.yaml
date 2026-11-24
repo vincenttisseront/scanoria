@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Packs du catalogue (F11) : ensembles de modules installés en une opération,
+# avec contrôle global des ressources par la console et le service root.
+# Schéma : catalog/schema/packs.schema.json. Chaque module cité doit exister
+# dans modules/ et ne pas être une base (les bases « feed » suivent par
+# dépendance). Un module absent fait échouer la construction de l'index.
+# Le nom est un libellé court ; la console le traduit par l'identifiant.
+packs:
+  - id: selection-conseillee
+    name: Sélection conseillée
+    modules: [gitleaks, osv-scanner, trivy]
+    technologies: []
+  - id: node
+    name: Node.js
+    modules: [gitleaks, osv-scanner, trivy]
+    technologies: [javascript, typescript, npm]
+  - id: python
+    name: Python
+    modules: [gitleaks, osv-scanner, trivy]
+    technologies: [python, pip, poetry]
+  - id: java
+    name: Java
+    modules: [gitleaks, osv-scanner, trivy]
+    technologies: [java, maven, gradle]
+  - id: iac
+    name: IaC
+    modules: [gitleaks, trivy]
+    technologies: [terraform, kubernetes, helm, dockerfile]
+  - id: conteneurs
+    name: Conteneurs
+    modules: [trivy]
+    technologies: [dockerfile, container-image]

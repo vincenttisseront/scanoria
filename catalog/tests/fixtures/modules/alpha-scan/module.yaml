@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Module fictif (jeu d'essai du catalogue).
+id: alpha-scan
+name: Alpha Scan
+type: scanner
+categories: [sca, secrets]
+license: { spdx: MIT, url: https://exemple.test/licence, restrictions: none }
+upstream: { homepage: https://exemple.test/alpha, source: https://exemple.test/alpha.git }
+image: registry.exemple.test/outils/alpha@sha256:0000000000000000000000000000000000000000000000000000000000000000
+version: "1.2.3"
+resources: { min_ram_mb: 256, min_cpu: 1, disk_mb: 100 }
+hostname: null
+requires: { feeds: [beta-db], appliance: ">=0.2.0" }
+options:
+  type: object
+  properties:
+    depth: { type: integer, default: 0 }
+scan:
+  inputs: [repo]
+  command: ["alpha", "--sarif", "/out/result.sarif", "/src"]
+  timeout_s: 300
+  network: none
+outputs: { sarif: { path: /out/result.sarif, version: "2.1.0" } }
+testbed:
+  path: testbed/
+  expect: [{ category: sca, min: 1 }]
