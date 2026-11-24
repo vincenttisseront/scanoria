@@ -32,11 +32,17 @@ Correctif : la console et le worker joignent de nouveau les forges.
   appuyé sur un index des imports et des appels relevé sans rien exécuter
   par le nouveau module d'appoint `reach-index`. L'avis ne lève jamais un
   blocage (I11).
+- Pages **Composants** (recherche transverse par composant, version ou CVE,
+  re-corrélation sans réanalyse, F3) et **Licences** (politique par défaut :
+  permissives autorisées, le reste à revoir ; décisions globales et par
+  projet, F8), et **quarantaine** des versions de moins de 7 jours (H5). Ces
+  fonctions s'appuient sur les SBOM : elles restent vides tant que le module
+  Syft de la 0.5 n'est pas installé.
 - Schéma de la 0.5 en base (SBOM, licences, EPSS et KEV, recoupement) et
   nouvelles règles du quality gate. Les règles restent sans effet tant
   qu'aucun module ne les alimente. Un plan figé avant cette version les
   garde désactivées quand il est rejoué.
-- Catalogue n° 7.
+- Catalogue n° 8.
 
 ### Après la mise à jour
 - Si vous aviez posé le contournement
