@@ -23,7 +23,6 @@ puis publiées dans results/<id>/ avec result.json (scan-result.schema.json),
 travail est supprimé dans tous les cas ; les résultats sont purgés après 24 h.
 """
 
-import datetime
 import json
 import os
 import re
@@ -33,7 +32,7 @@ import sys
 import threading
 import time
 
-from . import catalogverify, common, fetch, modules, schema, testbed
+from . import catalogverify, common, feeds, fetch, modules, schema, testbed
 from .common import Fail
 
 
@@ -421,14 +420,8 @@ def feeds_info(reg, m):
             continue
         fe = reg["modules"].get(fid)
         ver = (fe.get("manifest") or {}).get("version") if isinstance(fe, dict) else None
-        updated = None
-        d = os.path.join(testbed.FEEDS, fid)
-        try:
-            newest = max((os.lstat(os.path.join(d, n)).st_mtime for n in os.listdir(d)), default=None)
-            if newest is not None:
-                updated = common.iso(datetime.datetime.fromtimestamp(newest, datetime.timezone.utc))
-        except OSError:
-            pass
+        # Date du dernier téléchargement réussi de la base (feeds.py, 0.3.4).
+        updated = feeds.public_status(fid).get("updated_at")
         res.append({"id": fid, "version": ver if isinstance(ver, str) else None, "updated_at": updated})
     return res
 
@@ -542,6 +535,11 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
 
     if common.run("podman", ["image", "exists", m["image"]], timeout=60).returncode != 0:
         return finish("error", _err("E_IMAGE_MISSING", "infra", "image of module %s is missing" % mid))
+    try:
+        feeds.require_ready(m)
+    except Fail as f:
+        # Base vide : message clair plutôt que le code 127 du scanner.
+        return finish("error", _err("E_FEED_MISSING", "infra", f.message))
     timeout = scan.get("timeout_s") if isinstance(scan.get("timeout_s"), int) else testbed.DEFAULT_TIMEOUT
     timeout = max(10, min(timeout, 86400))
     mounts = [(os.path.join(ws, "src"), "/src", "ro"), (out, "/out", "rw")]

@@ -125,6 +125,10 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
     valid: [{}],
     invalid: [{ force: true }],
   },
+  'refresh-feeds': {
+    valid: [{}, { ids: ['trivy-db'] }, { ids: ['osv-db', 'trivy-db'] }],
+    invalid: [{ ids: [] }, { ids: ['../x'] }, { ids: ['osv-db', 'osv-db'] }, { force: true }],
+  },
   'install-modules': {
     valid: [
       { modules: [{ id: 'gitleaks', version: '8.30.1', options: {} }], accept_licenses: [] },

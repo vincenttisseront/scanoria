@@ -112,5 +112,15 @@
       "result": "failed",
       "message": "banc d’essai : 0 résultat sur 2 attendus"
     }
+  ],
+  "feeds": [
+    {
+      "id": "trivy-db",
+      "updated_at": "2026-11-24T03:00:00Z",
+      "size_mb": 1732.8,
+      "status": "ok",
+      "error": null,
+      "checked_at": "2026-11-24T03:00:00Z"
+    }
   ]
 }

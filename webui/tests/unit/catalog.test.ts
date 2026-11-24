@@ -110,7 +110,8 @@ describe('lecture des fichiers publiés', () => {
     expect(state.available).toBe(true)
     expect(state.modules.map(m => m.id)).toEqual(['gitleaks', 'trivy-db', 'trivy', 'ancien'])
     expect(state.operations).toHaveLength(2)
-    expect(await readModulesState(join(tmp, 'absent.json'))).toEqual({ available: false, modules: [], operations: [] })
+    expect(state.feeds).toEqual([expect.objectContaining({ id: 'trivy-db', status: 'ok', size_mb: 1732.8 })])
+    expect(await readModulesState(join(tmp, 'absent.json'))).toEqual({ available: false, modules: [], operations: [], feeds: [] })
   })
 
   // Contrat 4 : le jeu d'essai suit les schémas des chantiers B et C dès qu'ils sont fusionnés
@@ -310,7 +311,7 @@ describe('plan d’installation', () => {
 })
 
 describe('vue du catalogue', () => {
-  const view = () => buildCatalogView({ ...ctx({ installed }), operations: [], stateAvailable: true } as CatalogContext)
+  const view = () => buildCatalogView({ ...ctx({ installed }), operations: [], feeds: [], stateAvailable: true } as CatalogContext)
 
   it('fusionne index et état : installé, mise à jour, compatibilité, orphelins', () => {
     const v = view()
@@ -326,6 +327,15 @@ describe('vue du catalogue', () => {
     expect(v.index).toEqual({ available: true, version: 7, generated_at: '2026-11-23T06:00:00Z', rejected: 1 })
   })
 
+  it('joint l’âge de la base aux feeds installés seulement', () => {
+    const feed = { id: 'trivy-db', updated_at: '2026-11-24T03:00:00Z', size_mb: 12, status: 'ok' as const, error: null }
+    const v = buildCatalogView({ ...ctx({ installed }), operations: [], feeds: [feed], stateAvailable: true } as CatalogContext)
+    const byId = Object.fromEntries(v.modules.map(m => [m.id, m]))
+    expect(byId['trivy-db']!.feed).toEqual(feed)
+    expect(byId.gitleaks!.feed).toBeNull()
+    expect(byId['osv-db']!.feed).toBeNull()
+  })
+
   it('packs : modules inconnus, installés, restants et plan global', () => {
     const packs = Object.fromEntries(view().packs.map(p => [p.id, p]))
     expect(packs.iac!.unknown_modules).toEqual(['checkov'])
@@ -339,7 +349,7 @@ describe('vue du catalogue', () => {
     expect(v.recommended.ids).toEqual(['osv-scanner', 'shellcheck'])
     expect(v.recommended.first_access).toBe(false)
     expect(v.recommended.plan?.items.map(i => i.id)).toEqual(['osv-scanner', 'shellcheck', 'osv-db'])
-    const fresh = buildCatalogView({ ...ctx(), operations: [], stateAvailable: false } as CatalogContext)
+    const fresh = buildCatalogView({ ...ctx(), operations: [], feeds: [], stateAvailable: false } as CatalogContext)
     expect(fresh.recommended.first_access).toBe(true)
     expect(fresh.recommended.ids).toEqual(['gitleaks', 'osv-scanner', 'trivy', 'shellcheck'])
   })
@@ -350,7 +360,7 @@ describe('vue du catalogue', () => {
       { from: 'semgrep', to: 'opengrep', kind: 'conflict' },
       { from: 'orphelin-dep', to: 'inexistant', kind: 'module' },
     ]))
-    const empty = buildCatalogView({ ...ctx({ index: null, installed }), operations: [], stateAvailable: true } as CatalogContext)
+    const empty = buildCatalogView({ ...ctx({ index: null, installed }), operations: [], feeds: [], stateAvailable: true } as CatalogContext)
     expect(empty.index.available).toBe(false)
     expect(empty.modules).toEqual([])
     expect(empty.orphans).toHaveLength(4)

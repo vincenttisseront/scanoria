@@ -9,7 +9,7 @@ irréversible : garder ou supprimer les données).
 -->
 
 <script setup lang="ts">
-import type { DnsStatus, InstallPlan, InstalledModule, ModuleOperation, ModuleSummary } from '~/composables/useCatalog'
+import type { DnsStatus, FeedStatus, InstallPlan, InstalledModule, ModuleOperation, ModuleSummary } from '~/composables/useCatalog'
 
 interface ModuleDetail {
   module: ModuleSummary | null
@@ -21,6 +21,7 @@ interface ModuleDetail {
   update_license: ModuleSummary['license'] | null
   plan: InstallPlan | null
   dependents: string[]
+  feed: FeedStatus | null
   operations: ModuleOperation[]
   dns: DnsStatus | null
 }
@@ -106,6 +107,17 @@ async function update() {
   await reload()
 }
 
+// --- Base d'un module feed : âge et mise à jour immédiate ---
+const feedReq = useHelperRequest()
+const feedAgeDays = computed(() => {
+  const at = detail.value?.feed?.updated_at
+  return at ? Math.max(0, Math.floor((Date.now() - Date.parse(at)) / 86_400_000)) : null
+})
+async function refreshFeed() {
+  await feedReq.run('/api/catalog/feeds/refresh', { ids: [id.value] }, { timeoutMs: 60 * 60_000 })
+  await reload()
+}
+
 // --- Désinstallation ---
 const uninstallModal = ref(false)
 const keepData = ref<'keep' | 'delete'>('keep')
@@ -133,7 +145,8 @@ const updateAck = computed(() => {
   return t('catalog.detail.updateLicense', { version: detail.value!.update_available ?? '', spdx: l.spdx, restriction: text.restrictionLabel(l.restrictions) })
 })
 const dependentNames = computed(() => (detail.value?.dependents ?? []).map(d => names.value[d] ?? d).join(', '))
-const ownRunning = computed(() => stateReq.running.value || updateReq.running.value || uninstallReq.running.value)
+const ownRunning = computed(() => stateReq.running.value || updateReq.running.value || uninstallReq.running.value
+  || feedReq.running.value)
 // Une opération lancée ailleurs (autre onglet, pack) bloque aussi les actions de la fiche.
 const anyRunning = computed(() => ownRunning.value || catalogBusy.value)
 interface TestbedCase { rule: string | null, category: string | null, min: number, found: number, ok: boolean }
@@ -354,6 +367,53 @@ const testbedDetails = computed(() => {
             {{ t('catalog.list.updateAvailable', { version: detail.update_available }) }}
           </li>
         </ul>
+
+        <div
+          v-if="detail.feed"
+          class="mt-4 rounded border p-3"
+          :class="detail.feed.status === 'ok' ? 'border-default' : 'border-warning'"
+          data-feed
+        >
+          <h3 class="text-sm font-semibold">
+            {{ t('catalog.feed.title') }}
+          </h3>
+          <p class="text-sm">
+            <template v-if="detail.feed.updated_at">
+              {{ t('catalog.feed.updated', { date: fmt.date(detail.feed.updated_at), days: feedAgeDays ?? 0, size: detail.feed.size_mb ?? 0 }) }}
+            </template>
+            <template v-else>
+              {{ t('catalog.feed.missing') }}
+            </template>
+          </p>
+          <p
+            v-if="detail.feed.status === 'stale' || detail.feed.status === 'failed'"
+            class="text-sm text-warning"
+          >
+            {{ t('catalog.feed.lastFailure', { error: detail.feed.error ?? '?' }) }}
+          </p>
+          <p class="text-xs text-muted">
+            {{ t('catalog.feed.help') }}
+          </p>
+          <div
+            v-if="isAdmin"
+            class="mt-2 space-y-1"
+          >
+            <UButton
+              icon="i-lucide-refresh-cw"
+              color="neutral"
+              variant="outline"
+              size="sm"
+              :loading="feedReq.running.value"
+              :disabled="anyRunning && !feedReq.running.value"
+              :label="t('catalog.feed.refresh')"
+              @click="refreshFeed"
+            />
+            <RequestProgress
+              :active="feedReq.running.value"
+              :label="feedReq.label.value"
+            />
+          </div>
+        </div>
 
         <div
           class="mt-4 rounded border p-3"

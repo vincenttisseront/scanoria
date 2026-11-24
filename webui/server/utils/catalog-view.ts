@@ -16,6 +16,7 @@ import { buildInstallPlan, dependentsOf, type InstallPlan, type Machine, type Pl
 export interface CatalogContext extends PlanContext {
   index: CatalogIndex | null
   operations: Awaited<ReturnType<typeof readModulesState>>['operations']
+  feeds: Awaited<ReturnType<typeof readModulesState>>['feeds']
   stateAvailable: boolean
 }
 
@@ -44,6 +45,7 @@ export async function loadCatalogContext(): Promise<CatalogContext> {
     index,
     installed: modules.modules,
     operations: modules.operations,
+    feeds: modules.feeds,
     stateAvailable: modules.available,
     machine: published.state ? machineFrom(published.state) : null,
     applianceVersion: version,
@@ -108,6 +110,7 @@ export function buildCatalogView(ctx: CatalogContext) {
         blockers: plan?.blockers ?? [],
         auto_added: plan?.items.filter(i => i.reason !== 'requested').map(i => i.id) ?? [],
         dependents: installed ? dependentsOf(m.id, ctx) : [],
+        feed: installed ? (ctx.feeds ?? []).find(f => f.id === m.id) ?? null : null,
       }
     })
   const orphans = ctx.installed.filter(i => !latest.has(i.id))
