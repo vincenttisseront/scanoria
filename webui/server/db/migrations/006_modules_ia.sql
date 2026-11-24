@@ -41,6 +41,11 @@ ALTER TABLE ai_tasks DROP CONSTRAINT ai_tasks_subject_type_check;
 ALTER TABLE ai_tasks ADD CONSTRAINT ai_tasks_subject_type_check
     CHECK (subject_type IN ('finding', 'scan', 'testbed', 'rule', 'module'));
 
+-- I15 : contexte joint par l'appelant (extrait masqué et borné d'un journal),
+-- seule source de journal lisible par scanoria-ai, qui n'a pas accès aux
+-- fichiers de /var/lib/scanoria.
+ALTER TABLE ai_tasks ADD COLUMN context jsonb CHECK (context IS NULL OR pg_column_size(context) <= 32768);
+
 -- I24 : retour d'une personne sur une sortie IA (pouce, correction). Sert à
 -- mesurer l'accord IA/humain par tâche et par modèle ; jamais envoyé à un
 -- autre projet que celui de la tâche.
