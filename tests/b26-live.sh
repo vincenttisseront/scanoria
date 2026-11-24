@@ -164,8 +164,8 @@ run_job() { # job JSON → result.json
 	id=$(jq -r .id <<< "$1")
 	printf '%s' "$1" > "$SCANS/jobs/incoming/$id.json"
 	chmod 0600 "$SCANS/jobs/incoming/$id.json"
-	"$RUNNER" --once 2> "$TMP/runner.err" || echo "runner : code $?"
-	sed 's/^/     runner: /' "$TMP/runner.err" | tail -n 10
+	"$RUNNER" --once 2> "$TMP/runner.err" || echo "runner : code $?" >&2
+	sed 's/^/     runner: /' "$TMP/runner.err" | tail -n 10 >&2
 	cat "$SCANS/results/$id/result.json" 2> /dev/null || echo '{}'
 }
 "$RUNNER" --once 2> /dev/null || true   # arborescence
