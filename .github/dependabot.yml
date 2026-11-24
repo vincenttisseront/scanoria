@@ -34,3 +34,13 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  # Bancs d'essai des modules (F12) : dépendances volontairement vulnérables,
+  # que le scanner doit détecter. Aucune mise à jour, de version ni de
+  # sécurité (les conditions « ignore » s'appliquent aux deux).
+  - package-ecosystem: npm
+    directories: ["/modules/*/testbed"]
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
