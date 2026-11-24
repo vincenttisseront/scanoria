@@ -66,6 +66,20 @@ describe('traductions', () => {
     }
   })
 
+  it('traduit chaque étape du service root (set_step, op.step)', () => {
+    const py = join(ROOT, '../src/rootfs/usr/lib/scanoria/py/scanoria')
+    const steps = new Set<string>()
+    for (const name of readdirSync(py).filter(n => n.endsWith('.py'))) {
+      const src = readFileSync(join(py, name), 'utf8')
+      for (const m of src.matchAll(/(?:set_step|op\.step)\("([a-z0-9-]+)"/g)) steps.add(m[1]!)
+    }
+    expect(steps.size).toBeGreaterThan(10)
+    for (const step of steps) {
+      expect(get(fr as Tree, `steps.${step}`), step).toBeTypeOf('string')
+      expect(get(en as Tree, `steps.${step}`), step).toBeTypeOf('string')
+    }
+  })
+
   it('chaque clé utilisée dans le code existe', () => {
     const used = new Set<string>()
     for (const file of [...sourceFiles(join(ROOT, 'app'))]) {

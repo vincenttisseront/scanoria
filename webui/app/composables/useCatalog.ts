@@ -4,6 +4,9 @@
 // Catalogue des modules (lecture seule) : vue renvoyée par GET /api/catalog,
 // rafraîchie toutes les 5 s pendant une opération, toutes les 30 s sinon.
 
+/** Texte traduit du catalogue (description d'un module ou d'un pack). */
+export interface LocalizedText { fr: string, en: string }
+
 export type ModuleType = 'scanner' | 'service' | 'feed' | 'runner'
 export type Restriction = 'none' | 'private-code-forbidden' | 'no-redistribution' | 'other'
 export type ModuleStatus = 'installing' | 'testing' | 'healthy' | 'failed' | 'disabled' | 'removing'
@@ -58,7 +61,7 @@ export interface ModuleSummary {
   name: string
   type: ModuleType
   version: string
-  description: string | null
+  description: LocalizedText | null
   categories: string[]
   license: ModuleLicense
   upstream: { homepage?: string, source?: string } | null
@@ -101,7 +104,7 @@ export interface CatalogPack {
   name: string
   modules: string[]
   technologies: string[]
-  description?: string
+  description?: LocalizedText
   unknown_modules: string[]
   installed_modules: string[]
   pending_modules: string[]

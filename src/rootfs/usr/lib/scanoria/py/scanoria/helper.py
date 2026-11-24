@@ -552,7 +552,11 @@ def handle(name):
             rname, rid, rtype = invalid_name(), None, None
         write_result(rname, make_result(rid, rtype, "console", err[0], err[1], received, None))
         return
-    write_result(name, execute(obj, "console", received))
+    res = execute(obj, "console", received)
+    # État publié AVANT le résultat : la console relit l'état dès qu'elle voit le
+    # résultat final, et doit y trouver l'effet de l'action (pas l'état d'avant).
+    common.publish_state()
+    write_result(name, res)
 
 
 def recover_work():
@@ -608,8 +612,8 @@ def cmd_exec(origin, rtype, params_text):
                 res = make_result(rid, t, origin, err[0], err[1], received, None)
             else:
                 res = execute(req, origin, received)
-    write_result(name, res)
     common.publish_state()
+    write_result(name, res)
     sys.stdout.write(common.dumps(res))
     return 0 if res["status"] == "ok" else 1
 

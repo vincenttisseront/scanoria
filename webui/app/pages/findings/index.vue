@@ -125,19 +125,23 @@ function query(): Record<string, unknown> {
   return out
 }
 
+// Seule la réponse de la dernière requête est affichée (filtres changés en cours de route).
+let loadSeq = 0
 async function load() {
+  const seq = ++loadSeq
   loading.value = true
   try {
     const res = await api<{ items: FindingRow[], total: number }>('/api/findings', { query: query() })
+    if (seq !== loadSeq) return
     items.value = res.items
     total.value = res.total
     void loadSuggestions(res.items)
   }
   catch (err) {
-    toast.add({ title: errorMessage(err), color: 'error' })
+    if (seq === loadSeq) toast.add({ title: errorMessage(err), color: 'error' })
   }
   finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 // Pré-tri suggéré par IA (I3) à côté du statut « nouveau » : indice seulement,
@@ -158,8 +162,15 @@ async function loadSuggestions(rows: FindingRow[]) {
 }
 const SUGGESTION_COLORS: Record<string, 'success' | 'warning' | 'error'> = { 'likely-false-positive': 'success', 'to-confirm': 'warning', 'likely-true-positive': 'error' }
 
+const reloading = ref(false)
 async function reloadAll() {
-  await Promise.all([load(), loadSummary()])
+  reloading.value = true
+  try {
+    await Promise.all([load(), loadSummary()])
+  }
+  finally {
+    reloading.value = false
+  }
 }
 onMounted(reloadAll)
 watch(page, load)
@@ -171,6 +182,7 @@ watch(filters, () => {
     else void load()
   }, 300)
 })
+onBeforeUnmount(() => clearTimeout(debounce))
 
 function resetFilters() {
   Object.assign(filters, { project_id: 'all', scan_id: '', tool: '', severity: 'all', category: 'all', status: 'open', q: '', is_new: false, secret: false, malicious: false })
@@ -333,7 +345,7 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
         icon="i-lucide-refresh-cw"
         color="neutral"
         variant="ghost"
-        :loading="loading"
+        :loading="loading || reloading"
         :aria-label="t('findings.refresh')"
         @click="reloadAll"
       />

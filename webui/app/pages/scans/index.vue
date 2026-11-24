@@ -16,7 +16,6 @@ useHead({ title: computed(() => t('scans.title')) })
 const { api } = useApi()
 const { label, scanError } = useScanText()
 const fmt = useFormat()
-const toast = useToast()
 
 const PAGE = 50
 const tab = ref<'queue' | 'history'>('queue')
@@ -26,6 +25,7 @@ const items = ref<ScanSummary[]>([])
 const total = ref(0)
 const loading = ref(false)
 
+const loadError = ref('')
 async function load(quiet = false) {
   if (!quiet) loading.value = true
   try {
@@ -40,9 +40,10 @@ async function load(quiet = false) {
     const res = await api<{ items: ScanSummary[], total: number }>('/api/scans', { query })
     items.value = res.items
     total.value = res.total
+    loadError.value = ''
   }
   catch (err) {
-    if (!quiet) toast.add({ title: scanError(err), color: 'error' })
+    loadError.value = scanError(err)
   }
   finally {
     loading.value = false
@@ -118,6 +119,13 @@ const tabs = computed(() => [
 
 <template>
   <PageShell :title="t('scans.title')">
+    <UAlert
+      v-if="loadError"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-circle-x"
+      :title="loadError"
+    />
     <template #actions>
       <UButton
         icon="i-lucide-refresh-cw"
