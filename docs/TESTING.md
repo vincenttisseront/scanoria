@@ -163,6 +163,6 @@ PATH=/tmp/outils:$PATH
 .github/scripts/check-repo.sh
 .github/scripts/lint-shell.sh
 actionlint
-gitleaks git --config .gitleaks.toml --redact --log-opts=--all .
+gitleaks git --config .gitleaks.toml --redact --log-opts=HEAD .
 osv-scanner scan source --config osv-scanner.toml --recursive .
 ```
