@@ -23,8 +23,9 @@ PrivateTmp=yes
 # entrée ReadWritePaths par arborescence : deux entrées imbriquées sont deux
 # montages, et un rename entre elles échoue en EXDEV (#29). Les cgroups et
 # /proc/sys restent inscriptibles : Podman crée les cgroups des conteneurs et
-# netavark active le routage de ses réseaux. b16-live lance un conteneur
-# confiné sous ces mêmes réglages.
+# netavark active le routage de ses réseaux. Pas de ProtectHostname : crun
+# donne son propre nom à chaque conteneur (sethostname refusé sinon). b16-live
+# lance un conteneur confiné sous ces mêmes réglages.
 ProtectSystem=strict
 ReadWritePaths=/var/lib/scanoria/scans
 ReadWritePaths=/var/lib/containers
@@ -35,7 +36,6 @@ NoNewPrivileges=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectClock=yes
-ProtectHostname=yes
 ProtectControlGroups=no
 RestrictSUIDSGID=yes
 LockPersonality=yes

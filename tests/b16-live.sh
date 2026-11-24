@@ -166,7 +166,12 @@ expect "réseau propre en /24 fixe" "$(podman network inspect scanoria-mod-web -
 expect "réseau de scan interne" "$(podman network inspect scanoria-mod-web_scan --format '{{.Internal}}')" true
 expect "secret monté dans le conteneur" "$(podman exec scanoria-mod-web cat /run/secrets/admin-password)" "$(cat "$SECDIR/admin-password" 2>/dev/null || echo absent)"
 expect "secret en variable dans le conteneur" "$(podman exec scanoria-mod-web printenv APP_DB_PASSWORD)" "$(cat "$SECDIR/db-password" 2>/dev/null || echo absent)"
-expect "aucun secret dans l'inspection du conteneur" "$(podman inspect scanoria-mod-web | grep -c -F "$(cat "$SECDIR/db-password")" || true)" 0
+# La valeur ne figure dans aucun fichier lisible hors root : unités Quadlet,
+# fichier d'environnement, états publiés (podman inspect, réservé à root,
+# montre une variable injectée depuis un secret : pas un fichier).
+expect "aucun secret dans les unités, l'environnement et les états" \
+	"$(cat /etc/containers/systemd/scanoria-mod-web* "$T/etc/scanoria/modules/web/env" "$T"/var/lib/scanoria/*.json "$T"/run/scanoria/*.json 2> /dev/null \
+		| grep -c -F "$(cat "$SECDIR/db-password")" || true)" 0
 expect "limite nofile appliquée" "$(podman exec scanoria-mod-web sh -c 'ulimit -n')" 65536
 expect "sysctl appliqué, jamais baissé" "$(( $(sysctl -n fs.inotify.max_user_instances) >= 256 ))/$([[ -f /etc/sysctl.d/60-scanoria-web.conf ]] || echo absent)" "1/absent"
 expect "fichier sysctl de la racine de test" "$(grep -c '^fs.inotify.max_user_instances = ' "$T/etc/sysctl.d/60-scanoria-web.conf")" 1
@@ -178,7 +183,7 @@ pgq() { # réseau
 		psql -h 10.90.0.1 -U mod_web -d mod_web -X -A -t -c "SELECT current_user" 2>&1
 }
 expect "PostgreSQL joignable depuis le réseau du module" "$(pgq scanoria-mod-web)" mod_web
-expect "PostgreSQL refusé depuis un autre réseau (pg_hba)" "$(pgq podman | grep -c 'no pg_hba.conf entry' || true)" 1
+expect "PostgreSQL refusé depuis un autre réseau (pg_hba)" "$(pgq podman | grep -q 'no pg_hba.conf entry' && echo refusé)" refusé
 
 # === Sauvegarde et restauration =============================================
 echo "marqueur b16" > "$VOLDIR/marqueur.html"
