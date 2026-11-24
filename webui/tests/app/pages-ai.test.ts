@@ -194,6 +194,94 @@ describe('page Système › IA', () => {
     ])
   })
 
+  it('liste déroulante des modèles : rédaction et embedding, saisie libre, découverte suivie, serveur injoignable', async () => {
+    setUser('admin')
+    let status: Record<string, unknown> = activeStatus({
+      models: [
+        { name: 'qwen-test:14b', capabilities: ['completion'], parameters_b: 14.8, context: 32768 },
+        { name: 'small-test:3b', capabilities: ['completion'], parameters_b: 3, context: 8192 },
+        { name: 'embed-test:latest', capabilities: ['embedding'], parameters_b: 0.137, context: 8192 },
+      ],
+      defaults: { generation: null, embedding: null },
+    })
+    route('GET', '/api/ai/status', () => status)
+    route('GET', '/api/ai/calls', () => ({ calls: [] }))
+    route('GET', '/api/ai/agreement', () => ({ days: 90, items: [] }))
+    route('PUT', '/api/ai/models', () => ({ models: {} }))
+    route('POST', '/api/ai/probe', () => ({ queued: true }))
+    const w = await mountIn(AiPage)
+    await settle()
+    expect(w.find('[data-testid="ai-pick-default"]').text()).toContain('Modèle de rédaction (toutes les tâches)')
+    expect(w.find('[data-testid="ai-pick-embedding"]').text()).toContain('Modèle d’embedding')
+
+    const vm = w.vm as unknown as {
+      generationItems: { label: string, value: string }[]
+      embeddingItems: { label: string, value: string }[]
+      pickGlobal: (k: 'default' | 'embedding', v: string) => void
+      saveCustom: (k: 'default' | 'embedding') => Promise<void>
+      custom: Record<'default' | 'embedding', { open: boolean, value: string }>
+    }
+    // Seuls les modèles de rédaction dans la première liste, avec taille et contexte, puis la saisie libre.
+    expect(vm.generationItems.map(i => i.value)).toEqual(['__auto__', 'qwen-test:14b', 'small-test:3b', '__other__'])
+    expect(vm.generationItems[1]!.label).toBe('qwen-test:14b · 14.8 B · contexte 32 k')
+    expect(vm.embeddingItems.map(i => i.value)).toEqual(['__auto__', 'embed-test:latest', '__other__'])
+
+    vm.pickGlobal('default', 'small-test:3b')
+    await settle()
+    vm.pickGlobal('embedding', '__other__')
+    await settle()
+    expect(vm.custom.embedding.open).toBe(true)
+    expect(w.find('[data-testid="ai-custom-embedding"]').exists()).toBe(true)
+    vm.custom.embedding.value = 'bad name'
+    await vm.saveCustom('embedding')
+    vm.custom.embedding.value = 'nomic-embed-text'
+    await vm.saveCustom('embedding')
+    await settle()
+    expect(callsTo('PUT', '/api/ai/models').map(c => c.body)).toEqual([
+      { models: { default: 'small-test:3b' } },
+      { models: { embedding: 'nomic-embed-text' } },
+    ])
+    expect(vm.custom.embedding.open).toBe(false)
+
+    // Un nom choisi absent du serveur reste visible et signalé.
+    status = { ...status, defaults: { generation: 'gone:7b', embedding: null } }
+    await click(button('Redécouvrir les modèles'))
+    await settle()
+    expect(vm.generationItems.some(i => i.label === 'gone:7b (absent du serveur)')).toBe(true)
+
+    // Serveur injoignable : message clair, dernière liste gardée.
+    status = { ...status, probe: { status: 'error', error: 'unauthorized', at: '2026-11-24T09:10:00Z', version: '0.12.3', pending: false }, models_at: '2026-11-24T09:05:00Z' }
+    await click(button('Redécouvrir les modèles'))
+    await settle()
+    const alert = w.find('[data-testid="ai-probe-error"]').text()
+    expect(alert).toContain('Liste des modèles indisponible : jeton refusé par le serveur (401 ou 403).')
+    expect(alert).toContain('dernière liste connue')
+    expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ color: 'error' }))
+  })
+
+  it('découverte jamais traitée : avertissement au lieu d’une attente sans fin', async () => {
+    setUser('admin')
+    route('GET', '/api/ai/status', () => activeStatus({ probe: { status: 'queued', error: null, at: null, version: null, pending: true, stalled: true } }))
+    route('GET', '/api/ai/calls', () => ({ calls: [] }))
+    route('GET', '/api/ai/agreement', () => ({ days: 90, items: [] }))
+    const w = await mountIn(AiPage)
+    await settle()
+    expect(w.find('[data-testid="ai-probe-stalled"]').text()).toContain('Le service IA ne traite pas la demande')
+    expect(w.find('[data-testid="ai-probe-pending"]').exists()).toBe(false)
+    expect(button('Redécouvrir les modèles').disabled).toBe(false)
+  })
+
+  it('découverte en cours : indicateur d’attente et bouton occupé', async () => {
+    setUser('admin')
+    route('GET', '/api/ai/status', () => activeStatus({ probe: { status: 'queued', error: null, at: null, version: null, pending: true } }))
+    route('GET', '/api/ai/calls', () => ({ calls: [] }))
+    route('GET', '/api/ai/agreement', () => ({ days: 90, items: [] }))
+    const w = await mountIn(AiPage)
+    await settle()
+    expect(w.find('[data-testid="ai-probe-pending"]').text()).toContain('Découverte des modèles en cours')
+    expect(button('Redécouvrir les modèles').disabled).toBe(true)
+  })
+
   it('résolution changée : avertissement, nouvelle confirmation proposée ; retrait par modale', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] })
     setUser('admin')
