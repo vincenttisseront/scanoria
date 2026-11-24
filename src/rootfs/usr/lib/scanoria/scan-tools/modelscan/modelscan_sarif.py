@@ -249,19 +249,28 @@ OUT_DIR = "/out"
 NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,100}")
 
 
+def out_path(arg, ext):
+    """Chemin de sortie reconstruit sous OUT_DIR depuis un nom validé ; None si l'argument n'est pas /out/<nom><ext>."""
+    if os.path.dirname(arg) != OUT_DIR:
+        return None
+    m = NAME_RE.fullmatch(os.path.basename(arg))
+    if not m or not m.group(0).endswith(ext) or m.group(0) in (".", ".."):
+        return None
+    path = os.path.realpath(os.path.join(OUT_DIR, m.group(0)))
+    return path if os.path.dirname(path) == os.path.realpath(OUT_DIR) else None
+
+
 def main(argv):
     """Point d'entrée du conteneur : sources /src, sorties /out/<nom>.json et /out/<nom>.sarif."""
-    if len(argv) == 3 and argv[1] == "--convert":
-        # Conversion seule d'un rapport natif déjà écrit (tests, diagnostic) : SARIF sur la sortie standard.
-        with open(argv[2], encoding="utf-8") as fh:
-            json.dump(convert(json.load(fh)), sys.stdout, ensure_ascii=False, sort_keys=True)
+    if len(argv) == 2 and argv[1] == "--convert":
+        # Conversion seule d'un rapport natif lu sur l'entrée standard (diagnostic) : SARIF sur la sortie standard.
+        json.dump(convert(json.load(sys.stdin)), sys.stdout, ensure_ascii=False, sort_keys=True)
         return 0
-    if len(argv) != 4 or argv[1] != SRC_DIR \
-            or any(os.path.dirname(a) != OUT_DIR or not NAME_RE.fullmatch(os.path.basename(a)) for a in argv[2:]) \
-            or not argv[2].endswith(".json") or not argv[3].endswith(".sarif"):
+    outs = [out_path(a, ext) for a, ext in zip(argv[2:4], (".json", ".sarif"))] if len(argv) == 4 else []
+    if argv[1:2] != [SRC_DIR] or len(outs) != 2 or None in outs:
         print("usage: modelscan_sarif.py /src /out/<nom>.json /out/<nom>.sarif", file=sys.stderr)
         return 2
-    return run(SRC_DIR, argv[2], argv[3])
+    return run(SRC_DIR, outs[0], outs[1])
 
 
 if __name__ == "__main__":

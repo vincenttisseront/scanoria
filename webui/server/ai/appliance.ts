@@ -126,9 +126,18 @@ function alertContext(key: string, state: Obj | null, last?: RequestRow): Applia
   return null
 }
 
+/** Chemin sans « / » de tête ni de fin (sans expression régulière : aucun retour arrière). */
+function trimSlashes(s: string): string {
+  let a = 0
+  let b = s.length
+  while (a < b && s[a] === '/') a++
+  while (b > a && s[b - 1] === '/') b--
+  return s.slice(a, b)
+}
+
 /** Clé d'un point de montage dans un sujet (« / » → root, « /var/lib » → var-lib). */
 export function diskKey(mount: string): string {
-  const k = mount.replace(/^\/+|\/+$/g, '').replace(/[^a-z0-9._-]+/gi, '-').toLowerCase()
+  const k = trimSlashes(mount).replace(/[^a-z0-9._-]+/gi, '-').toLowerCase()
   return (k || 'root').slice(0, 80)
 }
 
@@ -260,6 +269,6 @@ export async function diagnosableSubjects(db: Queryable, sources?: ApplianceSour
   for (const m of src.modules.modules) {
     if (m.status === 'failed' || m.last_error || (isObj(m.testbed) && m.testbed.passed === false)) failedModules.add(String(m.id))
   }
-  out.push(...[...failedModules].sort().map(m => `install:${m}`))
+  out.push(...[...failedModules].sort((a, b) => a.localeCompare(b)).map(m => `install:${m}`))
   return out.filter(s => APPLIANCE_SUBJECT_RE.test(s)).slice(0, 100)
 }
