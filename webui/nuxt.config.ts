@@ -65,7 +65,7 @@ export default defineNuxtConfig({
     nodeTsConfig: {
       include: [
         '../tests/unit/**/*.ts', '../tests/integration/**/*.ts', '../tests/e2e/**/*.ts', '../tests/helpers/**/*.ts',
-        '../vitest.config.ts', '../vitest.e2e.config.ts', '../migrate.d.mts',
+        '../vitest.config.ts', '../vitest.e2e.config.ts', '../migrate.d.mts', '../worker/**/*.ts',
       ],
       compilerOptions: {
         paths: {

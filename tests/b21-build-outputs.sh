@@ -99,7 +99,8 @@ check "lot : VERSION et webui/VERSION = $V" bash -c '[[ $(cat "$1/VERSION") == "
 for f in LICENSE CHANGELOG.md OPEN-SOURCE.md webui/server/index.mjs webui/nitro.json webui/migrate.mjs \
 	webui/migrations/001_initial.sql rootfs/usr/sbin/scanoria-helper rootfs/usr/sbin/scanoria-selfupdate \
 	rootfs/usr/sbin/scanoria-firstboot rootfs/usr/lib/systemd/system/scanoria-firstboot.service \
-	rootfs/usr/lib/systemd/system/scanoria-console.service rootfs/usr/share/scanoria/MANIFEST; do
+	rootfs/usr/lib/systemd/system/scanoria-console.service rootfs/usr/share/scanoria/MANIFEST \
+	webui/services/worker.mjs rootfs/usr/lib/systemd/system/scanoria-worker.service; do
 	check "lot : $f" test -s "$L/$f"
 done
 check "lot : pg embarqué pour migrate.mjs (webui/server/node_modules/pg)" test -f "$L/webui/server/node_modules/pg/package.json"

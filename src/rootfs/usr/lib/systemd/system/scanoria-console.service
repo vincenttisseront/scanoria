@@ -7,6 +7,8 @@
 Description=Scanoria web console
 After=network.target postgresql.service
 Wants=postgresql.service
+# File d'analyses (0.3) : démarrée avec la console, arrêtée avec elle (PartOf=).
+Wants=scanoria-worker.service
 ConditionPathExists=/opt/scanoria/current/webui/server/index.mjs
 
 [Service]
