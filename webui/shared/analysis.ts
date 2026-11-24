@@ -92,3 +92,20 @@ export const VerdictDetails = z.object({
   exceptions_applied: z.array(z.object({ id: z.string().uuid(), reason: z.string(), expires_on: z.string() }).strict()),
 }).strict()
 export type VerdictDetails = z.infer<typeof VerdictDetails>
+
+/**
+ * Cible d'une exception (table exceptions.target), par type (chantiers D et E).
+ * Une exception ne s'applique jamais à un résultat malveillant (H4).
+ * - path : glob sur le chemin (« ** » traverse les dossiers, « * » et « ? » non) ;
+ * - rule : règle d'un outil ; vuln : identifiant d'avis (CVE, GHSA, OSV…) ;
+ * - finding : un résultat précis ; module : module du plan en échec (G13).
+ */
+const EXCEPTION_GLOB_RE = /^[^\0\n]{1,512}$/
+export const ExceptionTargets = {
+  path: z.object({ glob: z.string().regex(EXCEPTION_GLOB_RE), tool: z.string().min(1).max(64).optional() }).strict(),
+  rule: z.object({ rule_id: z.string().min(1).max(255), tool: z.string().min(1).max(64).optional() }).strict(),
+  vuln: z.object({ vuln_id: z.string().regex(/^[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9._:-]{1,120}$/), package: z.string().min(1).max(255).optional() }).strict(),
+  finding: z.object({ finding_id: z.string().uuid() }).strict(),
+  module: z.object({ module_id: z.string().regex(MODULE_ID_RE) }).strict(),
+} as const
+export type ExceptionKind = (typeof EXCEPTION_KINDS)[number]
