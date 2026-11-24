@@ -31,6 +31,7 @@ export const REQUEST_TYPES = [
   'rollback-update',
   'set-update-policy',
   'run-selftest',
+  'check-dns',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -95,6 +96,7 @@ export const requestParamSchemas = {
       path: ['maintenance_window'],
     }),
   'run-selftest': z.strictObject({ quick: z.boolean().optional() }),
+  'check-dns': z.strictObject({}),
 } satisfies Record<RequestType, z.ZodType>
 
 export type RequestParams<T extends RequestType> = z.infer<(typeof requestParamSchemas)[T]>

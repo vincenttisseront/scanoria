@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module OSV-Scanner (vulnérabilités des dépendances). Version, empreinte
+# d'image et licence relevées en amont le 2026-11-24 (tag v2.7.1, index OCI
+# multi-architecture). Base hors ligne : module feed osv-db, montée en lecture
+# seule sur /feeds/osv-db (OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY).
+id: osv-scanner
+name: OSV-Scanner
+description:
+  fr: Vulnérabilités connues des dépendances (fichiers de verrouillage), d'après la base OSV hors ligne.
+  en: Known vulnerabilities in dependencies (lockfiles), from the offline OSV database.
+type: scanner
+categories: [sca]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/google/osv-scanner/blob/v2.7.1/LICENSE
+  restrictions: none
+  verified_at: "2026-11-24"
+upstream:
+  homepage: https://google.github.io/osv-scanner/
+  source: https://github.com/google/osv-scanner
+image: ghcr.io/google/osv-scanner@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde
+version: "2.7.1"
+resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 200 }
+hostname: null
+requires: { modules: [], feeds: [osv-db], appliance: ">=0.2.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties:
+    recursive:
+      type: boolean
+      default: true
+      title: Parcourir les sous-répertoires
+      description: Cherche les fichiers de verrouillage dans toute l'arborescence (appliqué par le worker d'analyses, 0.3).
+options_i18n:
+  recursive:
+    fr: { title: Parcourir les sous-répertoires, description: Cherche les fichiers de verrouillage dans toute l'arborescence. }
+    en: { title: Scan subdirectories, description: Looks for lockfiles in the whole tree. }
+scan:
+  inputs: [repo, archive, sbom]
+  # Aucune requête réseau : --offline-vulnerabilities lit la base locale
+  # (<répertoire>/osv-scalibr/<écosystème>/all.zip) sans la télécharger.
+  command: ["/osv-scanner", "scan", "source", "--recursive", "--offline-vulnerabilities",
+            "--format", "sarif", "--output-file", "/out/result.sarif", "/src"]
+  env:
+    OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY: /feeds/osv-db
+  timeout_s: 900
+  network: none
+  # 0 : aucune vulnérabilité ; 1 : vulnérabilités trouvées (résultat normal) ;
+  # 128 : aucun paquet trouvé (le contrat de sortie G2 décide alors).
+  exit_codes_ok: [0, 1, 128]
+outputs:
+  sarif: { path: /out/result.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # minimist 1.2.5 : CVE-2021-44906 (GHSA-xvch-5gv4-984h), corrigée en 1.2.6.
+    - { rule: CVE-2021-44906, category: sca, min: 1 }
+health: { command: ["/osv-scanner", "--version"] }
+upgrade: { policy: on-demand }

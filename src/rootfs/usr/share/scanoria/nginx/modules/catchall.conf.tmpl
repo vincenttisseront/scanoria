@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Généré par scanoria.routing : ne pas modifier.
+# scanoria-route: id=- mode=catchall host=*.@FQDN@ port=- fqdn=@FQDN@
+#
+#   :80   <libellé>.@FQDN@ -> https://<libellé>.@FQDN@ (même nom)
+#   :443  <libellé>.@FQDN@ sans module -> page « module indisponible » de la
+#         console. Les noms exacts des modules (fichiers module-*.conf) sont
+#         prioritaires sur ce nom en expression régulière ; un nom à plusieurs
+#         étiquettes reste refusé (444) par le site de la console.
+server {
+	listen 80;
+	listen [::]:80;
+	server_name "~^(?<scanoria_http_label>[a-z0-9][a-z0-9-]*)\.@FQDN_RE@$";
+	server_tokens off;
+	location / {
+		return 301 https://$scanoria_http_label.@FQDN@$request_uri;
+	}
+}
+
+server {
+	listen 443 ssl http2;
+	listen [::]:443 ssl http2;
+	server_name "~^(?<scanoria_label>[a-z0-9][a-z0-9-]*)\.@FQDN_RE@$";
+	server_tokens off;
+@TLS@
+	location / {
+		return 302 https://@FQDN@/modules/unavailable?m=$scanoria_label;
+	}
+}

@@ -61,6 +61,7 @@ FQDN_RE = re.compile(r"([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,
 REQUEST_TYPES = (
     "set-hostname", "set-admin-networks", "issue-certificate", "import-certificate",
     "check-update", "apply-update", "rollback-update", "set-update-policy", "run-selftest",
+    "check-dns",
 )
 REJECT_CODES = frozenset((
     "E_INVALID_NAME", "E_NOT_REGULAR_FILE", "E_BAD_OWNER", "E_TOO_LARGE", "E_INVALID_JSON",
@@ -292,6 +293,8 @@ SYSTEM_CMDS = {
     "systemd-tmpfiles": "/usr/bin/systemd-tmpfiles",
     "timedatectl": "/usr/bin/timedatectl",
     "getent": "/usr/bin/getent",
+    "ip": "/usr/sbin/ip",
+    "resolvectl": "/usr/bin/resolvectl",
 }
 # Commandes sans effet sur le système, exécutées réellement en mode test.
 TEST_PASSTHROUGH = ("openssl", "zstd")
