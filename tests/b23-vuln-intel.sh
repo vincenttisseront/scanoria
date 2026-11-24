@@ -228,14 +228,12 @@ rm "$SRV/mode"
 
 # --- Export : échec d'écriture, déclaration, retrait ---------------------------
 kev '{vulnerabilities: [{cveID: "CVE-2026-0001", dateAdded: "2026-11-01"}, {cveID: "CVE-2026-0007", dateAdded: "2026-11-20"}]}'
-chmod 0500 "$EXPORT"
+# Un répertoire à la place de l'export : le rename(2) échoue, même en root
+# (shared_dir rétablit les droits du répertoire, un chmod ne suffirait pas).
+cp "$EXPORT/kev.jsonl.gz" "$TMP/kev.keep" && rm "$EXPORT/kev.jsonl.gz" && mkdir "$EXPORT/kev.jsonl.gz"
 refresh "$KEV"
-chmod 0750 "$EXPORT"
-if [[ $(id -u) -eq 0 ]]; then
-	ok "kev : export impossible (ignoré en root, qui écrit malgré les droits)"
-else
-	expect "kev : export impossible → E_EXPORT_FAILED, base active" "${R%% *}/$(jq -r .status "$T/var/lib/scanoria/feeds/.store/kev/status.json")" E_EXPORT_FAILED/ok
-fi
+rmdir "$EXPORT/kev.jsonl.gz" && mv "$TMP/kev.keep" "$EXPORT/kev.jsonl.gz"
+expect "kev : export impossible → E_EXPORT_FAILED, base active" "${R%% *}/$(jq -r .status "$T/var/lib/scanoria/feeds/.store/kev/status.json")" E_EXPORT_FAILED/ok
 R=$(python3 - <<-'PY' 2>&1 || true
 	import os, sys
 	sys.path.insert(0, os.environ["PYLIB"])
