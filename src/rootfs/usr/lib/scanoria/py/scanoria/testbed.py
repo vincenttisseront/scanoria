@@ -125,7 +125,9 @@ def extract(archive, dest):
         # Préfixe unique « testbed/ » retiré s'il couvre toutes les entrées.
         if all(rel == "testbed" or rel.startswith("testbed/") for rel, _ in members):
             members = [(rel[len("testbed/"):], m) for rel, m in members if rel != "testbed"]
+        # Lisible par l'utilisateur du conteneur (65534) malgré l'umask 027 du helper.
         os.makedirs(dest, mode=0o755, exist_ok=False)
+        os.chmod(dest, 0o755)
         base = os.path.realpath(dest)
         for rel, m in members:
             # rel est relatif sans « .. » et seuls des répertoires réels sont créés
@@ -138,6 +140,7 @@ def extract(archive, dest):
             src = tf.extractfile(m)
             fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
             with os.fdopen(fd, "wb") as out, src:
+                os.fchmod(out.fileno(), 0o644)
                 shutil.copyfileobj(src, out, 1 << 20)
     os.unlink(tar_path)
 
@@ -150,6 +153,7 @@ def _mkdirs(base, rel):
             st = os.lstat(cur)
         except FileNotFoundError:
             os.mkdir(cur, 0o755)
+            os.chmod(cur, 0o755)
             continue
         if not stat.S_ISDIR(st.st_mode):
             raise Fail("E_ARCHIVE", "path conflict in the testbed archive")

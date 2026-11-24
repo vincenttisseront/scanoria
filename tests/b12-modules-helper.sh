@@ -111,6 +111,8 @@ cat > "$STUBS/podman" <<-EOF
 		done
 		if [[ -z "\$out" ]]; then [[ -e "$FIX/podman-fail-health" ]] && exit 1; exit 0; fi
 		[[ -e "$FIX/scan-output" ]] && cp "$FIX/scan-output" "\$out/result.sarif"
+		src=\${out%/out}/src
+		echo "\$(stat -c %a "\$src") \$(stat -c %a "\$src/README")" > "$FIX/src-modes"
 		exit "\$(cat "$FIX/scan-rc" 2> /dev/null || echo 1)" ;;
 	*) exit 0 ;;
 	esac
@@ -374,6 +376,7 @@ for flag in '"--network=none"' '"--read-only"' '"--cap-drop=ALL"' '"--security-o
 	'"--user","65534:65534"' '"--pids-limit","512"' '"--pull=never"' ':/src:ro"' '"--entrypoint","[\"gitleaks\"]"'; do
 	expect "banc d'essai confiné : $flag" "$(grep -c -F -- "$flag" <<< "$RUNLINE")" 1
 done
+expect "banc d'essai lisible par l'utilisateur du conteneur" "$(cat "$FIX/src-modes" 2> /dev/null)" "755 644"
 expect "répertoire de travail du banc d'essai supprimé" "$(find "$T/var/lib/scanoria/modules/work" -mindepth 1 | wc -l)" 0
 hx install-modules "$(inst gitleaks 8.0.0)"
 expect "install : déjà installé, sans effet" "$(code)/$(jq -r '.output.skipped[0]' <<< "$R")" OK/gitleaks
