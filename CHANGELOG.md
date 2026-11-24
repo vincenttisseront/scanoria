@@ -10,7 +10,49 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.3.4 — non publiée
+## 0.4.0 — non publiée
+
+Applications permanentes : SonarQube s'installe depuis le catalogue. La
+consommation, la santé des analyses et les fonctions IA de la 0.4 sont
+arrivées en 0.3.3.
+
+### Ajouté
+- **Modules permanents** :
+  - base PostgreSQL dédiée et cloisonnée par module ;
+  - secrets générés par l'appliance ;
+  - réglages noyau gérés ;
+  - refus clair quand la machine manque de ressources ;
+  - sauvegarde vérifiée avant chaque mise à jour, et à la demande ;
+  - restauration depuis la console ;
+  - retour arrière automatique d'une mise à jour ratée ;
+  - consommation réelle de chaque module publiée (F14).
+- **SonarQube Community Build**, installable depuis le catalogue sur
+  `sonarqube.<appliance>`. Sa mise en service est automatique : mot de passe
+  administrateur aléatoire, utilisateur et jeton d'analyse dédiés,
+  authentification forcée, projets privés. La console réinitialise le mot de
+  passe administrateur et ne l'affiche qu'une fois.
+- **Module sonar-scanner** : la branche principale est analysée par
+  SonarQube, et ses résultats qualité et SAST rejoignent les résultats
+  unifiés. Le jeton n'est jamais exposé.
+- Le runner d'analyses est durci par systemd.
+- Contrôle en CI : le catalogue publié reste lisible par la dernière
+  appliance publiée.
+- Catalogue n° 6.
+
+### Limites connues
+- SonarQube Community Build n'analyse que la branche principale, jamais les
+  PR. Les commentaires `// NOSONAR` du code analysé restent pris en compte.
+- Le réseau interne des modules (`10.90.0.0/16`) peut chevaucher un réseau
+  d'entreprise. Il se règle dans `services-network.conf`, sans interface
+  pour l'instant.
+- PostgreSQL redémarre une fois, au premier module qui utilise une base.
+- Une restauration exige la version du module qui a fait la sauvegarde. Une
+  désinstallation sans conservation des données supprime aussi les
+  sauvegardes.
+- Le mot de passe administrateur affiché est effacé deux minutes après son
+  dépôt, et non dès sa lecture.
+
+## 0.3.4 — 2026-11-24
 
 Installation d'OSV-Scanner et de Trivy sur une appliance réelle.
 
