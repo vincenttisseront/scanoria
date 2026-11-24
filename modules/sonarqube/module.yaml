@@ -6,8 +6,16 @@
 # image officielle docker.io/library/sonarqube, étiquette
 # 26.11.0.134175-community (index OCI multi-architecture), dépôts
 # SonarSource/sonarqube et SonarSource/docker-sonarqube sous LGPL-3.0.
-# Contraintes : branche principale seulement (pas d'analyse de PR ni de
-# branche), PostgreSQL, vm.max_map_count ≥ 524288, ≥ 4 Go de RAM pour lui seul.
+# Contraintes : PostgreSQL, vm.max_map_count ≥ 524288, ≥ 4 Go de RAM pour lui
+# seul. La Community Build n'analyse que la branche principale ; l'option
+# « branches » (activée par défaut) lève cette limite avec le plugin libre
+# mc1arke/sonarqube-community-branch-plugin (LGPL-3.0, non maintenu par
+# SonarSource), livré par son auteur dans l'image
+# docker.io/mc1arke/sonarqube-with-community-branch-plugin (service.variants).
+# Le plugin suit la version majeure.mineure de SonarQube : il n'est retenu que
+# s'il est publié pour cette version, sinon l'image officielle est gardée et la
+# console dit pourquoi. Au 2026-11-24, le plugin publié s'arrête à 26.10.0 :
+# aucune variante n'est encore déclarée pour 26.11.
 # Mise en service automatique par le helper (provision.py) : mot de passe
 # admin aléatoire (jamais affiché ni en base), utilisateur et jeton d'analyse
 # dédiés, authentification forcée. Le verdict reste celui de Scanoria : le
@@ -15,8 +23,8 @@
 id: sonarqube
 name: SonarQube Community Build
 description:
-  fr: Qualité du code et SAST sur la branche principale, avec son interface web.
-  en: Code quality and SAST on the main branch, with its web interface.
+  fr: Qualité du code et SAST, avec son interface web ; toutes les branches avec le plugin de branches quand il est disponible.
+  en: Code quality and SAST, with its web interface; every branch with the branch plugin when available.
 type: service
 categories: [quality, sast]
 license:
@@ -24,7 +32,7 @@ license:
   url: https://github.com/SonarSource/sonarqube/blob/master/LICENSE.txt
   restrictions: none
   verified_at: "2026-11-24"
-  notes: Community Build. Analyse de la branche principale seulement ; les analyses de PR et de branches sont réservées aux éditions payantes.
+  notes: Community Build. Seule la branche principale est analysée par l'édition elle-même ; l'option « branches » ajoute l'analyse des branches et des PR par le plugin libre sonarqube-community-branch-plugin (LGPL-3.0), quand une version compatible est publiée.
 upstream:
   homepage: https://www.sonarsource.com/products/sonarqube/
   source: https://github.com/SonarSource/sonarqube
@@ -44,12 +52,37 @@ needs:
 options:
   type: object
   additionalProperties: false
-  properties: {}
+  properties:
+    branches:
+      type: boolean
+      default: true
+      title: Analyse des branches
+      description: Ajoute le plugin libre de branches (LGPL-3.0, tiers) quand une version compatible avec ce SonarQube est publiée ; sinon seule la branche principale est analysée. Les PR suivront avec leur analyse incrémentale (G18).
+options_i18n:
+  branches:
+    fr: { title: Analyse des branches, description: "Ajoute le plugin libre de branches (LGPL-3.0, tiers) quand une version compatible avec ce SonarQube est publiée ; sinon seule la branche principale est analysée. Les PR suivront avec leur analyse incrémentale (G18)." }
+    en: { title: Branch analysis, description: "Adds the free third-party branch plugin (LGPL-3.0) when a version compatible with this SonarQube is published; otherwise only the main branch is analysed. Pull requests will follow with their incremental analysis (G18)." }
 service:
   port: 9000
   health_path: /api/system/status
   units:
     - { name: sonarqube }
+  # Fonction optionnelle portée par l'option du même nom ; fournie par une
+  # variante d'image compatible (même version de SonarQube, plugin de même
+  # majeure.mineure). Gabarit de la variante, à ajouter dès que le plugin
+  # 26.11.x est publié (empreinte relevée sur Docker Hub, licence revérifiée) :
+  #   variants:
+  #     - feature: branches
+  #       option: branches
+  #       image: docker.io/mc1arke/sonarqube-with-community-branch-plugin@sha256:<empreinte de 26.11.0.134175-community>
+  #       version: "26.11.0"            # version du plugin
+  #       base_version: "26.11.0.134175" # SonarQube embarqué, égal à version
+  #       license: { spdx: LGPL-3.0-only, url: https://github.com/mc1arke/sonarqube-community-branch-plugin/blob/master/LICENSE, verified_at: "AAAA-MM-JJ", restrictions: none }
+  #       upstream: { source: https://github.com/mc1arke/sonarqube-community-branch-plugin }
+  #       leaves:
+  #         - { volume: extensions, dir: plugins, prefix: sonarqube-community-branch-plugin }
+  features: [branches]
+  variants: []
   volumes:
     - { name: data, path: /opt/sonarqube/data }
     - { name: extensions, path: /opt/sonarqube/extensions }

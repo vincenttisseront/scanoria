@@ -18,7 +18,7 @@ import {
   type CatalogIndex, type DnsStatus, type InstalledModule,
 } from '../../server/utils/catalog'
 import { buildInstallPlan, containersDisk, dependentsOf, resourceChecks, type Machine, type PlanContext } from '../../server/utils/module-plan'
-import { buildCatalogView, dependencyEdges, updateAvailable, type CatalogContext } from '../../server/utils/catalog-view'
+import { buildCatalogView, dependencyEdges, updateAvailable, variantPending, type CatalogContext } from '../../server/utils/catalog-view'
 import { changedOptions, checkOption, optionDefaults, optionFields, resolveOptions } from '#shared/module-options'
 
 const FIXTURES = fileURLToPath(new URL('../fixtures/', import.meta.url))
@@ -366,5 +366,30 @@ describe('vue du catalogue', () => {
     expect(empty.orphans).toHaveLength(4)
     expect(empty.recommended.plan).toBeNull()
     expect(updateAvailable(undefined, undefined)).toBeNull()
+  })
+
+  it('variante devenue compatible à la même version : proposée comme mise à jour', () => {
+    const variant = { feature: 'branches', option: 'branches', image: 'docker.io/exemple/x@sha256:' + 'a'.repeat(64), version: '26.11.0', base_version: '26.11.0.134175' }
+    const latest = (variants: unknown[]) => ({ id: 'sonarqube', version: '26.11.0.134175', service: { features: ['branches'], variants } }) as never
+    const inst = (st: Record<string, unknown>) => ({ id: 'sonarqube', version: '26.11.0.134175', type: 'service', status: 'healthy', enabled: true,
+      installed_at: null, options: { branches: true }, features: { branches: st } }) as unknown as InstalledModule
+    const waiting = inst({ active: false, version: null, code: 'unavailable', reason: 'x' })
+    expect(variantPending(waiting, latest([variant]))).toBe(true)
+    expect(updateAvailable(waiting, latest([variant]))).toBe('26.11.0.134175')
+    expect(variantPending(waiting, latest([]))).toBe(false)
+    expect(variantPending(waiting, latest([null, 'x', variant]))).toBe(true)
+    expect(variantPending(waiting, { id: 'sonarqube', version: '26.11.0.134175' } as never)).toBe(false)
+    expect(variantPending(waiting, { id: 'sonarqube', version: '26.12.0.1', service: { features: ['branches'], variants: [variant] } } as never)).toBe(false)
+    expect(updateAvailable(waiting, latest([]))).toBeNull()
+    // Plugin d'une autre version, image construite sur un autre SonarQube : rien.
+    expect(variantPending(waiting, latest([{ ...variant, version: '26.10.0' }]))).toBe(false)
+    expect(variantPending(waiting, latest([{ ...variant, base_version: '26.10.0.133078' }]))).toBe(false)
+    // Option à false ou fonction déjà active : rien à proposer.
+    expect(variantPending(inst({ active: false, version: null, code: 'disabled', reason: 'x' }), latest([variant]))).toBe(false)
+    expect(variantPending(inst({ active: true, version: '26.11.0', code: null, reason: null }), latest([variant]))).toBe(false)
+    // Installation antérieure à l'option (0.4.0) : aucun état publié, défaut vrai.
+    const before = { ...waiting, options: {}, features: undefined } as unknown as InstalledModule
+    expect(variantPending(before, latest([variant]))).toBe(true)
+    expect(variantPending({ ...before, options: { branches: false } } as InstalledModule, latest([variant]))).toBe(false)
   })
 })

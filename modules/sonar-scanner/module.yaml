@@ -7,15 +7,19 @@
 # 12.5.0.4351_8.5.0 (SonarScanner CLI 8.5.0.16571, amd64), relevée en amont le
 # 2026-11-24 ; LGPL-3.0 (SonarSource/sonar-scanner-cli et -docker).
 # Réseau : uniquement le réseau interne du service sonarqube ; jeton d'analyse
-# par secret Podman. Branche par défaut seulement (Community Build) : sur une
-# autre référence le module est « skipped », sans effet sur le verdict.
+# par secret Podman. Branche par défaut, plus les autres branches quand le
+# service sonarqube a la fonction « branches » active (plugin de branches,
+# option du module sonarqube) : la branche est passée par SCANORIA_BRANCH à
+# sonar-scanner (sonar.branch.name) et les résultats lus sur cette branche.
+# Sans la fonction, une autre référence rend le module « skipped », sans effet
+# sur le verdict.
 # Orchestration et conversion : outil de l'appliance
 # /usr/lib/scanoria/scan-tools/sonar (python3 de l'image, bibliothèque standard).
 id: sonar-scanner
 name: SonarQube (analyse)
 description:
-  fr: Analyse la branche principale avec SonarQube et rapatrie ses résultats dans la console.
-  en: Analyses the main branch with SonarQube and brings its results into the console.
+  fr: Analyse le dépôt avec SonarQube (branche principale, et autres branches avec le plugin de branches) et rapatrie ses résultats dans la console.
+  en: Analyses the repository with SonarQube (main branch, and other branches with the branch plugin) and brings its results into the console.
 type: scanner
 categories: [quality, sast]
 license:
@@ -43,6 +47,7 @@ scan:
   tool: sonar
   network: service:sonarqube
   refs: default-branch
+  refs_feature: branches
   timeout_s: 1800
   exit_codes_ok: [0]
   severity_map:
