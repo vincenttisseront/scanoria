@@ -10,7 +10,55 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.1.0 — non publiée
+## 0.2.0 — non publiée
+
+Moteur de modules : le catalogue signé, l'installation des outils depuis la
+console et l'accès aux applications par leur nom.
+
+### Ajouté
+- **Format des modules** : manifeste `module.yaml` validé par
+  `catalog/schema/module.schema.json` (dépendances et conflits, options typées
+  avec défauts, sorties déclarées, banc d'essai) et guide `docs/MODULES.md`.
+- **Premiers modules** : gitleaks, OSV-Scanner et Trivy, chacun avec son banc
+  d'essai piégé ; bases `trivy-db` et `osv-db` déclarées.
+- **Catalogue signé** (F11, G1) : index publié en release `catalog-v<N>`
+  indépendamment de la console, avec manifestes normalisés, packs, bancs
+  d'essai empaquetés de façon reproductible, dépendances et conflits contrôlés
+  à la construction, `SHA256SUMS` signé Ed25519 avec la clé de mise à jour.
+- **Moteur de modules** (service root, Podman et Quadlet) : installation,
+  activation, désactivation, mise à jour et retrait depuis un catalogue
+  vérifié et rafraîchi chaque jour. Dépendances et conflits résolus,
+  ressources, licences et options contrôlées (G3) ; chaque scanner passe son
+  banc d'essai confiné avant activation (F12) ; tout échec déclenche un retour
+  arrière complet ; une mise à jour est toujours précédée d'une sauvegarde.
+- **Accès aux modules par nom** : chaque application installée répond sur
+  `<libellé>.<nom de l'appliance>` ; un module désactivé ou un nom inconnu
+  affiche la page « application indisponible » de la console.
+- **Vérification DNS automatique** de l'appliance, du joker `*.<nom>` et des
+  noms des modules (toutes les heures, après un changement de nom ou de
+  module) ; contrôle `routing.sites` dans `scanoria-selftest`.
+- **Console, section Catalogue** : sélection conseillée au premier accès,
+  packs, licences et restrictions, ressources et compatibilité, graphe des
+  dépendances ; installation en une confirmation (dépendances et bases
+  ajoutées automatiquement, raison affichée, licences à restriction acceptées
+  explicitement) ; détail d'un module avec options générées depuis le
+  manifeste, banc d'essai, activation, mise à jour et désinstallation en
+  gardant ou supprimant les données ; état DNS avec vérification immédiate.
+- Batteries `b10` à `b13` et jobs CI `modules-testbed-live` et `modules-live`
+  (vrais conteneurs Podman).
+
+### Corrigé
+- Canal stable des mises à jour : la dernière version stable est trouvée même
+  quand `releases/latest` désigne l'index du catalogue ; la promotion compare
+  avec la plus haute version `vX.Y.Z` stable.
+
+### Limites connues
+- Aucune analyse de projet encore : les scanners installés ne servent qu'à leur
+  banc d'essai jusqu'à la 0.3.
+- Modules `service` (SonarQube…) prévus à partir de la 0.4 ; le moteur et
+  l'aiguillage par nom sont prêts à les recevoir.
+
+## 0.1.0 — 2026-11-24
 
 Première version : le socle de l'appliance (console seule).
 

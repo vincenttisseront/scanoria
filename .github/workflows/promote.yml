@@ -148,8 +148,12 @@ jobs:
         env:
           VERSION: ${{ steps.in.outputs.version }}
         run: |
-          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)
-          latest=${latest#v}
+          # Plus haute version stable vX.Y.Z publiée : releases/latest peut
+          # désigner une release du catalogue (catalog-v<N>) tant qu'aucune
+          # version de la console n'est stable.
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | sed -n 's/^v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p' | sort -V | tail -n 1)
           if [ -n "$latest" ]; then
             top=$(printf '%s\n%s\n' "$latest" "$VERSION" | sort -V | tail -n 1)
             if [ "$latest" = "$VERSION" ] || [ "$top" != "$VERSION" ]; then
