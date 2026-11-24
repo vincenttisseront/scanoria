@@ -54,6 +54,11 @@ cat > "$PYLIB/scanoria/provision.py" <<-'EOF'
 	        f.write(json.dumps({"id": m["id"], "version": m["version"], "info": info}, sort_keys=True) + "\n")
 	    if os.path.exists(common.p("/provision-fail")):
 	        raise Fail("E_INTERNAL", "provisioning failed")
+
+
+	def act_reset_service_admin(c):
+	    """Demande reset-service-admin du vrai provision.py (chantier SonarQube), hors du sujet de b16."""
+	    raise Fail("E_PRECONDITION", "not provided by the test provision.py")
 EOF
 
 T="$TMP/root"
