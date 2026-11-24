@@ -1,0 +1,326 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scanoria:schema:scan-result:1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront. Contrat de l'itération 0.3 (socle).",
+  "title": "Résultat d'une tâche d'analyse publié par scanoria-runner (ARCHITECTURE § 12.4)",
+  "description": "results/<job-id>/result.json (root:scanoria 0640). Les chemins de sortie sont relatifs à results/<job-id>/. Jamais de secret : ni jeton de la source, ni valeur trouvée dans le journal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "scan_id",
+    "status",
+    "started_at",
+    "finished_at",
+    "source",
+    "modules"
+  ],
+  "$defs": {
+    "ts": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "rel": {
+      "type": "string",
+      "maxLength": 255,
+      "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+      "not": {
+        "pattern": "(^|/)\\.\\.?(/|$)"
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "class",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^E_[A-Z_]+$"
+        },
+        "class": {
+          "enum": [
+            "infra",
+            "tool",
+            "input"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    }
+  },
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "scan_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "error"
+      ]
+    },
+    "error": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/error"
+        }
+      ]
+    },
+    "started_at": {
+      "$ref": "#/$defs/ts"
+    },
+    "finished_at": {
+      "$ref": "#/$defs/ts"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "commit",
+        "history",
+        "files",
+        "bytes",
+        "skipped"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "git",
+            "archive"
+          ]
+        },
+        "commit": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40,64}$"
+            }
+          ]
+        },
+        "history": {
+          "enum": [
+            "shallow",
+            "full",
+            "none"
+          ]
+        },
+        "files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "reason"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "reason": {
+                "enum": [
+                  "size",
+                  "symlink",
+                  "special",
+                  "limit"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "modules": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version",
+          "status",
+          "image_digest",
+          "feeds",
+          "outputs",
+          "log"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error",
+              "timeout",
+              "oom",
+              "invalid-output",
+              "missing",
+              "skipped"
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/error"
+              }
+            ]
+          },
+          "image_digest": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              }
+            ]
+          },
+          "feeds": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "version",
+                "updated_at"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+                },
+                "version": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 128
+                },
+                "updated_at": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/ts"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "started_at": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/ts"
+              }
+            ]
+          },
+          "finished_at": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/ts"
+              }
+            ]
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "sarif": {
+                "$ref": "#/$defs/rel"
+              },
+              "cyclonedx": {
+                "$ref": "#/$defs/rel"
+              }
+            }
+          },
+          "log": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/rel"
+              }
+            ]
+          },
+          "stats": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "duration_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "peak_memory_mb": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cpu_ms": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

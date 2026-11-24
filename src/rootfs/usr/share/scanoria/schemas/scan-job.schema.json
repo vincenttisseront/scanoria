@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scanoria:schema:scan-job:1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront. Contrat de l'itération 0.3 (socle).",
+  "title": "Tâche d'analyse déposée par scanoria-worker pour scanoria-runner (ARCHITECTURE § 12.4)",
+  "description": "Le runner (root) ne fait confiance à rien ici : chaque module doit être installé, sain et actif dans modules/state.json, et son image, ses bases et ses limites viennent de l'état publié, jamais de la tâche.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "scan_id",
+    "created_at",
+    "source",
+    "modules"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "scan_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "url",
+            "ref",
+            "history"
+          ],
+          "properties": {
+            "kind": {
+              "const": "git"
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 2048,
+              "pattern": "^(https://[^?#@\\s]+|ssh://[A-Za-z0-9._-]+@[^?#\\s]+|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^?#\\s]+)$"
+            },
+            "ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^[A-Za-z0-9._/-]+$",
+              "not": {
+                "pattern": "(^-|\\.\\.|//|@\\{)"
+              }
+            },
+            "commit": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40,64}$"
+            },
+            "history": {
+              "enum": [
+                "shallow",
+                "full"
+              ]
+            },
+            "credential": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "token"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "token"
+                    },
+                    "username": {
+                      "type": "string",
+                      "maxLength": 255,
+                      "pattern": "^[^:\\s]+$"
+                    },
+                    "token": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "^[\\x21-\\x7e]+$"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "private_key",
+                    "known_hosts"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "ssh-key"
+                    },
+                    "private_key": {
+                      "type": "string",
+                      "maxLength": 16384,
+                      "pattern": "^-----BEGIN OPENSSH PRIVATE KEY-----"
+                    },
+                    "known_hosts": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 16384
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "upload_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "archive"
+            },
+            "upload_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        }
+      ]
+    },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "options": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

@@ -3,9 +3,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 Copyright (C) 2026 Vincent Tisseront
 -->
 
-# Architecture de Scanoria — itération 0.1 (socle)
+# Architecture de Scanoria
 
-Ce document fixe les **contrats communs** de la 0.1 : arborescence, chemins sur
+Ce document fixe les **contrats communs** de la 0.1 (puis des itérations suivantes, § 4.1, 4.2 et 12) : arborescence, chemins sur
 l'appliance, utilisateurs et droits, protocole des demandes de la console au
 service root, état publié, format des releases, AC interne, tests de fumée et
 base de données. `CLAUDE.md` reste la référence fonctionnelle (sections 2, 3,
@@ -633,3 +633,117 @@ sous le plancher D6 (2 vCPU, 4 Go, 40 Go).
   `update-source.json` généré, aucune clé privée dans les sorties.
 - Lot D : actifs de release conformes au § 6.2, signature vérifiée avec
   `update-pubkey.pem` avant publication, promotion sans reconstruction.
+
+## 12. Analyses (0.3)
+
+Contrats communs de la 0.3, fixés avant les chantiers. Références : `CLAUDE.md`
+§ 3.5, 5.2, 6 et 15 ; schéma `webui/server/db/migrations/003_analyses.sql` ;
+types `webui/shared/analysis.ts` ; schémas `scan-job` et `scan-result` dans
+`src/rootfs/usr/share/scanoria/schemas/`.
+
+### 12.1 Processus
+
+```
+console (scanoria) ─ enqueueScan() ─▶ table scans (file, G17)
+scanoria-worker (scanoria, Node) ─ plan (G7, G11) ─▶ /var/lib/scanoria/scans/jobs/incoming/<id>.json
+scanoria-runner (root, Python) ─ valide, récupère la source, lance chaque module confiné (§ 6.4)
+                                ─▶ /var/lib/scanoria/scans/results/<id>/result.json + sorties
+scanoria-worker ─ ingère (résultats unifiés, G5, G19) ─ évalue le quality gate (G13) ─▶ scans.verdict
+scanoria-ai (scanoria-ai, Node) ─ file ai_tasks ─HTTPS─▶ Ollama externe (§ 3.5 de CLAUDE.md)
+```
+
+- **scanoria-worker** tourne sous `scanoria`, sans privilège, comme la console
+  (même rôle PostgreSQL). Il tient la file, choisit l'ordre (priorités de
+  `SCAN_PRIORITY`, quotas par projet, aucune famine), résout le profil, dépose
+  une tâche quand le runner a une place libre, ingère les résultats et rend le
+  verdict. Il ne lance jamais de conteneur.
+- **scanoria-runner** tourne en root, comme le helper, mais dans sa propre file
+  pour ne jamais bloquer les demandes d'administration. Il ne fait confiance à
+  rien dans la tâche (principe 4) : chaque module doit être installé, sain et
+  actif dans `modules/state.json` ; l'image, les bases, la commande, le délai
+  et les limites viennent de l'état publié et du manifeste de l'index vérifié.
+  Il publie sa capacité dans `/run/scanoria/runner.json`
+  (`{slots, busy, updated_at}`, root:scanoria 0640), bornée par la RAM.
+- **scanoria-ai** : service sans privilège, utilisateur `scanoria-ai`, seul
+  autorisé à sortir vers le serveur Ollama (règle nftables `meta skuid`).
+
+### 12.2 Arborescence ajoutée
+
+| Chemin | Propriétaire, mode | Contenu |
+|---|---|---|
+| `/var/lib/scanoria/scans/` | root:scanoria 0750 | file entre worker et runner |
+| `…/scans/jobs/tmp/`, `…/jobs/incoming/` | scanoria:scanoria 0700 | tâches en cours d'écriture, puis prêtes (renommage atomique, fichiers 0600) |
+| `…/scans/jobs/work/` | root:root 0700 | tâches prises en charge ; le fichier est supprimé dès sa lecture (il peut contenir un jeton) |
+| `…/scans/results/<job-id>/` | root:scanoria 0750, fichiers 0640 | `result.json` et sorties, purgés après 24 h |
+| `…/scans/workspaces/<job-id>/` | root:root 0700 | source récupérée, **supprimée** après la tâche (§ 6.4, étape 3) |
+| `/var/lib/scanoria/console/secret.key` | scanoria:scanoria 0600 | clé AES-256 des secrets en base, créée au premier démarrage de la console, incluse dans les sauvegardes |
+| `/var/lib/scanoria/console/scan-logs/<scan-id>/<module>.log` | scanoria:scanoria 0600 | journaux des modules copiés par le worker (G20), purgés avec l'analyse |
+
+### 12.3 Secrets en base
+
+Table `credentials` : AES-256-GCM, `secret_enc = 0x01 | nonce (12) | chiffré | étiquette (16)`,
+données associées = `credentials.id`. La valeur n'est jamais renvoyée par l'API,
+jamais journalisée, jamais copiée dans l'audit ; seul `hint` s'affiche. Elle ne
+quitte la console que vers le runner, dans une tâche 0600 supprimée à la lecture.
+
+### 12.4 Tâches et résultats du runner
+
+- Tâche : `scan-job.schema.json`. Une tâche = une analyse : la source est
+  récupérée une fois, puis chaque module tourne sur la même copie en lecture
+  seule. `history: full` si un module du plan déclare `scan.history: full`
+  (gitleaks), sinon `shallow`.
+- La source Git est récupérée **dans un conteneur jetable** du module système
+  `git-fetch` (installé automatiquement comme dépendance des scanners qui lisent
+  un dépôt, G1), avec un réseau limité à l'hôte de la forge et sans exécuter de
+  hook, de filtre ni de sous-module. Une archive téléversée est extraite sans
+  lien ni chemin sortant, avec des limites de taille.
+- Résultat : `scan-result.schema.json`. Classes d'erreur (G12) : `infra`
+  (mémoire, délai, image absente, échec de podman, runner redémarré) relancée
+  automatiquement par le worker, au plus 2 fois ; `tool` (sortie invalide ou
+  absente, code de sortie inattendu) et `input` (source inaccessible, archive
+  piégée) jamais relancées. Une sortie déclarée est validée contre son schéma
+  (SARIF 2.1.0, CycloneDX) avant publication (G2) ; invalide = `invalid-output`.
+
+### 12.5 Analyses reproductibles (G11)
+
+`scans.plan` fige, au moment du dépôt : la liste des modules résolue depuis le
+profil (G7) avec version, empreinte d'image, options et versions des bases,
+les règles du quality gate, et le commit. « Rejouer à l'identique » crée une
+analyse `trigger = replay`, `replay_of = <id>`, avec le même plan ; si un module
+ou une image du plan n'est plus disponible, l'analyse est non concluante et le
+dit.
+
+### 12.6 Résultats unifiés
+
+- Gravité normalisée par `severity_maps` (G5), alimentée par défaut depuis les
+  niveaux SARIF (`error` → `high`, `warning` → `medium`, `note` → `low`,
+  `none` → `info`) et les propriétés usuelles (`security-severity` : ≥ 9
+  `critical`, ≥ 7 `high`, ≥ 4 `medium`, > 0 `low`).
+- Empreinte stable (G19) : SHA-256 de `outil | règle | chemin | contexte`, où
+  le contexte est le texte normalisé (espaces repliés) des lignes autour du
+  résultat, sans numéro de ligne ; pour une dépendance, `écosystème | nom |
+  version | identifiant d'avis`. `partialFingerprints` SARIF est utilisé quand
+  l'outil le fournit.
+- Un secret n'est jamais stocké : message et extrait sont masqués à
+  l'ingestion ; seuls type, emplacement et empreinte restent (F7).
+- Un avis `MAL-` (OSV) marque `malicious = true` : toujours bloquant, aucune
+  exception possible (H4).
+- Un résultat absent d'une analyse complète réussie de la même branche passe
+  `fixed` ; il redevient `new` s'il réapparaît.
+
+### 12.7 Verdict
+
+`evaluateGate(scanId)` produit `VerdictDetails` (`webui/shared/analysis.ts`) :
+raisons ordonnées, bloquantes ou non, avec les actions qui débloqueraient.
+Non concluant (G13) dès qu'un module du plan est absent, en erreur, en délai
+dépassé ou à sortie invalide, sauf exception datée de type `module`. L'IA
+(I9) ne fait que rédiger à partir de `verdict_details` ; elle n'entre jamais dans
+le calcul.
+
+### 12.8 API pour la CI
+
+`Authorization: Bearer scn_…` (jeton de projet, `api_tokens`, seule l'empreinte
+SHA-256 est gardée). `POST /api/projects/:id/scans {ref, profile?}` → `202
+{scan_id, url}` ; `GET /api/scans/:id` → état et verdict. Le client
+`scanoria-scan` attend le verdict et rend 0 (passed), 1 (failed), 2
+(inconclusive), 3 (erreur d'utilisation ou d'accès).
