@@ -273,8 +273,17 @@ mk_testbed testbed-trapd-1.0.0.tar.zst dotdot
 ALL=$(jq -cn --argjson a "[$GL1,$GL2,$TRIVY,$TDB,$SVC,$SVC2,$BIG,$MANYCPU,$SEMG,$OPEN,$NEWAPP,$DEPTOP,$WOPT,$BADSYS,$TRAP1,$TRAP2,$DEEP]" '$a')
 
 publish 3 "$ALL"
+# Appliance installée avant l'entrée tmpfiles.d : répertoire créé en 0700 par un
+# helper plus ancien. Il doit être rétabli en 0750 (groupe scanoria hors mode test),
+# sinon la console ne peut pas lire l'index publié (« catalogue pas encore disponible »).
+mkdir -p "$T/var/lib/scanoria" && install -d -m 0700 "$T/var/lib/scanoria/catalog"
+rm -f "$T/var/lib/scanoria/modules/state.json"
 hx refresh-catalog '{}'
 expect "refresh-catalog : index signé accepté" "$(code)" OK
+expect "refresh-catalog : répertoire du catalogue lisible par la console (0750)" "$(stat -c %a "$T/var/lib/scanoria/catalog")" 750
+expect "refresh-catalog : état des modules publié dès la première actualisation" \
+	"$(jq -c '[.version, .modules]' "$T/var/lib/scanoria/modules/state.json" 2> /dev/null)" '[1,[]]'
+expect "refresh-catalog : répertoire des modules lisible par la console (0750)" "$(stat -c %a "$T/var/lib/scanoria/modules")" 750
 expect "refresh-catalog : numéro publié" "$(jq -r .version "$T/var/lib/scanoria/catalog/catalog-index.json")" 3
 expect "refresh-catalog : droits 0640" "$(stat -c %a "$T/var/lib/scanoria/catalog/catalog-index.json")" 640
 expect "refresh-catalog : source mémorisée" "$(jq -r .tag "$T/var/lib/scanoria/catalog/source.json")" catalog-v3

@@ -134,13 +134,22 @@ const dnsStatusSchema = z.object({
 })
 export type DnsStatus = z.infer<typeof dnsStatusSchema>
 
+const deniedLogged = new Set<string>()
+
 async function readJson(path: string, max: number): Promise<unknown> {
   try {
     const buf = await readFile(path)
     if (buf.length > max) return undefined
     return JSON.parse(buf.toString('utf8'))
   }
-  catch {
+  catch (err) {
+    // Un fichier présent mais illisible (droits du répertoire) ressemble à un
+    // fichier absent pour l'utilisateur : on le signale une fois dans le journal.
+    const code = (err as NodeJS.ErrnoException).code
+    if ((code === 'EACCES' || code === 'EPERM') && !deniedLogged.has(path)) {
+      deniedLogged.add(path)
+      console.warn(`[catalog] ${path} : lecture refusée (${code}), vérifier les droits du répertoire`)
+    }
     return undefined
   }
 }

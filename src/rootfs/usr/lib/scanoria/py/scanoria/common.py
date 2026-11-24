@@ -14,6 +14,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -238,6 +239,30 @@ def scanoria_ids():
     import pwd
     pw = pwd.getpwnam("scanoria")
     return (pw.pw_uid, pw.pw_gid)
+
+
+def shared_dir(path):
+    """Crée ou rétablit un répertoire d'état lu par la console : root:scanoria 0750.
+
+    Un simple os.makedirs sous l'UMask du helper laisserait root:root 0750 et la
+    console (utilisateur scanoria) ne pourrait pas y entrer : le fichier publié
+    paraîtrait absent. tmpfiles.d crée ces répertoires à l'installation ; ce
+    rattrapage couvre une appliance installée avant leur ajout. Un lien
+    symbolique est refusé."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        os.makedirs(os.path.dirname(path), mode=0o750, exist_ok=True)
+        os.mkdir(path, 0o750)
+        st = os.lstat(path)
+    if not stat.S_ISDIR(st.st_mode):
+        raise Fail("E_INTERNAL", "%s is not a directory" % path)
+    if stat.S_IMODE(st.st_mode) != 0o750:
+        os.chmod(path, 0o750)
+    if not TEST_ROOT:
+        gid = scanoria_ids()[1]
+        if st.st_uid != 0 or st.st_gid != gid:
+            os.chown(path, 0, gid)
 
 
 def atomic_write(path, data, mode=0o640, group_scanoria=True):
