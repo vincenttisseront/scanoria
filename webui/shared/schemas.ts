@@ -31,6 +31,13 @@ export const REQUEST_TYPES = [
   'rollback-update',
   'set-update-policy',
   'run-selftest',
+  // 0.2 : moteur de modules (chantier C) et DNS (chantier D)
+  'refresh-catalog',
+  'install-modules',
+  'uninstall-module',
+  'set-module-state',
+  'update-module',
+  'check-dns',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -42,6 +49,8 @@ export const RESULT_CODES = [
   'E_ARCHIVE', 'E_VERSION', 'E_DISK_SPACE', 'E_CERT_INVALID', 'E_CERT_NAMES',
   'E_CERT_KEY_MISMATCH', 'E_CERT_EXPIRED', 'E_NO_PREVIOUS', 'E_HEALTH_ROLLED_BACK',
   'E_ROLLBACK_FAILED', 'E_TIMEOUT', 'E_INTERNAL',
+  // 0.2 : moteur de modules (chantier C)
+  'E_RESOURCES', 'E_DEPENDENCY', 'E_CONFLICT', 'E_LICENSE', 'E_TESTBED',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 
@@ -52,6 +61,15 @@ export const CHANNELS = ['stable', 'prerelease'] as const
 export const WEEK_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
 
 const unique = (items: readonly unknown[]) => new Set(items).size === items.length
+
+/** Identifiant d'un module du catalogue (dossier modules/<id>/). */
+export const MODULE_ID_RE = /^[a-z0-9][a-z0-9-]{1,40}$/
+/** Version amont d'un module (souvent x.y.z, parfois plus longue). */
+export const MODULE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/
+export const moduleIdSchema = z.string().regex(MODULE_ID_RE)
+export const moduleVersionSchema = z.string().regex(MODULE_VERSION_RE)
+/** Valeurs d'options d'un module (G3), validées par la console contre le schéma du manifeste. */
+export const moduleOptionsSchema = z.record(z.string(), z.unknown())
 
 export const fqdnSchema = z.string().min(4).max(253).regex(FQDN_RE)
 export const versionSchema = z.string().regex(VERSION_RE)
@@ -95,6 +113,17 @@ export const requestParamSchemas = {
       path: ['maintenance_window'],
     }),
   'run-selftest': z.strictObject({ quick: z.boolean().optional() }),
+  'refresh-catalog': z.strictObject({}),
+  'install-modules': z.strictObject({
+    // Unicité des id contrôlée par la console (plan) et par le helper, pas par le contrat.
+    modules: z.array(z.strictObject({ id: moduleIdSchema, version: moduleVersionSchema, options: moduleOptionsSchema }))
+      .min(1).max(32),
+    accept_licenses: z.array(moduleIdSchema).max(32).refine(unique, { message: 'duplicate' }),
+  }),
+  'uninstall-module': z.strictObject({ id: moduleIdSchema, keep_data: z.boolean() }),
+  'set-module-state': z.strictObject({ id: moduleIdSchema, enabled: z.boolean() }),
+  'update-module': z.strictObject({ id: moduleIdSchema, version: moduleVersionSchema }),
+  'check-dns': z.strictObject({}),
 } satisfies Record<RequestType, z.ZodType>
 
 export type RequestParams<T extends RequestType> = z.infer<(typeof requestParamSchemas)[T]>
@@ -198,3 +227,29 @@ export const ROLE_RANK: Record<Role, number> = { viewer: 10, operator: 20, admin
 export function hasRole(actual: Role, required: Role): boolean {
   return ROLE_RANK[actual] >= ROLE_RANK[required]
 }
+
+// ---- Catalogue (0.2) ----
+
+const planModuleSchema = z.strictObject({
+  id: moduleIdSchema,
+  version: moduleVersionSchema.optional(),
+  options: moduleOptionsSchema.optional(),
+})
+
+const planShape = {
+  modules: z.array(planModuleSchema).min(1).max(32).optional(),
+  pack: moduleIdSchema.optional(),
+}
+const onePlanSource = (b: { modules?: unknown, pack?: unknown }) => (b.modules === undefined) !== (b.pack === undefined)
+
+/** Plan d'installation : une liste de modules, ou un pack (F11). */
+export const planBodySchema = z.strictObject(planShape).refine(onePlanSource, { message: 'modules or pack' })
+
+/** Installation : plan + licences acceptées explicitement (§ 2.1). */
+export const installBodySchema = z
+  .strictObject({ ...planShape, accept_licenses: z.array(moduleIdSchema).max(32).default([]) })
+  .refine(onePlanSource, { message: 'modules or pack' })
+
+export const moduleStateBodySchema = z.strictObject({ enabled: z.boolean() })
+export const moduleUpdateBodySchema = z.strictObject({ version: moduleVersionSchema.optional() })
+export const moduleUninstallBodySchema = z.strictObject({ keep_data: z.boolean() })

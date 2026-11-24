@@ -6,17 +6,23 @@
 // mêmes expressions régulières, et mêmes verdicts sur des exemples valides
 // et hostiles (validés aussi par ajv, JSON Schema 2020-12).
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import Ajv2020 from 'ajv/dist/2020.js'
 import { describe, expect, it } from 'vitest'
 import {
-  ADDRESS_RE, CERT_PEM_RE, CIDR_RE, FQDN_RE, KEY_PEM_RE, REQUEST_TYPES, RESULT_CODES, TIMESTAMP_RE,
+  ADDRESS_RE, CERT_PEM_RE, CIDR_RE, FQDN_RE, KEY_PEM_RE, MODULE_ID_RE, MODULE_VERSION_RE, REQUEST_TYPES, RESULT_CODES, TIMESTAMP_RE,
   USERNAME_RE, UUID_V4_RE, VERSION_RE, WINDOW_START_RE, envelopeSchema, resultSchema, type RequestType,
 } from '#shared/schemas'
 
 const CONTRACT_DIR = fileURLToPath(new URL('../../../src/rootfs/usr/share/scanoria/requests/', import.meta.url))
 const loadSchema = (name: string) => JSON.parse(readFileSync(`${CONTRACT_DIR}${name}.schema.json`, 'utf8'))
+/**
+ * Les schémas des demandes de la 0.2 sont livrés par les chantiers C (modules)
+ * et D (DNS). Tant qu'un schéma n'est pas fusionné, son type est absent du
+ * contrat : la comparaison porte alors sur les types déjà livrés.
+ */
+const hasContract = (name: string) => existsSync(`${CONTRACT_DIR}${name}.schema.json`)
 
 const ajv = new Ajv2020({ strict: false, allErrors: true })
 const validators = new Map<string, ReturnType<typeof ajv.compile>>()
@@ -111,6 +117,45 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
     valid: [{}, { quick: true }],
     invalid: [{ quick: 1 }, { full: true }],
   },
+  'refresh-catalog': {
+    valid: [{}],
+    invalid: [{ force: true }],
+  },
+  'install-modules': {
+    valid: [
+      { modules: [{ id: 'gitleaks', version: '8.28.0', options: {} }], accept_licenses: [] },
+      { modules: [{ id: 'trivy', version: '0.67.2', options: { severity: 'HIGH' } }, { id: 'trivy-db', version: '2', options: {} }], accept_licenses: ['trivy'] },
+    ],
+    invalid: [
+      { modules: [], accept_licenses: [] },
+      { modules: [{ id: 'gitleaks', version: '8.28.0', options: {} }] },
+      { modules: [{ id: 'gitleaks', version: '8.28.0' }], accept_licenses: [] },
+      { modules: [{ id: '../etc', version: '1', options: {} }], accept_licenses: [] },
+      { modules: [{ id: 'Gitleaks', version: '1', options: {} }], accept_licenses: [] },
+      { modules: [{ id: 'gitleaks', version: '1; rm -rf /', options: {} }], accept_licenses: [] },
+      { modules: [{ id: 'gitleaks', version: '1', options: [] }], accept_licenses: [] },
+      { modules: [{ id: 'gitleaks', version: '1', options: {}, image: 'x' }], accept_licenses: [] },
+      { modules: [{ id: 'gitleaks', version: '1', options: {} }], accept_licenses: ['a', 'a'] },
+      { modules: Array.from({ length: 33 }, (_, i) => ({ id: `m${i}x`, version: '1', options: {} })), accept_licenses: [] },
+      { modules: [{ id: 'gitleaks', version: '1', options: {} }], accept_licenses: [], extra: 1 },
+    ],
+  },
+  'uninstall-module': {
+    valid: [{ id: 'gitleaks', keep_data: true }, { id: 'osv-scanner', keep_data: false }],
+    invalid: [{ id: 'gitleaks' }, { id: 'gitleaks', keep_data: 'no' }, { id: '-x', keep_data: true }],
+  },
+  'set-module-state': {
+    valid: [{ id: 'trivy', enabled: false }],
+    invalid: [{ id: 'trivy' }, { id: 'trivy', enabled: 1 }, { id: 'trivy', enabled: true, x: 1 }],
+  },
+  'update-module': {
+    valid: [{ id: 'trivy', version: '0.68.0' }],
+    invalid: [{ id: 'trivy' }, { id: 'trivy', version: '' }, { id: 'trivy', version: '.1' }],
+  },
+  'check-dns': {
+    valid: [{}],
+    invalid: [{ name: 'x' }],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {
@@ -132,10 +177,22 @@ describe('expressions régulières identiques au contrat', () => {
     expect(WINDOW_START_RE.source).toBe(policy.properties.params.properties.maintenance_window.oneOf[1].properties.start.pattern)
   })
 
+  it.runIf(hasContract('install-modules'))('reprend les motifs des demandes de modules', () => {
+    const install = loadSchema('install-modules')
+    const item = install.properties.params.properties.modules.items
+    expect(MODULE_ID_RE.source).toBe(item.properties.id.pattern)
+    expect(MODULE_VERSION_RE.source).toBe(item.properties.version.pattern)
+  })
+
   it('reprend la liste fermée des types et des codes', () => {
     const result = loadSchema('result')
-    expect([...REQUEST_TYPES]).toEqual(result.properties.type.oneOf[1].enum)
-    expect([...RESULT_CODES]).toEqual(result.properties.code.enum)
+    const contractTypes: string[] = result.properties.type.oneOf[1].enum
+    // Ordre identique ; un type absent du contrat n'a pas encore son schéma (chantier non fusionné).
+    expect(REQUEST_TYPES.filter(t => contractTypes.includes(t))).toEqual(contractTypes)
+    for (const t of REQUEST_TYPES.filter(t => !contractTypes.includes(t))) expect(hasContract(t), t).toBe(false)
+    const contractCodes: string[] = result.properties.code.enum
+    expect(RESULT_CODES.filter(c => contractCodes.includes(c))).toEqual(contractCodes)
+    if (hasContract('install-modules')) expect([...RESULT_CODES]).toEqual(contractCodes)
   })
 })
 
@@ -145,14 +202,14 @@ describe('zod et JSON Schema donnent le même verdict', () => {
     for (const params of CASES[type].valid) {
       it(`${type} accepte ${JSON.stringify(params).slice(0, 60)}`, () => {
         const doc = envelope(type, params)
-        expect(contractValidator(type)(doc)).toBe(true)
+        if (hasContract(type)) expect(contractValidator(type)(doc)).toBe(true)
         expect(zodEnvelope.safeParse(doc).success).toBe(true)
       })
     }
     for (const params of CASES[type].invalid) {
       it(`${type} refuse ${JSON.stringify(params).slice(0, 60)}`, () => {
         const doc = envelope(type, params)
-        expect(contractValidator(type)(doc)).toBe(false)
+        if (hasContract(type)) expect(contractValidator(type)(doc)).toBe(false)
         expect(zodEnvelope.safeParse(doc).success).toBe(false)
       })
     }

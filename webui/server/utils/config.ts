@@ -13,6 +13,12 @@ export interface ConsoleConfig {
   publicFilesDir: string
   versionFile: string
   updateSourceFile: string
+  /** Dernier index du catalogue vérifié par le helper (contrat 4). */
+  catalogIndexFile: string
+  /** État des modules publié par le helper (contrat 4). */
+  modulesStateFile: string
+  /** État DNS publié par le helper (contrat 4). */
+  dnsStatusFile: string
   /** Prend l'adresse cliente dans X-Real-IP quand la connexion vient de la boucle locale (nginx). */
   trustProxy: boolean
   /** Applique les migrations au démarrage du serveur (en plus de migrate.mjs). */
@@ -37,6 +43,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConsoleConfig 
     publicFilesDir: env.NUXT_PUBLIC_FILES_DIR || '/var/lib/scanoria/public',
     versionFile: env.NUXT_VERSION_FILE || '/opt/scanoria/current/VERSION',
     updateSourceFile: env.NUXT_UPDATE_SOURCE_FILE || '/usr/share/scanoria/update-source.json',
+    catalogIndexFile: env.NUXT_CATALOG_INDEX_FILE || '/var/lib/scanoria/catalog/catalog-index.json',
+    modulesStateFile: env.NUXT_MODULES_STATE_FILE || '/var/lib/scanoria/modules/state.json',
+    dnsStatusFile: env.NUXT_DNS_STATUS_FILE || '/var/lib/scanoria/dns/status.json',
     trustProxy: bool(env.NUXT_TRUST_PROXY, true),
     migrateOnStart: bool(env.NUXT_MIGRATE_ON_START, true),
     ingestIntervalMs: Number.isFinite(interval) && interval >= 200 ? interval : 5000,

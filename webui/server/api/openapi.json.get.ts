@@ -49,12 +49,37 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/system/updates/uploads/{id}/{name}': {
     put: { summary: 'Upload one release file (raw body): release.json, SHA256SUMS, SHA256SUMS.sig, scanoria-X.Y.Z.tar.zst', role: 'admin', status: 201 },
   },
+  '/api/catalog': { get: { summary: 'Catalog modules, install state, compatibility, packs, dependency graph, recommended selection, operations', role: 'viewer' } },
+  '/api/catalog/refresh': { post: { summary: 'Request refresh-catalog (download and verify the signed index)', role: 'admin', body: 'refresh-catalog', status: 202 } },
+  '/api/catalog/plan': { post: { summary: 'Install plan without side effect: added dependencies, licenses to accept, resource checks', role: 'viewer', body: 'CatalogPlan' } },
+  '/api/catalog/install': { post: { summary: 'Request install-modules for modules or a pack (409 E_PLAN when blocked)', role: 'admin', body: 'CatalogInstall', status: 202 } },
+  '/api/catalog/modules/{id}': { get: { summary: 'Module detail: versions, options schema, state, plan, dependents, operations', role: 'viewer' } },
+  '/api/catalog/modules/{id}/state': { post: { summary: 'Request set-module-state (enable or disable)', role: 'admin', body: 'ModuleState', status: 202 } },
+  '/api/catalog/modules/{id}/update': { post: { summary: 'Request update-module (latest version by default)', role: 'admin', body: 'ModuleUpdate', status: 202 } },
+  '/api/catalog/modules/{id}/uninstall': { post: { summary: 'Request uninstall-module (409 E_DEPENDENTS when another module needs it)', role: 'admin', body: 'ModuleUninstall', status: 202 } },
+  '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
+  '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
 }
 
 const HELPER_BODIES = [
   'set-hostname', 'set-admin-networks', 'issue-certificate', 'import-certificate', 'check-update',
-  'apply-update', 'rollback-update', 'set-update-policy', 'run-selftest',
+  'apply-update', 'rollback-update', 'set-update-policy', 'run-selftest', 'refresh-catalog', 'check-dns',
 ]
+
+const PLAN_PROPERTIES = {
+  modules: {
+    type: 'array', minItems: 1, maxItems: 32,
+    items: {
+      type: 'object', additionalProperties: false, required: ['id'],
+      properties: {
+        id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,40}$' },
+        version: { type: 'string', description: 'Latest version of the index by default' },
+        options: { type: 'object', description: 'Validated against the module options schema; defaults fill the rest' },
+      },
+    },
+  },
+  pack: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,40}$' },
+}
 
 export default defineEventHandler(async () => {
   const version = await getRunningVersion(getConfig().versionFile)
@@ -142,6 +167,20 @@ export default defineEventHandler(async () => {
             role: { enum: ['viewer', 'operator', 'admin'] }, locale: { enum: ['fr', 'en'] }, is_active: { type: 'boolean' },
           },
         },
+        CatalogPlan: {
+          type: 'object', additionalProperties: false, description: 'Exactly one of modules or pack',
+          properties: PLAN_PROPERTIES,
+        },
+        CatalogInstall: {
+          type: 'object', additionalProperties: false, description: 'Exactly one of modules or pack',
+          properties: {
+            ...PLAN_PROPERTIES,
+            accept_licenses: { type: 'array', maxItems: 32, items: { type: 'string' }, description: 'Modules whose license restrictions are explicitly accepted' },
+          },
+        },
+        ModuleState: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } },
+        ModuleUpdate: { type: 'object', additionalProperties: false, properties: { version: { type: 'string' } } },
+        ModuleUninstall: { type: 'object', additionalProperties: false, required: ['keep_data'], properties: { keep_data: { type: 'boolean' } } },
         PasswordReset: {
           type: 'object', additionalProperties: false, required: ['password'],
           properties: { password: { type: 'string', minLength: 12, maxLength: 1024 }, must_change_password: { type: 'boolean' } },

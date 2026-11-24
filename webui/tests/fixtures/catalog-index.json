@@ -1,0 +1,802 @@
+{
+  "schema": 1,
+  "version": 7,
+  "generated_at": "2026-11-23T06:00:00Z",
+  "modules": [
+    {
+      "id": "gitleaks",
+      "name": "gitleaks",
+      "type": "scanner",
+      "version": "8.28.0",
+      "categories": [
+        "secrets"
+      ],
+      "license": {
+        "spdx": "MIT",
+        "url": "https://exemple.test/licenses/MIT",
+        "restrictions": "none"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/gitleaks",
+        "source": "https://exemple.test/gitleaks/src"
+      },
+      "resources": {
+        "min_ram_mb": 256,
+        "min_cpu": 1,
+        "disk_mb": 200
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [],
+        "feeds": [],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scan_history": {
+            "type": "boolean",
+            "default": true,
+            "title": "Scan history"
+          },
+          "max_target_megabytes": {
+            "type": "integer",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 1000,
+            "title": "Max size"
+          },
+          "redact": {
+            "type": "string",
+            "default": "full",
+            "enum": [
+              "full",
+              "partial"
+            ]
+          }
+        }
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": {
+        "path": "testbed/",
+        "expect": [
+          {
+            "category": "secrets",
+            "min": 1
+          }
+        ]
+      },
+      "testbed_archive": "testbed-gitleaks-8.28.0.tar.zst",
+      "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "description": "Recherche de secrets dans l’historique Git.",
+      "options_i18n": {
+        "scan_history": {
+          "fr": {
+            "title": "Analyser l’historique",
+            "description": "Tout l’historique Git"
+          },
+          "en": {
+            "title": "Scan history"
+          }
+        }
+      },
+      "image": "ghcr.io/exemple/gitleaks@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "osv-scanner",
+      "name": "OSV-Scanner",
+      "type": "scanner",
+      "version": "2.2.0",
+      "categories": [
+        "sca"
+      ],
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://exemple.test/licenses/Apache-2.0",
+        "restrictions": "none"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/osv-scanner",
+        "source": "https://exemple.test/osv-scanner/src"
+      },
+      "resources": {
+        "min_ram_mb": 256,
+        "min_cpu": 1,
+        "disk_mb": 200
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [],
+        "feeds": [
+          "osv-db"
+        ],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": {
+        "path": "testbed/",
+        "expect": [
+          {
+            "category": "secrets",
+            "min": 1
+          }
+        ]
+      },
+      "testbed_archive": "testbed-osv-scanner-2.2.0.tar.zst",
+      "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "image": "ghcr.io/exemple/osv-scanner@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "osv-db",
+      "name": "Base OSV",
+      "type": "feed",
+      "version": "1",
+      "categories": [
+        "sca"
+      ],
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://exemple.test/licenses/Apache-2.0",
+        "restrictions": "none"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/osv-db",
+        "source": "https://exemple.test/osv-db/src"
+      },
+      "resources": {
+        "min_ram_mb": 128,
+        "min_cpu": 1,
+        "disk_mb": 1500
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [],
+        "feeds": [],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputs": {},
+      "testbed": null,
+      "testbed_archive": null,
+      "testbed_sha256": null,
+      "image": "ghcr.io/exemple/osv-db@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "trivy",
+      "name": "Trivy",
+      "type": "scanner",
+      "version": "0.67.2",
+      "categories": [
+        "sca",
+        "iac",
+        "container",
+        "sbom",
+        "secrets"
+      ],
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://exemple.test/licenses/Apache-2.0",
+        "restrictions": "none"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/trivy",
+        "source": "https://exemple.test/trivy/src"
+      },
+      "resources": {
+        "min_ram_mb": 512,
+        "min_cpu": 1,
+        "disk_mb": 500
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [],
+        "feeds": [],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": {
+            "type": "string",
+            "default": "HIGH",
+            "enum": [
+              "CRITICAL",
+              "HIGH",
+              "MEDIUM",
+              "LOW"
+            ]
+          },
+          "skip_dirs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "maxLength": 200
+          },
+          "timeout_s": {
+            "type": "number",
+            "default": 900,
+            "minimum": 60
+          }
+        }
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": {
+        "path": "testbed/",
+        "expect": [
+          {
+            "category": "secrets",
+            "min": 1
+          }
+        ]
+      },
+      "testbed_archive": "testbed-trivy-0.67.2.tar.zst",
+      "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "needs": {
+        "feeds": [
+          "trivy-db"
+        ],
+        "sysctl": {},
+        "postgres": false
+      },
+      "image": "ghcr.io/exemple/trivy@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "trivy",
+      "name": "Trivy",
+      "type": "scanner",
+      "version": "0.66.0",
+      "categories": [
+        "sca"
+      ],
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://exemple.test/licenses/Apache-2.0",
+        "restrictions": "none"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/trivy",
+        "source": "https://exemple.test/trivy/src"
+      },
+      "resources": {
+        "min_ram_mb": 512,
+        "min_cpu": 1,
+        "disk_mb": 200
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [],
+        "feeds": [],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": {
+        "path": "testbed/",
+        "expect": [
+          {
+            "category": "secrets",
+            "min": 1
+          }
+        ]
+      },
+      "testbed_archive": "testbed-trivy-0.66.0.tar.zst",
+      "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "needs": {
+        "feeds": [
+          "trivy-db"
+        ]
+      },
+      "image": "ghcr.io/exemple/trivy@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "trivy-db",
+      "name": "Base trivy-db",
+      "type": "feed",
+      "version": "2",
+      "categories": [],
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://exemple.test/licenses/Apache-2.0",
+        "restrictions": "none"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/trivy-db",
+        "source": "https://exemple.test/trivy-db/src"
+      },
+      "resources": {
+        "min_ram_mb": 128,
+        "min_cpu": 1,
+        "disk_mb": 1000
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [],
+        "feeds": [],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": null,
+      "testbed_archive": null,
+      "testbed_sha256": null,
+      "image": "ghcr.io/exemple/trivy-db@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "sonarqube",
+      "name": "SonarQube Community Build",
+      "type": "service",
+      "version": "25.10.0",
+      "categories": [
+        "quality",
+        "sast"
+      ],
+      "license": {
+        "spdx": "LGPL-3.0-only",
+        "url": "https://exemple.test/licenses/LGPL-3.0-only",
+        "restrictions": "none"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/sonarqube",
+        "source": "https://exemple.test/sonarqube/src"
+      },
+      "resources": {
+        "min_ram_mb": 4096,
+        "min_cpu": 2,
+        "disk_mb": 10000
+      },
+      "hostname": "sonarqube",
+      "requires": {
+        "modules": [],
+        "feeds": [],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": {
+        "path": "testbed/",
+        "expect": [
+          {
+            "category": "secrets",
+            "min": 1
+          }
+        ]
+      },
+      "testbed_archive": "testbed-sonarqube-25.10.0.tar.zst",
+      "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "needs": {
+        "feeds": [],
+        "sysctl": {
+          "vm.max_map_count": 524288
+        },
+        "postgres": true
+      },
+      "service": {
+        "port": 9000,
+        "health_path": "/api/system/status",
+        "units": [
+          "sonarqube.container"
+        ]
+      },
+      "image": "ghcr.io/exemple/sonarqube@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "codeql",
+      "name": "CodeQL",
+      "type": "scanner",
+      "version": "2.23.0",
+      "categories": [
+        "sast"
+      ],
+      "license": {
+        "spdx": "LicenseRef-GitHub-CodeQL",
+        "url": "https://exemple.test/licenses/LicenseRef-GitHub-CodeQL",
+        "restrictions": "private-code-forbidden"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/codeql",
+        "source": "https://exemple.test/codeql/src"
+      },
+      "resources": {
+        "min_ram_mb": 256,
+        "min_cpu": 1,
+        "disk_mb": 200
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [],
+        "feeds": [],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": {
+        "path": "testbed/",
+        "expect": [
+          {
+            "category": "secrets",
+            "min": 1
+          }
+        ]
+      },
+      "testbed_archive": "testbed-codeql-2.23.0.tar.zst",
+      "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "image": "ghcr.io/exemple/codeql@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "semgrep",
+      "name": "Semgrep CE",
+      "type": "scanner",
+      "version": "1.140.0",
+      "categories": [
+        "sast"
+      ],
+      "license": {
+        "spdx": "LGPL-2.1-only",
+        "url": "https://exemple.test/licenses/LGPL-2.1-only",
+        "restrictions": "no-redistribution"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/semgrep",
+        "source": "https://exemple.test/semgrep/src"
+      },
+      "resources": {
+        "min_ram_mb": 256,
+        "min_cpu": 1,
+        "disk_mb": 200
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [],
+        "feeds": [],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [
+        "opengrep"
+      ],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": {
+        "path": "testbed/",
+        "expect": [
+          {
+            "category": "secrets",
+            "min": 1
+          }
+        ]
+      },
+      "testbed_archive": "testbed-semgrep-1.140.0.tar.zst",
+      "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "image": "ghcr.io/exemple/semgrep@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "opengrep",
+      "name": "Opengrep",
+      "type": "scanner",
+      "version": "1.10.0",
+      "categories": [
+        "sast"
+      ],
+      "license": {
+        "spdx": "LGPL-2.1-only",
+        "url": "https://exemple.test/licenses/LGPL-2.1-only",
+        "restrictions": "none"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/opengrep",
+        "source": "https://exemple.test/opengrep/src"
+      },
+      "resources": {
+        "min_ram_mb": 256,
+        "min_cpu": 1,
+        "disk_mb": 200
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [],
+        "feeds": [],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": {
+        "path": "testbed/",
+        "expect": [
+          {
+            "category": "secrets",
+            "min": 1
+          }
+        ]
+      },
+      "testbed_archive": "testbed-opengrep-1.10.0.tar.zst",
+      "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "image": "ghcr.io/exemple/opengrep@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "futur",
+      "name": "Module futur",
+      "type": "scanner",
+      "version": "1.0.0",
+      "categories": [],
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://exemple.test/licenses/Apache-2.0",
+        "restrictions": "none"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/futur",
+        "source": "https://exemple.test/futur/src"
+      },
+      "resources": {
+        "min_ram_mb": 256,
+        "min_cpu": 1,
+        "disk_mb": 200
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [],
+        "feeds": [],
+        "appliance": ">=9.0.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": {
+        "path": "testbed/",
+        "expect": [
+          {
+            "category": "secrets",
+            "min": 1
+          }
+        ]
+      },
+      "testbed_archive": "testbed-futur-1.0.0.tar.zst",
+      "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "image": "ghcr.io/exemple/futur@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "shellcheck",
+      "name": "ShellCheck",
+      "type": "scanner",
+      "version": "0.11.0",
+      "categories": [
+        "lint"
+      ],
+      "license": {
+        "spdx": "GPL-3.0-only",
+        "url": "https://exemple.test/licenses/GPL-3.0-only",
+        "restrictions": "none"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/shellcheck",
+        "source": "https://exemple.test/shellcheck/src"
+      },
+      "resources": {
+        "min_ram_mb": 64,
+        "min_cpu": 1,
+        "disk_mb": 50
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [],
+        "feeds": [],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": {
+        "path": "testbed/",
+        "expect": [
+          {
+            "category": "secrets",
+            "min": 1
+          }
+        ]
+      },
+      "testbed_archive": "testbed-shellcheck-0.11.0.tar.zst",
+      "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "image": "ghcr.io/exemple/shellcheck@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "orphelin-dep",
+      "name": "Dépendance cassée",
+      "type": "scanner",
+      "version": "1.0.0",
+      "categories": [],
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://exemple.test/licenses/Apache-2.0",
+        "restrictions": "none"
+      },
+      "upstream": {
+        "homepage": "https://exemple.test/orphelin-dep",
+        "source": "https://exemple.test/orphelin-dep/src"
+      },
+      "resources": {
+        "min_ram_mb": 256,
+        "min_cpu": 1,
+        "disk_mb": 200
+      },
+      "hostname": null,
+      "requires": {
+        "modules": [
+          "inexistant"
+        ],
+        "feeds": [],
+        "appliance": ">=0.2.0"
+      },
+      "conflicts": [],
+      "options": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputs": {
+        "sarif": {
+          "path": "/out/result.sarif",
+          "version": "2.1.0"
+        }
+      },
+      "testbed": {
+        "path": "testbed/",
+        "expect": [
+          {
+            "category": "secrets",
+            "min": 1
+          }
+        ]
+      },
+      "testbed_archive": "testbed-orphelin-dep-1.0.0.tar.zst",
+      "testbed_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "image": "ghcr.io/exemple/orphelin-dep@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "../evil",
+      "name": "x",
+      "type": "scanner",
+      "version": "1"
+    }
+  ],
+  "packs": [
+    {
+      "id": "secrets",
+      "name": "Secrets",
+      "modules": [
+        "gitleaks",
+        "trivy"
+      ],
+      "technologies": [
+        "git"
+      ]
+    },
+    {
+      "id": "iac",
+      "name": "IaC",
+      "modules": [
+        "trivy",
+        "checkov"
+      ],
+      "technologies": [
+        "terraform",
+        "kubernetes"
+      ]
+    },
+    {
+      "id": "base",
+      "name": "Base",
+      "modules": [
+        "gitleaks"
+      ],
+      "technologies": []
+    }
+  ]
+}
