@@ -125,11 +125,14 @@ async function remove() {
 }
 
 // --- essai d'une expression ---
-const trial = reactive({ expression: '', result: null as null | { decision: Decision, source: string }, loading: false })
+const trial = reactive({ expression: '', license: '', result: null as null | { decision: Decision, source: string }, loading: false })
 async function evaluate() {
   trial.loading = true
   try {
     trial.result = await api('/api/licenses/evaluate', { method: 'POST', body: { expression: trial.expression, project_id: projectId.value || null } })
+    // Explication IA (I18) : une licence simple seulement, pas une expression composée.
+    const single = trial.expression.trim()
+    trial.license = /^[A-Za-z0-9.+-]+$/.test(single) ? single : ''
   }
   catch (err) {
     toast.add({ title: errorMessage(err), color: 'error' })
@@ -270,6 +273,12 @@ async function evaluate() {
                 <td class="py-2 text-xs text-muted">
                   {{ r.reason }}
                   <span v-if="r.updated_by_username"> — {{ r.updated_by_username }}, {{ fmt.date(r.updated_at) }}</span>
+                  <!-- I18 : explication de la licence pour ce projet (masquée sans connecteur IA). -->
+                  <AiLicenseExplanation
+                    v-if="block.key === 'project' && projectId"
+                    :license="r.license"
+                    :project-id="projectId"
+                  />
                 </td>
                 <td class="py-2 text-right">
                   <UButton
@@ -353,6 +362,12 @@ async function evaluate() {
             {{ t(`licenses.decision.${trial.result.decision}`) }} · {{ t(`licenses.source.${trial.result.source}`) }}
           </UBadge>
         </form>
+        <AiLicenseExplanation
+          v-if="trial.result && projectId && trial.license"
+          :license="trial.license"
+          :project-id="projectId"
+          class="mt-3"
+        />
       </UCard>
     </template>
 
