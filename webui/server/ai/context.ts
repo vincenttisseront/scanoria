@@ -11,6 +11,7 @@
 import { z } from 'zod'
 import { MODULE_ID_RE } from '#shared/schemas'
 import { redactText } from './redact'
+import { boundContext, MAX_EXCERPT_CHARS, ReachContext } from './reach-context'
 
 /** Taille maximale de tous les extraits réunis (octets UTF-8). */
 export const MAX_CONTEXT_BYTES = 16_384
@@ -51,9 +52,32 @@ export function aiLogContext(entries: { module: string, log: string }[]): AiLogC
   }
 }
 
+/** Tâches qui reçoivent un contexte joint ; assess-reachability n'existe pas sans lui (I11). */
+export const CONTEXT_KINDS = ['diagnose-scan', 'assess-reachability'] as const
+export const CONTEXT_REQUIRED = ['assess-reachability'] as const
+
+/** I11 : emplacements de l'index revalidés, extraits remasqués, 16 Ko au plus. */
+export function sanitizeReachContext(context: unknown): ReachContext | null {
+  const parsed = ReachContext.safeParse(context)
+  if (!parsed.success) return null
+  return boundContext({
+    ...parsed.data,
+    symbols: parsed.data.symbols.map(s => redactText(s).text.slice(0, 200)).filter(Boolean),
+    locations: parsed.data.locations.map(l => ({
+      ...l,
+      path: redactText(l.path).text.slice(0, 512) || '-',
+      module: redactText(l.module).text.slice(0, 300) || '-',
+      symbol: redactText(l.symbol).text.slice(0, 200),
+      excerpt: redactText(l.excerpt).text.slice(0, MAX_EXCERPT_CHARS),
+    })),
+  })
+}
+
 /** Contexte accepté par enqueueAiTask : revalidé, remasqué, borné ; null sinon. */
-export function sanitizeContext(kind: string, context: unknown): AiLogContext | null {
-  if (context === undefined || context === null || kind !== 'diagnose-scan') return null
+export function sanitizeContext(kind: string, context: unknown): AiLogContext | ReachContext | null {
+  if (context === undefined || context === null) return null
+  if (kind === 'assess-reachability') return sanitizeReachContext(context)
+  if (kind !== 'diagnose-scan') return null
   const parsed = AiLogContext.safeParse(context)
   if (!parsed.success) return null
   const out = aiLogContext(parsed.data.logs.map(l => ({ module: l.module, log: l.excerpt })))

@@ -29,7 +29,8 @@ GRANT USAGE ON SCHEMA public TO "scanoria-ai";
 -- Lecture seule, colonnes utiles seulement.
 GRANT SELECT (version) ON schema_migrations TO "scanoria-ai";
 GRANT SELECT (key, value) ON appliance_settings TO "scanoria-ai";
-GRANT SELECT (id, slug, name, ai_opt_out, archived_at) ON projects TO "scanoria-ai";
+-- 0.5 : spdx_license sert à l'explication des licences (I18, licence déclarée du projet).
+GRANT SELECT (id, slug, name, ai_opt_out, archived_at, spdx_license) ON projects TO "scanoria-ai";
 GRANT SELECT (id, project_id, number, ref, commit_sha, status, verdict, verdict_details,
               coverage, plan, error, queued_at) ON scans TO "scanoria-ai";
 -- 0.4 : status_by, status_at et status_reason servent aux exemples de pré-tri
@@ -44,6 +45,9 @@ GRANT SELECT (scan_id, finding_id, is_new) ON scan_findings TO "scanoria-ai";
 GRANT SELECT (scan_id, module_id, module_version, status, error_class, attempts, duration_ms, peak_memory_mb)
     ON scan_modules TO "scanoria-ai";
 GRANT SELECT (id, kind, secret_enc) ON credentials TO "scanoria-ai";
+-- 0.5 : I18 n'explique qu'une licence rencontrée dans le SBOM d'un projet qui
+-- accepte l'IA ; seuls le projet et les licences des composants sont lus.
+GRANT SELECT (project_id, licenses) ON sbom_components TO "scanoria-ai";
 
 -- Écritures : tables ai_* seulement.
 GRANT SELECT ON ai_tasks TO "scanoria-ai";
@@ -54,3 +58,5 @@ GRANT INSERT (kind, subject_type, subject_id, priority) ON ai_tasks TO "scanoria
 GRANT UPDATE (status, output, error, model, model_digest, input_hash, attempts, started_at, finished_at) ON ai_tasks TO "scanoria-ai";
 GRANT SELECT, INSERT, DELETE ON ai_cache TO "scanoria-ai";
 GRANT SELECT, INSERT ON ai_calls TO "scanoria-ai";
+-- 0.5 : embeddings des résultats (I7), remplacés quand l'entrée change.
+GRANT SELECT, INSERT, UPDATE ON ai_embeddings TO "scanoria-ai";

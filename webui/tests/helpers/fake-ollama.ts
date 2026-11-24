@@ -98,9 +98,43 @@ function wellBehaved04(required: string[], data: Record<string, unknown>): Recor
   return null
 }
 
+/** Tâches de la 0.5 (I11, I18) : réponses sages et déterministes. */
+function wellBehaved05(required: string[], data: Record<string, unknown>): Record<string, unknown> | null {
+  if (required.includes('reachability')) {
+    const locs = (data.locations as { ref: number, kind: string, path: string }[] | undefined) ?? []
+    const call = locs.find(l => l.kind === 'call')
+    if (call) return { reachability: 'probable', summary: `The component is called in ${call.path}.`, reasons: [{ ref: call.ref, explanation: `Call in ${call.path}.` }] }
+    if (!locs.length) return { reachability: 'improbable', summary: 'The component is never imported.', reasons: [{ ref: 0, explanation: 'No import found.' }] }
+    return { reachability: 'indeterminate', summary: `Imported in ${locs[0]!.path} (test code) but no call of zipObjectDeep found.`, reasons: [{ ref: locs[0]!.ref, explanation: 'Import only.' }] }
+  }
+  if (required.includes('compatibility')) {
+    const lic = String(data.license)
+    return {
+      summary: `${lic} is a licence with source obligations (copyleft for GPL family; per-file for MPL; library for LGPL).`,
+      obligations: [`Keep the ${lic} notice.`],
+      compatibility: 'conditional',
+      compatibility_note: `Check how ${lic} combines with ${String(data.project_license)}.`,
+      to_check: ['How the component is linked.'],
+    }
+  }
+  return null
+}
+
+/** Embedding déterministe : mots hachés dans 64 dimensions, normalisé (textes semblables = vecteurs proches). */
+export function fakeEmbedding(text: string, dims = 64): number[] {
+  const v = Array.from({ length: dims }, () => 0)
+  for (const w of text.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []) {
+    let h = 2166136261
+    for (const c of w) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0
+    v[h % dims]! += 1
+  }
+  const n = Math.sqrt(v.reduce((a, b) => a + b * b, 0)) || 1
+  return v.map(x => x / n)
+}
+
 /** Réponse sage : reprend le titre, le message et les métadonnées, jamais l'extrait de code. */
 function wellBehaved(required: string[], data: Record<string, unknown>): Record<string, unknown> {
-  const v04 = wellBehaved04(required, data)
+  const v04 = wellBehaved04(required, data) ?? wellBehaved05(required, data)
   if (v04) return v04
   if (required.includes('detects')) {
     const pkg = data.package as { name?: string, fixed?: string[] } | null
@@ -160,6 +194,13 @@ export async function startFakeOllama(models: FakeModel[] = [
         details: { family: m.family ?? 'llama', parameter_size: m.parameterSize ?? '8.0B' },
         model_info: { 'general.architecture': m.family ?? 'llama', [`${m.family ?? 'llama'}.context_length`]: m.context ?? 8192 },
       })
+    }
+    if (req.url === '/api/embed') {
+      const parsed = JSON.parse(body) as { model: string, input: string[] }
+      const m = fake.models.find(x => x.name === parsed.model)
+      if (!m || !(m.capabilities ?? []).includes('embedding')) return send(res, 404, { error: 'model not found' })
+      if (state.mode === 'invalid-json') return send(res, 200, { model: parsed.model, embeddings: [[1, 2]] })
+      return send(res, 200, { model: parsed.model, embeddings: parsed.input.map(t => fakeEmbedding(t)) })
     }
     if (req.url === '/api/chat') {
       state.chats += 1

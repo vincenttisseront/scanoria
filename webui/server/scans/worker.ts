@@ -628,6 +628,8 @@ export class ScanWorker {
       await this.integrations.enqueueAiTask(this.pool, {
         kind: 'summarize-scan', subjectType: 'scan', subjectId: scanId, projectId: r.rows[0].project_id, priority: 10,
       })
+      // 0.5 : I11 (atteignabilité, index reach-index lu dans le dossier de résultats) et I18 (licences), même branchement.
+      await this.integrations.enqueueAfterVerdict?.(this.pool, { scanId, projectId: r.rows[0].project_id, scansDir: this.cfg.scansDir })
     }
     catch (e) {
       this.log(`scan ${scanId}: AI task not queued: ${(e as Error).message}`)
