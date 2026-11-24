@@ -5,7 +5,7 @@
 // demandé après une image absente (V1), une seule demande à la fois ; liste des
 // projets publiée pour le runner (miroirs Git et caches des projets retirés).
 
-import { mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -77,8 +77,15 @@ describe('liste des projets pour le runner', () => {
     const n = await publishLiveProjects(fakeDb(0, ids), join(dir, 'scans'), new Date('2026-11-24T10:00:00Z'))
     expect(n).toBe(2)
     const file = join(dir, 'scans', 'jobs', 'tmp', LIVE_PROJECTS_FILE)
-    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ schema: 1, at: '2026-11-24T10:00:00.000Z', projects: ids })
-    expect((await stat(file)).mode & 0o777).toBe(0o600)
+    // Un seul descripteur pour les droits et le contenu.
+    const fh = await open(file, 'r')
+    try {
+      expect((await fh.stat()).mode & 0o777).toBe(0o600)
+      expect(JSON.parse(await fh.readFile('utf8'))).toEqual({ schema: 1, at: '2026-11-24T10:00:00.000Z', projects: ids })
+    }
+    finally {
+      await fh.close()
+    }
     expect((await readdir(join(dir, 'scans', 'jobs', 'tmp'))).filter(f => f.endsWith('.part'))).toEqual([])
     // Republication : le fichier est remplacé, jamais complété.
     await publishLiveProjects(fakeDb(0, []), join(dir, 'scans'))
