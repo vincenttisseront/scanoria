@@ -26,6 +26,7 @@ import {
 import { EFFECTIVE_PRIORITY_SQL, retryDelayS } from './priority'
 import { makeRedactor } from './redact'
 import { loadTimeoutOverrides } from '../ai/overrides'
+import { aiLogContext } from '../ai/context'
 import type { WorkerConfig } from './config'
 
 export interface WorkerPaths {
@@ -651,7 +652,9 @@ export class ScanWorker {
         if (excerpt) logs.push({ module: m.module_id, excerpt })
       }
       await this.integrations.enqueueAiTask(this.pool, {
-        kind: 'diagnose-scan', subjectType: 'scan', subjectId: scanId, projectId, context: { logs },
+        kind: 'diagnose-scan', subjectType: 'scan', subjectId: scanId, projectId,
+        // Format et bornes du chantier D : masqué de nouveau (règle IA), fin de journal, 16 Ko en tout.
+        context: aiLogContext(logs.map(l => ({ module: l.module, log: l.excerpt }))),
       })
     }
     catch (e) {

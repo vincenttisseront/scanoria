@@ -207,7 +207,8 @@ describe.skipIf(!DATABASE_URL)('santé des analyses (G20, PostgreSQL réel)', ()
     calls.length = 0
     const ok = await scanWith(now, [{ id: 'trivy', status: 'ok' }, { id: 'gitleaks', status: 'skipped' }], 'ingesting')
     await w.conclude(ok, { status: 'done', error: null, complete: true })
-    expect(calls.map(c => c.kind)).toEqual(['explain-verdict'])
+    // I9 et I5 (résumé de l'analyse, chantier D) ; aucun diagnostic.
+    expect(calls.map(c => c.kind)).toEqual(['explain-verdict', 'summarize-scan'])
 
     // l'IA ne fait jamais échouer une analyse
     const broken = new ScanWorker(db.pool, cfg, { modulesStateFile: join(root, 'm.json'), catalogIndexFile: join(root, 'i.json') },
