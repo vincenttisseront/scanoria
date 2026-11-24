@@ -215,7 +215,7 @@ describe.skipIf(!DATABASE_URL)('forges et projets (PostgreSQL, faux serveurs)', 
       const again = await discoverForge(db.pool, (await getForge(db.pool, forgeId))!)
       expect(again.created).toHaveLength(0)
       await db.pool.query('UPDATE projects SET archived_at = NULL WHERE id = $1', [app.id])
-      const audit = await db.pool.query<{ details: Record<string, unknown> }>("SELECT details FROM audit_log WHERE action = 'forge.discover' ORDER BY id")
+      const audit = await db.pool.query<{ details: Record<string, unknown> }>('SELECT details FROM audit_log WHERE action = \'forge.discover\' ORDER BY id')
       expect(audit.rows[0]!.details).toMatchObject({ repos: 123, created: 121 })
       const all = await db.pool.query<{ t: string }>('SELECT string_agg(details::text, \' \') AS t FROM audit_log')
       expect(all.rows[0]!.t).not.toContain(forgejo.token)
@@ -245,7 +245,7 @@ describe.skipIf(!DATABASE_URL)('forges et projets (PostgreSQL, faux serveurs)', 
         return { scanId: rows[0]!.id, number: n }
       }
       // Un seul projet suivi pour ce test : les autres passent en « none ».
-      await db.pool.query(`UPDATE projects SET schedule = 'none' WHERE repo_full_name <> 'equipe/app'`)
+      await db.pool.query(`UPDATE projects SET schedule = 'none', detection = '{"version":1}' WHERE repo_full_name <> 'equipe/app'`)
       const app = (await listProjects(db.pool, { forgeId })).find(p => p.repo_full_name === 'equipe/app')!
       await db.pool.query(`UPDATE projects SET tracked_branches = '{main,release/1.0}', last_polled_at = NULL WHERE id = $1`, [app.id])
       await db.pool.query(`UPDATE forges SET last_discovery_at = now()`)
@@ -277,13 +277,15 @@ describe.skipIf(!DATABASE_URL)('forges et projets (PostgreSQL, faux serveurs)', 
     it('daily et URL libre : une analyse par jour au créneau du projet', async () => {
       const calls: string[] = []
       let n = 100
+      let clock = new Date()
       const enqueue: EnqueueScan = async (pool, input) => {
         calls.push(`${input.ref}:${input.trigger}`)
         n++
+        // queued_at suit l'horloge simulée du test.
         const { rows } = await pool.query<{ id: string }>(
-          `INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id)
-           SELECT id, $2, $3, 10, $4, profile_id, gate_id FROM projects WHERE id = $1 RETURNING id::text`,
-          [input.projectId, n, input.trigger, input.ref])
+          `INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id, queued_at)
+           SELECT id, $2, $3, 10, $4, profile_id, gate_id, $5 FROM projects WHERE id = $1 RETURNING id::text`,
+          [input.projectId, n, input.trigger, input.ref, clock.toISOString()])
         return { scanId: rows[0]!.id, number: n }
       }
       await db.pool.query(`UPDATE projects SET schedule = 'none'`)
@@ -295,12 +297,16 @@ describe.skipIf(!DATABASE_URL)('forges et projets (PostgreSQL, faux serveurs)', 
       const slot = currentDailySlot(free.id, new Date('2026-11-25T12:00:00Z'))
       const day = new Date(Date.UTC(2026, 10, 25))
       const at = new Date(Math.max(slot.getTime(), day.getTime()) + 1000)
-      expect((await runProjectSchedules(db.pool, at, enqueue)).enqueued).toBe(1)
+      const run = (d: Date) => {
+        clock = d
+        return runProjectSchedules(db.pool, d, enqueue)
+      }
+      expect((await run(at)).enqueued).toBe(1)
       expect(calls).toEqual(['main:schedule'])
       // Même créneau, 10 minutes plus tard : rien.
-      expect((await runProjectSchedules(db.pool, new Date(at.getTime() + 600_000), enqueue)).enqueued).toBe(0)
+      expect((await run(new Date(at.getTime() + 600_000))).enqueued).toBe(0)
       // Créneau suivant (le lendemain) : une nouvelle analyse.
-      expect((await runProjectSchedules(db.pool, new Date(at.getTime() + 86_400_000), enqueue)).enqueued).toBe(1)
+      expect((await run(new Date(at.getTime() + 86_400_000))).enqueued).toBe(1)
     })
   })
 })
