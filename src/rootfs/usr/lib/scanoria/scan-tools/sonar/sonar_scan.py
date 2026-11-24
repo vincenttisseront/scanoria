@@ -6,7 +6,11 @@ Lancé par scanoria-runner dans le conteneur jetable du module (image
 sonar-scanner-cli), rattaché au seul réseau interne du service SonarQube :
   1. attend que le serveur réponde UP (api/system/status) ;
   2. lance sonar-scanner sur /src (lecture seule), clé de projet fournie par
-     le runner (scanoria-<uuid court>), projet créé automatiquement ;
+     le runner (scanoria-<uuid court>), projet créé automatiquement ; JRE de
+     l'image (pas de téléchargement), extensions gardées d'une analyse à
+     l'autre dans le cache du projet (/cache, V10) et cache d'analyse de
+     SonarQube par branche (sonar.analysisCache.enabled) : seuls les fichiers
+     modifiés sont réanalysés en profondeur ;
   3. attend la tâche de calcul (api/ce/task) ;
   4. lit issues et hotspots ouverts (api/issues/search, api/hotspots/search),
      paginés et bornés, puis écrit le SARIF demandé en argument, par défaut
@@ -150,6 +154,15 @@ def target_params(target):
     return {}
 
 
+def cache_dir(work):
+    """SONAR_USER_HOME : le cache du projet monté par le runner (V10, scan.cache),
+    dont il ne garde que les extensions vérifiées ; sinon un cache jetable."""
+    d = os.environ.get("SCANORIA_CACHE_DIR", "")
+    if d == "/cache" and os.path.isdir(d) and os.access(d, os.W_OK):
+        return d
+    return os.path.join(work, "cache")
+
+
 def run_scanner(host, token, key, work, cache, deadline, target=None):
     os.makedirs(work, exist_ok=True)
     os.makedirs(cache, exist_ok=True)
@@ -171,6 +184,7 @@ def run_scanner(host, token, key, work, cache, deadline, target=None):
             "-Dsonar.working.directory=" + os.path.join(work, "scannerwork"),
             "-Dsonar.scm.disabled=true",
             "-Dsonar.scanner.skipJreProvisioning=true",
+            "-Dsonar.analysisCache.enabled=true",
             "-Dsonar.java.binaries=" + binaries,
             "-Dsonar.qualitygate.wait=false"] + target_args(target or {})
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "JAVA_HOME", "NODE_OPTIONS")}
@@ -295,7 +309,7 @@ def main(argv):
         where = (" pull request %s" % target["pr"]) if "pr" in target else \
             (" branch %s" % target["branch"]) if "branch" in target else " main branch"
         log("SonarQube %s is UP, analysing as %s,%s" % (version or "?", key, where))
-        task = run_scanner(host, token, key, work, os.path.join(work, "cache"), deadline, target)
+        task = run_scanner(host, token, key, work, cache_dir(work), deadline, target)
         wait_task(api, task, deadline)
         doc = export(api, key, version, target)
         tmp = os.path.join(OUT_DIR, ".result.sarif.tmp")

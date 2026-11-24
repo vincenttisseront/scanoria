@@ -151,6 +151,8 @@ export default {
     E_DTRACK_API: 'A Dependency-Track API call failed while setting it up.',
     E_SBOM_MISSING: 'No SBOM was produced in this scan (Syft module missing or failed): tool skipped.',
     E_EXPORT_FAILED: 'The database was updated, but its export for the console (EPSS, KEV) could not be written: check the appliance disk space. The console keeps the previous values.',
+    E_PREFETCH_FAILED: 'One or more module images could not be fetched: check access to the registry, or import an offline bundle.',
+    E_PREFETCH_UNKNOWN_IMAGE: 'Pinned version unknown to the signed catalog index, or different digest: image not fetched.',
     E_SERVICE_MISSING: 'The service this tool depends on is not installed, healthy and enabled.',
     E_SERVICE_TOKEN: 'The service analysis token is missing or unreadable: re-enable the service.',
     E_MODULE_INVALID: 'This module cannot be run by this appliance version: update the appliance.',
@@ -1124,6 +1126,18 @@ export default {
       title: 'Coverage',
       source: '{files} file(s) scanned, {skipped} skipped.',
       none: 'No coverage gap.',
+      excludedTitle: 'Common exclusions, not analysed (except by secrets and SAST modules, which see the whole tree)',
+      excluded: '{pattern}: {count} file(s)',
+      workdir: {
+        tmpfs: 'Sources extracted in memory.',
+        disk: 'Sources extracted on disk.',
+      },
+      mirror: {
+        hit: 'Commit already in the local Git mirror: the forge was not contacted.',
+        fetched: 'Local Git mirror updated: only new objects were fetched.',
+        created: 'Local Git mirror created by a first clone.',
+        ephemeral: 'Disposable clone, without a local mirror.',
+      },
     },
     gaps: {
       category: 'Category {category} not covered: {reason}.',

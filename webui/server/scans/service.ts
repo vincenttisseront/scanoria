@@ -17,6 +17,7 @@ import { runRecorrelation } from './recorrelate'
 import { purgeCache } from './orchestration'
 import type { Integrations } from './integrations'
 import { ScanWorker, type WorkerPaths } from './worker'
+import { LIVE_PROJECTS_EVERY_MS, publishLiveProjects } from './execution'
 import { UsageTask } from '../usage/samples'
 
 export interface ServiceOptions {
@@ -37,6 +38,7 @@ export class WorkerService {
   private timer: NodeJS.Timeout | undefined
   private lastSchedule = 0
   private lastPurge = 0
+  private lastLive = 0
   private lastCachePurge = 0
   private wake: (() => void) | null = null
   private readonly log: (msg: string) => void
@@ -76,6 +78,12 @@ export class WorkerService {
     if (now.getTime() - this.lastPurge >= 24 * 3600_000) {
       this.lastPurge = now.getTime()
       await this.worker.purgeOrphanLogs().catch(() => 0)
+    }
+    // 0.6 (V2, V10) : projets existants, pour la purge des miroirs et caches par le runner.
+    if (now.getTime() - this.lastLive >= LIVE_PROJECTS_EVERY_MS) {
+      this.lastLive = now.getTime()
+      await publishLiveProjects(this.opts.pool, this.opts.cfg.scansDir, now)
+        .catch((e: unknown) => this.log(`live projects not published: ${(e as Error).message}`))
     }
     await this.usage?.iterate(now)
     await this.heartbeat(now).catch(e => this.log(`heartbeat failed: ${(e as Error).message}`))

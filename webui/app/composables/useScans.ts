@@ -83,7 +83,12 @@ export interface ScanDetail extends ScanSummary {
     timeout_s: number
     created_at: string
   } | null
-  coverage: { gaps?: CoverageGap[], source?: { files: number, bytes: number, skipped: unknown[] } } & Record<string, unknown> | null
+  coverage: {
+    gaps?: CoverageGap[]
+    source?: { files: number, bytes: number, skipped: unknown[], workdir?: string, mirror?: string }
+    /** 0.6 (contrat 22) : exclusions communes, non analysées (G15). */
+    excluded?: { pattern: string, count: number }[]
+  } & Record<string, unknown> | null
   verdict_details: Record<string, unknown> | null
   requested_by_username: string | null
   by_api_token: boolean

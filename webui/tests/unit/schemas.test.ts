@@ -188,6 +188,10 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
     valid: [{ id: 'sonarqube' }],
     invalid: [{}, { id: 'Sonar' }, { id: '../sonarqube' }, { id: 'sonarqube', password: 'x' }],
   },
+  'prefetch-images': {
+    valid: [{}, { pins: [{ module_id: 'gitleaks', version: '8.30.1', image_digest: `sha256:${'a'.repeat(64)}` }] }],
+    invalid: [{ pins: [{ module_id: 'gitleaks', version: '8.30.1', image_digest: 'sha256:abc' }] }, { pins: [{ module_id: '../x', version: '1', image_digest: `sha256:${'a'.repeat(64)}` }] }, { image: 'docker.io/x' }],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {

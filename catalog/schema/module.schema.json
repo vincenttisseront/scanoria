@@ -624,6 +624,10 @@
           ],
           "description": "Module d'appoint (0.5) : planifié seulement quand un autre module du plan couvre cette catégorie (reach-index avec sca, pour I11) ; jamais compté dans la couverture (G15), et son échec ne rend pas le verdict non concluant (G13). Il ne produit aucun résultat d'analyse."
         },
+        "cache": {
+          "enum": ["sonar-plugins"],
+          "description": "V10 (0.6) : cache persistant du module, propre au projet, monté sur /cache (variable SCANORIA_CACHE_DIR). Après chaque passage, le runner ne garde que ce que la politique autorise et dont il a vérifié l'empreinte (sonar-plugins : cache/<MD5 ou SHA-256>/<nom>.jar). Ignoré par les appliances antérieures à 0.6."
+        },
         "applies_to": {
           "type": "object",
           "additionalProperties": false,

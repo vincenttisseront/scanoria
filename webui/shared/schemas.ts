@@ -46,6 +46,7 @@ export const REQUEST_TYPES = [
   'restore-module',
   'reset-service-admin',
   'package-dates',
+  'prefetch-images',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -64,6 +65,7 @@ export const RESULT_CODES = [
   'E_SONAR_UNAVAILABLE', 'E_SONAR_ADMIN', 'E_SONAR_API',
   'E_DTRACK_UNAVAILABLE', 'E_DTRACK_ADMIN', 'E_DTRACK_API',
   'E_EXPORT_FAILED',
+  'E_PREFETCH_FAILED', 'E_PREFETCH_UNKNOWN_IMAGE',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 
@@ -138,6 +140,14 @@ export const requestParamSchemas = {
   'package-dates': z.strictObject({
     purls: z.array(z.string().min(5).max(1024).regex(/^pkg:[a-z][a-z0-9.+-]{0,31}\/\S+$/)).min(1).max(2000)
       .refine(a => new Set(a).size === a.length, 'duplicate purls'),
+  }),
+  // 0.6 (C, V1) : images des modules installés et des versions figées (G6) présentes.
+  'prefetch-images': z.strictObject({
+    pins: z.array(z.strictObject({
+      module_id: z.string().regex(MODULE_ID_RE),
+      version: z.string().regex(MODULE_VERSION_RE),
+      image_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    })).max(500).optional(),
   }),
   'install-modules': z.strictObject({
     modules: z.array(z.strictObject({

@@ -49,6 +49,9 @@ scan:
   refs: default-branch
   refs_feature: branches
   timeout_s: 1800
+  # V10 (0.6) : SONAR_USER_HOME gardé par projet (/cache) ; le runner n'en
+  # garde que les extensions dont il a vérifié l'empreinte.
+  cache: sonar-plugins
   exit_codes_ok: [0]
   severity_map:
     blocker: critical

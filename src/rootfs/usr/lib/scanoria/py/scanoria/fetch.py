@@ -283,22 +283,72 @@ def reset_network():
 # --------------------------------------------------------------------------
 
 # Script lancé par /bin/sh dans l'image git-fetch ; arguments : URL, ref,
-# commit attendu (ou vide), profondeur (« 1 » ou vide pour l'historique complet).
-# La source est dans /src, le dépôt dans /git (fichier /src/.git : « gitdir: /git »),
-# pour que les scanners sans historique ne voient jamais les objets Git.
+# commit attendu (ou vide), historique (« shallow » ou « full »), clé de la ref.
+# V2 (0.6) : /mirror est le miroir du projet (dépôt nu, préparé par le runner) ;
+# seuls les objets nouveaux sont récupérés, puis le commit est extrait dans
+# /src par read-tree et checkout-index avec un index temporaire (/tmp), sans
+# hook, filtre ni sous-module. Si le commit demandé est déjà dans le miroir
+# (avec l'historique voulu), la forge n'est pas contactée. En mode « full »,
+# /git est un dépôt dont les objets viennent du miroir (alternates vers
+# /mirror/objects, monté en lecture seule chez le scanner) : rien n'est copié.
+# Marqueurs : « scanoria=nospace » (code 75, tmpfs trop petit), « scanoria=corrupt »
+# (code 74, miroir à recréer), puis la dernière ligne « commit=… ».
 FETCH_SCRIPT = r"""set -eu
-url=$1; ref=$2; want=$3; depth=$4
-set -- ; [ -n "$depth" ] && set -- --depth="$depth"
-git init -q --separate-git-dir=/git /src
-cd /src
-git remote add origin "$url"
-git fetch -q --no-tags --no-recurse-submodules "$@" origin "$ref"
-git checkout -q --detach FETCH_HEAD
-if [ -n "$want" ] && [ "$(git rev-parse HEAD)" != "$want" ]; then
-  git fetch -q --no-tags --no-recurse-submodules "$@" origin "$want" || true
-  git checkout -q --detach "$want"
+url=$1; ref=$2; want=$3; mode=$4; key=$5
+export GIT_DIR=/mirror
+have() { git cat-file -e "$1^{commit}" 2>/dev/null; }
+shallow=; [ -f /mirror/shallow ] && shallow=1
+known=; git for-each-ref --count=1 --format=x refs/scanoria | grep -q x && known=1
+depth=
+if [ "$mode" = full ]; then
+  [ -n "$shallow" ] && depth=--unshallow
+elif [ -z "$known" ] || [ -n "$shallow" ]; then
+  depth=--depth=1
 fi
-echo "commit=$(git rev-parse HEAD)"
+fetch() {
+  d=$depth; [ "$d" = --unshallow ] && [ ! -f /mirror/shallow ] && d=
+  rc=0
+  git fetch -q --no-tags --no-recurse-submodules --no-auto-gc $d "$url" "$1" 2>/tmp/fetch.err || rc=$?
+  cat /tmp/fetch.err >&2
+  # Miroir abîmé, même si git a contourné l'erreur en récupérant à nouveau : recréé (code 74).
+  if grep -qiE 'bad object|corrupt|unable to read [0-9a-f]{40}|missing (blob|tree|commit)|did not send all necessary|bad pack|packfile|unpack-objects failed|index-pack failed' /tmp/fetch.err; then
+    echo scanoria=corrupt; exit 74
+  fi
+  [ "$rc" -eq 0 ]
+}
+commit=
+if [ -n "$want" ] && have "$want" && [ "$depth" != --unshallow ]; then
+  commit=$want
+  echo scanoria=mirror-hit
+else
+  fetch "$ref"
+  commit=$(git rev-parse --verify -q 'FETCH_HEAD^{commit}')
+  if [ -n "$want" ] && [ "$commit" != "$want" ]; then
+    have "$want" || fetch "$want" || true
+    if ! have "$want"; then echo "fatal: requested commit not found (did not match)" >&2; exit 1; fi
+    commit=$want
+  fi
+  echo scanoria=mirror-fetch
+fi
+git update-ref "refs/scanoria/$key" "$commit"
+extract() {
+  GIT_INDEX_FILE=/tmp/scanoria-index git read-tree "$commit" &&
+  GIT_INDEX_FILE=/tmp/scanoria-index git --work-tree=/src checkout-index -a -f
+}
+if ! extract 2>/tmp/extract.err; then
+  cat /tmp/extract.err >&2
+  if grep -qi 'no space left' /tmp/extract.err; then echo scanoria=nospace; exit 75; fi
+  echo scanoria=corrupt; exit 74
+fi
+rm -f /tmp/scanoria-index
+printf 'gitdir: /git\n' > /src/.git
+if [ "$mode" = full ]; then
+  mkdir -p /git/objects/info /git/refs/heads /git/refs/tags
+  printf '/mirror/objects\n' > /git/objects/info/alternates
+  printf '[core]\n\trepositoryformatversion = 0\n\tbare = false\n' > /git/config
+  printf '%s\n' "$commit" > /git/HEAD
+fi
+echo "commit=$commit"
 """
 
 # Configuration imposée à chaque appel de git (variables GIT_CONFIG_*), en plus
@@ -409,8 +459,44 @@ def _ca_bundle():
     return path if os.path.isfile(path) else None
 
 
-def fetch_git(job, ws, registry_modules, history, log_path, secrets):
-    """Clone la source dans ws/src (et ws/git) ; retourne le commit."""
+class NoSpace(SourceError):
+    """L'arbre ne tient pas dans le tmpfs de l'analyse (V9) : à extraire sur disque."""
+
+
+def _clear(d):
+    """Vide d sans le supprimer (point de montage tmpfs possible)."""
+    for n in os.listdir(d):
+        q = os.path.join(d, n)
+        if os.path.isdir(q) and not os.path.islink(q):
+            shutil.rmtree(q, ignore_errors=True)
+        else:
+            os.unlink(q)
+
+
+def _prepare_dirs(ws, history):
+    """ws/src (déjà créé et monté en tmpfs par le runner, ou créé ici) et ws/git."""
+    for d in ("src", "git"):
+        path = os.path.join(ws, d)
+        if d == "git" and history != "full":
+            continue
+        if os.path.isdir(path) and not os.path.islink(path):
+            _clear(path)
+        else:
+            os.mkdir(path, 0o700)
+        testbed._give_to_container(path)
+
+
+def fetch_git(job, ws, registry_modules, history, log_path, secrets, mirror=None, info=None,
+              extra_memory_mb=0):
+    """Met à jour le miroir du projet (V2) puis extrait le commit dans ws/src (et
+    ws/git pour l'historique complet) ; retourne le commit.
+
+    mirror : session gitmirror.Session déjà ouverte (verrou tenu par l'appelant) ;
+    sans elle, un miroir jetable dans ws/mirror. info reçoit « mirror » : hit
+    (commit déjà présent, forge non contactée), fetched (nouveaux objets seulement),
+    created (premier clone) ou ephemeral. extra_memory_mb : taille du tmpfs de
+    ws/src, dont les pages sont comptées au conteneur qui les écrit."""
+    from . import gitmirror
     src = job["source"]
     host, port = parse_url(src["url"])
     if not REF_RE.match(src["ref"]) or src["ref"].startswith("-") or ".." in src["ref"]:
@@ -421,21 +507,61 @@ def fetch_git(job, ws, registry_modules, history, log_path, secrets):
     m = _container_ready(registry_modules)
     addrs = resolve(host, port)
     ensure_network()
-    for d in ("src", "git"):
-        os.mkdir(os.path.join(ws, d), 0o700)
-        testbed._give_to_container(os.path.join(ws, d))
+    info = info if info is not None else {}
+    own = mirror is None
+    if own:
+        mirror = gitmirror.Session(None, src["url"], ws)
+        mirror.__enter__()
+    try:
+        for attempt in (0, 1):
+            _prepare_dirs(ws, history)
+            rc, out = _fetch_once(job, ws, m, host, port, addrs, history, want, log_path, secrets,
+                                  mirror.path, extra_memory_mb)
+            if rc == 74 and attempt == 0:
+                common.log("runner: git mirror unusable, recreated by a shallow clone")
+                mirror.recreate()
+                continue
+            break
+    finally:
+        if own:
+            mirror.__exit__(None, None, None)
+    if rc == 75:
+        raise NoSpace("E_SOURCE_NOSPACE", "infra", "the source does not fit in memory")
+    if rc == 74:
+        raise SourceError("E_GITMIRROR_CORRUPT", "infra", "the Git mirror of the project is corrupted")
+    if rc != 0:
+        code, cls, msg = _classify(_read_log(log_path))
+        raise SourceError(code, cls, msg)
+    # Dernière ligne « commit= » : le script l'écrit en dernier, après toute sortie de git.
+    found = re.findall(r"^commit=([0-9a-f]{40,64})$", out, re.M)
+    if not found:
+        raise SourceError("E_SOURCE_FETCH", "input", "fetched commit unknown")
+    if want and found[-1] != want:
+        raise SourceError("E_SOURCE_NOT_FOUND", "input", "requested commit not found")
+    hit = re.search(r"^scanoria=mirror-hit$", out, re.M) is not None
+    info["mirror"] = "ephemeral" if mirror.project_id is None else (
+        "hit" if hit else ("created" if mirror.state == "created" else "fetched"))
+    return found[-1]
+
+
+def _fetch_once(job, ws, m, host, port, addrs, history, want, log_path, secrets, mirror_path, extra_mb):
+    """Un passage du conteneur git-fetch ; (code de sortie, sortie)."""
+    from . import gitmirror
+    src = job["source"]
     cred_dir = _write_cred(job["id"], src.get("credential"))
     ip = _alloc_ip()
     name = "scanoria-fetch-%s" % job["id"][:8] + "-" + os.urandom(3).hex()
     env, secret_env = git_env(src.get("credential"))
-    mounts = [(os.path.join(ws, "src"), "/src", "rw"), (os.path.join(ws, "git"), "/git", "rw")]
+    mounts = [(mirror_path, "/mirror", "rw"), (os.path.join(ws, "src"), "/src", "rw")]
+    if history == "full":
+        mounts.append((os.path.join(ws, "git"), "/git", "rw"))
     if cred_dir:
         mounts.append((cred_dir, "/cred", "ro"))
     ca = _ca_bundle()
     if ca:
         mounts.append((ca, "/etc/scanoria-ca.crt", "ro"))
         env["GIT_SSL_CAINFO"] = "/etc/scanoria-ca.crt"
-    manifest = dict(m, resources={"min_ram_mb": FETCH_MEMORY_MB, "min_cpu": 1})
+    manifest = dict(m, resources={"min_ram_mb": FETCH_MEMORY_MB + max(0, int(extra_mb)), "min_cpu": 1})
     args = [a for a in testbed.confined_args(manifest, mounts, name=name) if a != "--network=none"]
     args += ["--network", NETWORK, "--ip", ip, "--dns=none", "--add-host", "%s:%s" % (host, addrs[0]),
              "--timeout", str(FETCH_TIMEOUT)]
@@ -443,15 +569,15 @@ def fetch_git(job, ws, registry_modules, history, log_path, secrets):
         args += ["--env", "%s=%s" % (k, env[k])]
     for k in sorted(secret_env):
         args += ["--env", k]           # valeur héritée de l'environnement : jamais dans l'argv
-    depth = "1" if history == "shallow" else ""
     args += ["--entrypoint", '["/bin/sh"]', m["image"], "-c", FETCH_SCRIPT, "git-fetch",
-             src["url"], src["ref"], want, depth]
+             src["url"], src["ref"], want, "full" if history == "full" else "shallow",
+             gitmirror.ref_key(src["ref"])]
     allowed = False
     try:
         allow(ip, addrs, port)
         allowed = True
         rc, out, timed_out = run_logged(args, log_path, FETCH_TIMEOUT + 60, secret_env, secrets,
-                                        watch=lambda: storage_check(ws))
+                                        watch=lambda: storage_check(ws, mirror_path))
     finally:
         if allowed:
             revoke(ip, addrs, port)
@@ -465,16 +591,7 @@ def fetch_git(job, ws, registry_modules, history, log_path, secrets):
         raise SourceError("E_SOURCE_TIMEOUT", "infra", "fetching the repository timed out")
     if rc in (125, 126, 127):
         raise SourceError("E_PODMAN", "infra", "the fetch container could not start (exit %d)" % rc)
-    if rc != 0:
-        code, cls, msg = _classify(_read_log(log_path))
-        raise SourceError(code, cls, msg)
-    # Dernière ligne « commit= » : le script l'écrit en dernier, après toute sortie de git.
-    found = re.findall(r"^commit=([0-9a-f]{40,64})$", out, re.M)
-    if not found:
-        raise SourceError("E_SOURCE_FETCH", "input", "fetched commit unknown")
-    if want and found[-1] != want:
-        raise SourceError("E_SOURCE_NOT_FOUND", "input", "requested commit not found")
-    return found[-1]
+    return rc, out
 
 
 def disk_free(path):
@@ -496,10 +613,14 @@ def tree_usage(root):
     return total
 
 
-def storage_check(ws):
+def storage_check(ws, mirror=None):
     """Borne le stockage d'une récupération en cours ; SourceError si elle doit s'arrêter."""
+    from . import gitmirror
     if disk_free(ws) < MIN_FREE_BYTES:
         return SourceError("E_DISK_FULL", "infra", "not enough free space left on the appliance")
+    if mirror and tree_usage(mirror) > gitmirror.MAX_MIRROR_BYTES:
+        return SourceError("E_SOURCE_TOO_LARGE", "input",
+                           "Git mirror exceeds %d GiB" % (gitmirror.MAX_MIRROR_BYTES >> 30))
     if tree_usage(ws) > MAX_CLONE_BYTES:
         return SourceError("E_SOURCE_TOO_LARGE", "input",
                            "repository exceeds %d GiB" % (MAX_CLONE_BYTES >> 30))
