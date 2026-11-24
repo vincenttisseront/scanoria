@@ -54,7 +54,10 @@ export async function dtrackProjectUrl(uuid: string, stateFile = getConfig().mod
   const state = await readModulesState(stateFile)
   const mod = state.modules.find(m => m.id === 'dependency-track' && m.enabled)
   const base = mod?.route?.url
-  return base ? `${base.replace(/\/+$/, '')}/projects/${uuid}` : null
+  if (!base) return null
+  let end = base.length
+  while (end > 0 && base[end - 1] === '/') end--
+  return `${base.slice(0, end)}/projects/${uuid}`
 }
 
 export async function sbomPage(db: Queryable, scan: { id: string, project_id: string, coverage: unknown }, query: SbomQuery, stateFile?: string): Promise<SbomPage> {

@@ -228,7 +228,7 @@ expect "espace de travail supprimé" "$(find "$SCANS/workspaces" -mindepth 1 | w
 # --- 4. Ingestion par la console ------------------------------------------------------------
 runuser -u postgres -- psql -X -q -c "ALTER USER postgres PASSWORD 'b19-live-postgres'" > /dev/null
 if (cd "$ROOT/webui" && DATABASE_URL="postgres://postgres:b19-live-postgres@127.0.0.1:5432/postgres" SCANORIA_SBOM_LIVE_RESULT="$RES" \
-	npx vitest run --project server tests/integration/sbom-live.test.ts); then
+	node_modules/.bin/vitest run --project server tests/integration/sbom-live.test.ts); then
 	ok "console : SBOM réel ingéré (sbom_components, lien Dependency-Track)"
 else
 	ko "console : ingestion du SBOM réel"

@@ -193,9 +193,11 @@ def inventory(doc, project_uuid, version):
 
 
 def main(argv):
-    if len(argv) != 2 or os.path.dirname(argv[1]) != OUT_DIR or os.path.dirname(argv[0]) != SBOM_DIR \
-            or not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", os.path.basename(argv[1])):
-        log("usage: dtrack_upload.py %s/sbom.cdx.json %s/<file>.cdx.json" % (SBOM_DIR, OUT_DIR))
+    # Chemins fixes : les arguments sont seulement comparés, jamais utilisés tels quels.
+    sbom_path = os.path.join(SBOM_DIR, "sbom.cdx.json")
+    out_path = os.path.join(OUT_DIR, "dtrack.cdx.json")
+    if argv != [sbom_path, out_path]:
+        log("usage: dtrack_upload.py %s %s" % (sbom_path, out_path))
         return 2
     host = os.environ.get("SCANORIA_SERVICE_URL", "")
     key = os.environ.get("SCANORIA_PROJECT_KEY", "")
@@ -217,7 +219,7 @@ def main(argv):
         budget = 840
     deadline = time.monotonic() + max(60, budget)
     try:
-        raw = read_sbom(argv[0])
+        raw = read_sbom(sbom_path)
         api = Api(host, token)
         version = wait_up(api, min(deadline, time.monotonic() + 300))
         log("Dependency-Track %s is up, sending the SBOM to %s %s" % (version or "?", key, ref))
@@ -234,7 +236,7 @@ def main(argv):
         tmp = os.path.join(OUT_DIR, ".dtrack.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False)
-        os.replace(tmp, argv[1])
+        os.replace(tmp, out_path)
         log("%d component(s) in Dependency-Track project %s" % (len(out["components"]), uuid))
         return 0
     except Failure as f:
