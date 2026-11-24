@@ -13,6 +13,8 @@ d'essai, disjoncteur, latence, journal des appels.
 interface ModelChoice { model: string, digest: string, reason: string }
 interface TaskState {
   kind: string
+  /** I7 : modèle d'embedding, choisi automatiquement. */
+  embedding?: boolean
   model: ModelChoice | null
   override: string | null
   testbed: { score: number, threshold: number, passed: boolean, at: string } | null
@@ -477,7 +479,12 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
                   v-if="isAdmin"
                   class="py-2"
                 >
+                  <span
+                    v-if="task.embedding"
+                    class="text-xs text-muted"
+                  >{{ t('ai.models.embeddingAuto') }}</span>
                   <USelect
+                    v-else
                     :model-value="task.override ?? AUTO"
                     :items="modelItems(task)"
                     :loading="savingKind === task.kind"
@@ -492,7 +499,7 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
         <p class="mt-4 text-sm">
           <span class="text-muted">{{ t('ai.models.embedding') }} : </span>
           <span v-if="info.embedding"><span class="font-mono">{{ info.embedding.model }}</span> ({{ reasonLabel(info.embedding.reason) }})</span>
-          <span v-else>{{ t('ai.models.noEmbedding') }}</span>
+          <span v-else>{{ t('ai.models.noEmbedding') }} {{ t('ai.models.noEmbeddingSimilar') }}</span>
         </p>
       </UCard>
 
@@ -703,6 +710,9 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
             <li>{{ t('ai.activation.sent4') }}</li>
             <li>{{ t('ai.activation.sent5') }}</li>
             <li>{{ t('ai.activation.sent6') }}</li>
+            <li>{{ t('ai.activation.sent7') }}</li>
+            <li>{{ t('ai.activation.sent8') }}</li>
+            <li>{{ t('ai.activation.sent9') }}</li>
             <li>{{ t('ai.activation.sent3') }}</li>
           </ul>
         </div>

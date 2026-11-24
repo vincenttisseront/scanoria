@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Vincent Tisseront
 //
 // Client de l'API HTTP d'Ollama (/api/version, /api/tags, /api/show,
-// /api/chat), utilisé seulement par le service scanoria-ai (CLAUDE.md § 3.5).
+// /api/chat, /api/embed), utilisé seulement par le service scanoria-ai (CLAUDE.md § 3.5).
 // La connexion part toujours vers une adresse épinglée par le helper : le nom
 // n'est jamais résolu ici (pas de rebond DNS), il ne sert qu'à l'en-tête Host
 // et au nom TLS. Le corps d'une requête de chat est construit champ par
@@ -49,7 +49,32 @@ export interface ChatResult {
   durationMs: number
 }
 
+export interface EmbedResult {
+  embeddings: number[][]
+  bytesSent: number
+  durationMs: number
+}
+
 const MAX_RESPONSE = 4 * 1024 * 1024
+/** Bornes d'un vecteur (ai_embeddings.vector, migration 009). */
+export const EMBED_MIN_DIMS = 8
+export const EMBED_MAX_DIMS = 8192
+// 16 vecteurs de 8192 dimensions tiennent dans MAX_RESPONSE.
+export const EMBED_MAX_INPUTS = 16
+
+/** Vecteurs d'une réponse /api/embed : un par entrée, mêmes dimensions, nombres finis. */
+export function parseEmbeddings(json: unknown, expected: number): number[][] {
+  const list = (json as { embeddings?: unknown })?.embeddings
+  if (!Array.isArray(list) || list.length !== expected) throw new OllamaError('protocol', 'invalid embeddings')
+  const dims = Array.isArray(list[0]) ? list[0].length : 0
+  if (dims < EMBED_MIN_DIMS || dims > EMBED_MAX_DIMS) throw new OllamaError('protocol', 'invalid embedding size')
+  for (const v of list) {
+    if (!Array.isArray(v) || v.length !== dims || !v.every(x => typeof x === 'number' && Number.isFinite(x))) {
+      throw new OllamaError('protocol', 'invalid embedding vector')
+    }
+  }
+  return list as number[][]
+}
 
 /** Recherche de nom figée sur les adresses épinglées (aucune requête DNS). */
 export function pinnedLookup(addresses: string[]): LookupFunction {
@@ -188,5 +213,13 @@ export class OllamaClient {
     const content = (json as { message?: { content?: unknown } }).message?.content
     if (typeof content !== 'string') throw new OllamaError('protocol', 'missing message content')
     return { content, bytesSent, durationMs: Date.now() - started }
+  }
+
+  /** Embeddings (I7) : une liste de textes déjà masqués, un vecteur par texte. */
+  async embed(model: string, input: string[], timeoutMs: number): Promise<EmbedResult> {
+    if (input.length === 0 || input.length > EMBED_MAX_INPUTS) throw new OllamaError('protocol', 'invalid embed batch')
+    const started = Date.now()
+    const { json, bytesSent } = await this.request('POST', '/api/embed', { model, input, truncate: true, keep_alive: '10m' }, timeoutMs)
+    return { embeddings: parseEmbeddings(json, input.length), bytesSent, durationMs: Date.now() - started }
   }
 }

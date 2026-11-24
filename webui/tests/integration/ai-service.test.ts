@@ -158,7 +158,8 @@ describe.skipIf(!DATABASE_URL)('service scanoria-ai (PostgreSQL réel, faux Olla
     expect(probe.selection.embedding).toMatchObject({ model: 'embed-test:latest' })
     const tb = (await pool.query(`SELECT subject_id, output FROM ai_tasks WHERE kind = 'testbed' AND status = 'done' ORDER BY subject_id`)).rows
     expect(tb.map(r => [r.subject_id, r.output.passed])).toEqual([
-      ['classify-secret', true], ['diagnose-scan', true], ['explain-finding', true], ['explain-verdict', true],
+      ['assess-reachability', true], ['classify-secret', true], ['diagnose-scan', true], ['embed-finding', true],
+      ['explain-finding', true], ['explain-license', true], ['explain-verdict', true],
       ['summarize-scan', true], ['translate-rule', true], ['triage-finding', true],
     ])
     const t = await task(id!)

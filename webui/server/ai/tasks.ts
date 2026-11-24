@@ -6,7 +6,8 @@
 //   ici, impact, correction, références ;
 // - explain-verdict (I9) : pourquoi le quality gate bloque, à partir de
 //   verdict_details SEULEMENT, et ce qui le débloquerait.
-// Celles de la 0.4 (I3, I5, I14, I15, I17) sont dans server/ai/tasks/.
+// Celles de la 0.4 (I3, I5, I14, I15, I17) et de la 0.5 (I7, I11, I18) sont
+// dans server/ai/tasks/.
 // Briques communes et garde-fous : server/ai/task-kit.ts.
 
 import { z } from 'zod'
@@ -19,6 +20,9 @@ import { summarizeScan } from './tasks/summary'
 import { classifySecret } from './tasks/secret'
 import { diagnoseScan } from './tasks/diagnose'
 import { translateRule } from './tasks/translate'
+import { embedFinding } from './tasks/similar'
+import { assessReachability } from './tasks/reach'
+import { explainLicense } from './tasks/license'
 
 export type { FindingInput, TaskContext, TaskDefinition } from './task-kit'
 
@@ -144,9 +148,13 @@ export const explainVerdict: TaskDefinition<VerdictInput, ExplainVerdictOutput> 
 }
 
 export const TASKS: Record<string, TaskDefinition> = Object.fromEntries(
-  [explainFinding, explainVerdict, triageFinding, summarizeScan, classifySecret, diagnoseScan, translateRule]
+  [explainFinding, explainVerdict, triageFinding, summarizeScan, classifySecret, diagnoseScan, translateRule,
+    embedFinding, assessReachability, explainLicense]
     .map(d => [d.kind, d as unknown as TaskDefinition]),
 )
 export const TASK_KINDS = Object.keys(TASKS)
+/** Tâches de rédaction (modèle de chat) ; les tâches d'embedding (I7) prennent le modèle d'embedding. */
+export const COMPLETION_KINDS = TASK_KINDS.filter(k => !TASKS[k]!.embed)
+export const EMBED_KINDS = TASK_KINDS.filter(k => !!TASKS[k]!.embed)
 /** Tâches du service lui-même (sans sujet en base). */
 export const SERVICE_KINDS = ['probe', 'testbed'] as const

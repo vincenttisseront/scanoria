@@ -66,6 +66,13 @@ export interface GateInput {
   modules: GateModule[]
   /** Modules figés dans le plan (G11) : un module du plan sans ligne scan_modules est absent. */
   planModules?: string[]
+  /**
+   * 0.5 : modules d'appoint du plan (reason « companion », reach-index pour
+   * I11) ; leur échec est signalé sans bloquer : ils ne produisent aucun
+   * résultat et ne servent qu'à l'IA, dont l'indisponibilité ne rend jamais
+   * un verdict non concluant (CLAUDE.md § 3.5).
+   */
+  companionModules?: string[]
   findings: GateFinding[]
   exceptions: GateException[]
   coverage?: unknown
@@ -294,6 +301,10 @@ export function computeVerdict(input: GateInput): VerdictDetails {
   for (const m of [...input.modules, ...absent].sort((a, b) => a.module_id.localeCompare(b.module_id))) {
     const r = MODULE_REASON[m.status]
     if (!r) continue
+    if (input.companionModules?.includes(m.module_id)) {
+      infoReasons.push({ code: r.code, blocking: false, count: 1, severity: null, module: m.module_id, finding_ids: [], actions: [] })
+      continue
+    }
     const ex = exceptions.find(e => e.module === m.module_id)
     if (ex) applied.set(ex.source.id, ex.source)
     moduleReasons.push({ code: r.code, blocking: !ex, count: 1, severity: null, module: m.module_id, finding_ids: [], actions: ex ? [] : r.actions })
@@ -413,6 +424,16 @@ export function planModuleIds(plan: unknown): string[] {
   return [...new Set(ids.filter((id): id is string => !!id && /^[a-z0-9][a-z0-9-]{1,40}$/.test(id)))]
 }
 
+/** Modules d'appoint du plan (reason « companion », 0.5). */
+export function planCompanionIds(plan: unknown): string[] {
+  const list = (plan as { modules?: unknown } | null)?.modules
+  if (!Array.isArray(list)) return []
+  return list.flatMap((m) => {
+    const o = m as { id?: unknown, reason?: unknown } | null
+    return typeof o?.id === 'string' && o.reason === 'companion' ? [o.id] : []
+  })
+}
+
 /** Contrat 6 : évalue le quality gate d'une analyse (sans l'enregistrer : C le fait). */
 export async function evaluateGate(db: Queryable, scanId: string, now = new Date()): Promise<VerdictDetails> {
   const scan = await db.query<{ project_id: string, gate_id: string, plan: unknown, coverage: unknown, gate_rules: unknown, today: string, trigger: string, sbom_source: string | null }>(
@@ -449,6 +470,7 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
     rules,
     modules: modules.rows,
     planModules: planModuleIds(row.plan),
+    companionModules: planCompanionIds(row.plan),
     findings: findings.rows,
     exceptions: exceptions.rows,
     coverage: row.coverage,
