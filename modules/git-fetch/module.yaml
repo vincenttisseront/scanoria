@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module système git-fetch : récupération confinée des dépôts Git analysés
+# (ARCHITECTURE § 12.4). Il n'analyse rien : scanoria-runner l'utilise pour
+# cloner la source, sur un réseau limité à l'hôte de la forge, sans hook, filtre,
+# sous-module ni lien symbolique. Installé automatiquement comme dépendance des
+# scanners qui lisent un dépôt (requires.modules, G1) ; la catégorie « system »
+# l'exclut des profils et des analyses.
+# Image alpine/git v2.54.1 (index OCI multi-architecture, docker.io), relevée en
+# amont le 2026-11-24 ; licence de Git : GPL-2.0-only (COPYING du tag v2.54.1).
+# La configuration système de l'image (filtre git-lfs) est ignorée
+# (GIT_CONFIG_NOSYSTEM).
+id: git-fetch
+name: git-fetch
+description:
+  fr: Module système. Récupère les dépôts Git à analyser dans un conteneur confiné (aucun hook, réseau limité à la forge).
+  en: System module. Fetches the Git repositories to scan in a confined container (no hooks, network limited to the forge).
+type: scanner
+categories: [system]
+license:
+  spdx: GPL-2.0-only
+  url: https://github.com/git/git/blob/v2.54.1/COPYING
+  restrictions: none
+  verified_at: "2026-11-24"
+upstream:
+  homepage: https://git-scm.com
+  source: https://github.com/alpine-docker/git
+image: docker.io/alpine/git@sha256:29cff25811f790b9f72fc266bf8009a5a911714c0e03c31c47339c50909d9aef
+version: "2.54.1"
+resources: { min_ram_mb: 256, min_cpu: 1, disk_mb: 120 }
+hostname: null
+requires: { modules: [], feeds: [], appliance: ">=0.2.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo]
+  # Banc d'essai (F12) seulement : un dépôt est créé à partir de /src, servi par
+  # le transport local de Git (upload-pack), puis cloné en profondeur 1 avec la
+  # configuration imposée par le runner ; chaque fichier cloné et identique à
+  # l'original donne un résultat « git-clone ». La vraie récupération est lancée
+  # par scanoria-runner (fetch.py), jamais par une analyse.
+  command: ["/bin/sh", "-ec", "cp -R /src /tmp/o; cd /tmp/o; git init -q; git add -A; git commit -qm testbed; git clone -q --depth 1 --no-tags file:///tmp/o /tmp/c; cmp /src/README.md /tmp/c/README.md; test ! -e /tmp/c/.gitmodules; r=; for f in $(cd /tmp/c; find . -type f ! -path './.git/*'); do r=\"$r${r:+,}{\\\"ruleId\\\":\\\"git-clone\\\",\\\"message\\\":{\\\"text\\\":\\\"cloned\\\"}}\"; done; printf '{\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"git-fetch\"}},\"results\":[%s]}]}' \"$r\" > \"$1\"", "git-fetch", "/out/result.sarif"]
+  env:
+    HOME: /tmp
+    GIT_CONFIG_NOSYSTEM: "1"
+    GIT_CONFIG_GLOBAL: /dev/null
+    GIT_TERMINAL_PROMPT: "0"
+    GIT_CONFIG_COUNT: "8"
+    GIT_CONFIG_KEY_0: core.hooksPath
+    GIT_CONFIG_VALUE_0: /dev/null
+    GIT_CONFIG_KEY_1: core.symlinks
+    GIT_CONFIG_VALUE_1: "false"
+    GIT_CONFIG_KEY_2: protocol.allow
+    GIT_CONFIG_VALUE_2: never
+    GIT_CONFIG_KEY_3: protocol.file.allow
+    GIT_CONFIG_VALUE_3: always
+    GIT_CONFIG_KEY_4: submodule.recurse
+    GIT_CONFIG_VALUE_4: "false"
+    GIT_CONFIG_KEY_5: init.defaultBranch
+    GIT_CONFIG_VALUE_5: scanoria
+    GIT_CONFIG_KEY_6: user.name
+    GIT_CONFIG_VALUE_6: Scanoria
+    GIT_CONFIG_KEY_7: user.email
+    GIT_CONFIG_VALUE_7: testbed@exemple.test
+  timeout_s: 120
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/result.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    - { rule: git-clone, category: system, min: 3 }
+health: { command: ["git", "--version"] }
+upgrade: { policy: on-demand }

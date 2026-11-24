@@ -34,6 +34,12 @@ qui est risqué ou irréversible (licence restrictive, désinstallation).
 | `trivy` | scanner | sca, iac, container, secrets | 0.76.2 | Apache-2.0 | `trivy-db` |
 | `trivy-db` | feed | sca, container | format 2 | Apache-2.0 (données : conditions des sources) | — |
 | `osv-db` | feed | sca | format 1 | CC-BY-4.0 | — |
+| `git-fetch` | scanner (système) | system | 2.54.1 | GPL-2.0-only (Git) | — |
+
+`git-fetch` est un **module système** (catégorie `system`) : il n'analyse rien,
+n'entre dans aucun profil, et `scanoria-runner` l'utilise pour cloner les dépôts
+(§ 4.2). Les scanners qui lisent un dépôt le déclarent dans `requires.modules` :
+il est installé automatiquement avec eux (G1).
 
 Versions, empreintes d'images et licences relevées sur les dépôts amont le
 2026-11-24. Les trois outils produisent du SARIF 2.1.0 natif : aucun
@@ -84,8 +90,13 @@ Chaque propriété :
 Les traductions vont dans `options_i18n.<nom>.{fr,en}.{title,description}` ;
 `title` et `description` du schéma servent de repli.
 
-En 0.2, les options sont validées et enregistrées à l'installation ; le worker
-d'analyses (0.3) les applique à la commande.
+Les options sont validées et enregistrées à l'installation. À chaque analyse,
+`scanoria-runner` fusionne les options installées et celles de la tâche, les
+revalide contre ce schéma, puis remplace `{opt.<nom>}` dans `scan.command` (et
+`scan.history_command`) par la valeur : booléen `true`/`false`, liste jointe par
+des virgules, jeu de caractères `[A-Za-z0-9._,:=/@+-]` seulement, et jamais une
+valeur commençant par « - » à la place d'un argument qui n'en commençait pas un.
+Le banc d'essai (§ 5) utilise les valeurs par défaut.
 
 ## 4. Exécution d'un scanner (§ 6.4)
 
@@ -122,6 +133,75 @@ Disposition des bases fournies :
 
 En 0.2, les modules `feed` sont déclaratifs (manifeste seulement) : leur mise à
 jour planifiée et les lots hors ligne signés arrivent en 0.6 (§ 9).
+
+### 4.1 Historique Git et gravités (0.3)
+
+| Champ de `scan` | Défaut | Rôle |
+|---|---|---|
+| `history` | `shallow` | `full` : le scanner lit l'historique Git. Le runner fait alors un clone complet ; une option booléenne `history` à `false` le désactive pour un projet. |
+| `history_command` | — | argv lancé à la place de `command` quand l'historique est lu ; exige `history: full`. Le dépôt Git est monté en lecture seule sur `/git` (`/src/.git` contient `gitdir: /git`) ; sans historique, `/git` n'est pas monté. |
+| `severity_map` | — | gravité native → `critical`…`info`, lue par l'ingestion (G5). |
+
+gitleaks déclare `history: full` : `gitleaks git` parcourt tous les commits d'un
+dépôt, `gitleaks dir` reste utilisé pour une archive.
+
+### 4.2 scanoria-runner (ARCHITECTURE § 12)
+
+Service root, file `/var/lib/scanoria/scans/jobs/incoming/` alimentée par
+`scanoria-worker`. Pour chaque tâche :
+
+1. **Contrôles** : fichier régulier du compte `scanoria`, 0600, lien unique,
+   256 Kio au plus, JSON strict conforme à `scan-job.schema.json`, identifiant
+   égal au nom du fichier. Le fichier est déplacé dans `jobs/work/`, lu, puis
+   supprimé aussitôt. Refus : `result.json` avec `E_JOB_INVALID` (`input`).
+2. **Plan vérifié** : chaque module doit être sain, actif et à la version
+   demandée dans le registre ; image, commande, délai, limites, sorties et
+   bases viennent du manifeste. Absent : `missing` (`E_MODULE_MISSING`,
+   `input`) ; options hors schéma : `E_OPTIONS_INVALID` ; module système ou
+   entrée non lue (`repo`, `archive`) : refusé ou `skipped`.
+3. **Source** (`fetch.py`) :
+   - dépôt Git : conteneur jetable de l'image `git-fetch`, sans capacité,
+     racine en lecture seule, utilisateur 65534, sur le réseau podman
+     `scanoria-fetch` (10.89.250.0/24, sans DNS) ; le runner résout lui-même
+     l'hôte de la forge (adresses de bouclage, lien local, multidiffusion et
+     réseau de récupération refusées), passe l'adresse par `--add-host`, et
+     ouvre dans la table nftables `inet scanoria_fetch` le seul triplet
+     (conteneur, forge, port) le temps du clone. Git sans configuration
+     système ni globale, `core.hooksPath=/dev/null`, `core.symlinks=false`,
+     protocoles `https` et `ssh` seulement, sans sous-module ni redirection,
+     `--no-tags`, profondeur 1 sauf historique. Jeton : variable
+     d'environnement héritée par podman (jamais dans l'argv ni l'URL), lue par
+     un assistant d'identification en ligne ; `GIT_ASKPASS=/bin/false`. Clé
+     SSH : tmpfs `/run/scanoria/runner-cred/<id>/`, 0400, avec `known_hosts`
+     strict. AC du système (`/etc/ssl/certs/ca-certificates.crt`) montée pour
+     les forges à certificat d'entreprise ;
+   - archive : seul fichier de `uploads/<upload_id>/` (`source.zip`,
+     `source.tar`, `source.tar.gz`), reconnu par son en-tête, extrait sans
+     lien ni fichier spécial (listés dans `source.skipped`) ; un chemin absolu
+     ou avec « .. » refuse l'archive (`E_ARCHIVE_UNSAFE`) ;
+   - bornes : 100 Mio par fichier (`size`), 4 Gio et 200 000 fichiers au total
+     (`limit`) ; les fichiers écartés sont supprimés et listés (G15).
+4. **Modules** : conteneur confiné (`testbed.confined_args`), sources en
+   lecture seule sur `/src`, `/out` propre au module ; durée, pic mémoire
+   (`memory.peak`) et temps CPU (`cpu.stat`) relevés dans le cgroup du
+   conteneur ; journal stdout+stderr borné à 1 Mio, jeton masqué.
+5. **Sorties** (G2) : lues sans suivre de lien, validées (SARIF 2.1.0 ou
+   CycloneDX), copiées dans `results/<id>/<module>/` (0640 root:scanoria) ;
+   `result.json` est écrit en dernier, validé contre `scan-result.schema.json`.
+
+Classes d'erreur (G12) :
+
+| Classe | Codes |
+|---|---|
+| `infra` (relancée par le worker) | `E_MODULE_TIMEOUT`, `E_MODULE_OOM`, `E_IMAGE_MISSING`, `E_PODMAN`, `E_RUNNER_RESTARTED`, `E_RUNNER_INTERNAL`, `E_SOURCE_NETWORK`, `E_SOURCE_TIMEOUT`, `E_SOURCE_RESOLVE`, `E_FETCH_NETWORK` |
+| `tool` | `E_TOOL_EXIT`, `E_INVALID_OUTPUT` |
+| `input` | `E_JOB_INVALID`, `E_MODULE_MISSING`, `E_MODULE_INVALID`, `E_OPTIONS_INVALID`, `E_INPUT_UNSUPPORTED`, `E_NETWORK_UNSUPPORTED`, `E_SOURCE_URL`, `E_SOURCE_REF`, `E_SOURCE_ADDRESS`, `E_SOURCE_AUTH`, `E_SOURCE_HOSTKEY`, `E_SOURCE_NOT_FOUND`, `E_SOURCE_FETCH`, `E_FETCH_MODULE_MISSING`, `E_ARCHIVE_MISSING`, `E_ARCHIVE_INVALID`, `E_ARCHIVE_UNSAFE` |
+
+Capacité : `/run/scanoria/runner.json` `{slots, busy, updated_at}`, avec
+`slots` = (RAM − 3 Go réservés − services permanents) ÷ max(limite du plus gros
+scanner actif, 1 Go du clone), borné à 1…8 et au nombre de CPU. Au démarrage,
+une tâche interrompue est publiée en `E_RUNNER_RESTARTED` ; les résultats sont
+purgés après 24 h. `scanoria-selftest` contrôle `runner.alive`.
 
 ## 5. Banc d'essai (F12)
 

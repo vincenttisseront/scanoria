@@ -1,0 +1,32 @@
+{
+ "version": "2.1.0",
+ "runs": [
+  {
+   "tool": {
+    "driver": {
+     "name": "git-fetch"
+    }
+   },
+   "results": [
+    {
+     "ruleId": "git-clone",
+     "message": {
+      "text": "cloned"
+     }
+    },
+    {
+     "ruleId": "git-clone",
+     "message": {
+      "text": "cloned"
+     }
+    },
+    {
+     "ruleId": "git-clone",
+     "message": {
+      "text": "cloned"
+     }
+    }
+   ]
+  }
+ ]
+}

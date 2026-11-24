@@ -24,7 +24,7 @@ image: ghcr.io/google/osv-scanner@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb302397
 version: "2.7.1"
 resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 200 }
 hostname: null
-requires: { modules: [], feeds: [osv-db], appliance: ">=0.2.0" }
+requires: { modules: [git-fetch], feeds: [osv-db], appliance: ">=0.2.0" }
 conflicts: []
 needs: { sysctl: {}, postgres: false }
 options:
