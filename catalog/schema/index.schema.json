@@ -1,0 +1,327 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scanoria:schema:catalog-index:1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront. Contrat : catalog/README.md.",
+  "title": "Index du catalogue Scanoria (catalog-index.json)",
+  "description": "Publié en release GitHub catalog-v<N> avec SHA256SUMS signé (Ed25519). Produit par catalog/build.py ; copie déployée dans /usr/share/scanoria/schemas/catalog-index.schema.json. Limité au sous-ensemble de scanoria/schema.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "generated_at",
+    "modules",
+    "packs"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 999999999
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "description": "Manifeste normalisé (modules/<id>/module.yaml, conforme à catalog/schema/module.schema.json, validé à la construction) plus testbed_archive et testbed_sha256. Seuls les champs dont dépend la sécurité de l'appliance sont contraints ici ; les autres restent ceux du manifeste.",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "version",
+          "license",
+          "requires",
+          "conflicts",
+          "testbed_archive",
+          "testbed_sha256"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "type": {
+            "enum": [
+              "scanner",
+              "service",
+              "feed",
+              "runner"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$"
+          },
+          "categories": {
+            "type": "array",
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,30}$"
+            }
+          },
+          "license": {
+            "type": "object",
+            "required": [
+              "spdx",
+              "restrictions"
+            ],
+            "properties": {
+              "spdx": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 500
+              },
+              "restrictions": {
+                "enum": [
+                  "none",
+                  "private-code-forbidden",
+                  "no-redistribution",
+                  "other"
+                ]
+              }
+            }
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 300,
+            "pattern": "^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?(/[a-z0-9][a-z0-9._-]*)+@sha256:[0-9a-f]{64}$"
+          },
+          "hostname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+          },
+          "requires": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "modules",
+              "feeds"
+            ],
+            "properties": {
+              "modules": {
+                "type": "array",
+                "maxItems": 100,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+                }
+              },
+              "feeds": {
+                "type": "array",
+                "maxItems": 100,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+                }
+              },
+              "appliance": {
+                "type": "string",
+                "pattern": "^>=(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$"
+              }
+            }
+          },
+          "conflicts": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+            }
+          },
+          "options": {
+            "type": "object"
+          },
+          "testbed": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "testbed_archive": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^testbed-[a-z0-9][a-z0-9-]{1,40}-[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}\\.tar\\.zst$"
+          },
+          "testbed_sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "testbed"
+              ],
+              "properties": {
+                "testbed": {
+                  "type": "object"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "testbed_archive": {
+                  "type": "string"
+                },
+                "testbed_sha256": {
+                  "type": "string"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "testbed_archive": {
+                  "type": "null"
+                },
+                "testbed_sha256": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "scanner",
+                    "service",
+                    "runner"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "image"
+              ],
+              "properties": {
+                "image": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "scanner"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "testbed"
+              ],
+              "properties": {
+                "testbed": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "service"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "hostname"
+              ],
+              "properties": {
+                "hostname": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "packs": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "modules",
+          "technologies"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "modules": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+            },
+            "minItems": 1
+          },
+          "technologies": {
+            "type": "array",
+            "maxItems": 30,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9.+-]{0,30}$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

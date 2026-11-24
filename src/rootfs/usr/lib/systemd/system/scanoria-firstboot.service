@@ -7,8 +7,11 @@
 [Unit]
 Description=Scanoria first boot assistant
 ConditionPathExists=!/var/lib/scanoria/firstboot.done
-After=systemd-user-sessions.service plymouth-quit-wait.service cloud-final.service systemd-sysusers.service systemd-tmpfiles-setup.service
-Wants=cloud-final.service
+# Après les étapes de cloud-init qui créent les comptes (sysadmin), mais pas
+# après cloud-final : celui-ci suit multi-user.target, qui attend cet assistant
+# (cycle d'ordonnancement, systemd supprimerait alors l'assistant au démarrage).
+After=systemd-user-sessions.service plymouth-quit-wait.service cloud-init.service cloud-init-network.service cloud-config.service systemd-sysusers.service systemd-tmpfiles-setup.service
+Wants=cloud-config.service
 Before=getty@tty1.service
 
 [Service]

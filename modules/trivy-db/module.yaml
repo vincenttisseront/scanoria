@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Base de vulnérabilités de Trivy (module feed). En 0.2, manifeste seulement :
+# il rend « requires.feeds » vérifiable ; la mise à jour planifiée et l'import
+# d'un lot hors ligne signé arrivent en 0.6 (CLAUDE.md § 9). Licence relevée
+# le 2026-11-24 sur le dépôt amont.
+id: trivy-db
+name: Trivy DB
+description:
+  fr: Base de vulnérabilités hors ligne de Trivy (format trivy-db v2).
+  en: Trivy offline vulnerability database (trivy-db v2 format).
+type: feed
+categories: [sca, container]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/aquasecurity/trivy-db/blob/main/LICENSE
+  restrictions: none
+  verified_at: "2026-11-24"
+  notes: Code sous Apache-2.0 ; les avis agrégés gardent les conditions de leurs sources (NVD, GHSA, distributions).
+upstream:
+  homepage: https://trivy.dev
+  source: https://github.com/aquasecurity/trivy-db
+version: "2"
+resources: { min_ram_mb: 16, min_cpu: 0.1, disk_mb: 1500 }
+hostname: null
+requires: { modules: [], feeds: [], appliance: ">=0.2.0" }
+conflicts: []
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+feed:
+  format: trivy-db
+  mount: /feeds/trivy-db
+  max_age_days: 7
+  source: { kind: oci, ref: "mirror.gcr.io/aquasec/trivy-db:2" }
+  schedule: daily

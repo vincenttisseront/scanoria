@@ -20,8 +20,9 @@ export PYTHONDONTWRITEBYTECODE=1
 [[ "$(id -u)" -eq 0 ]] || { echo "b12-live : root requis (podman réel)" >&2; exit 2; }
 for t in python3 jq openssl zstd tar podman; do command -v "$t" > /dev/null || { echo "outil manquant : $t" >&2; exit 2; }; done
 
-# gitleaks, relevé en amont le 2026-11-24 (ghcr.io/gitleaks/gitleaks, tag v8.30.1, licence MIT).
-GITLEAKS_IMAGE="ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
+# gitleaks v8.30.1, relevé en amont le 2026-11-24 (ghcr.io/gitleaks/gitleaks, licence MIT) ;
+# référence par empreinte seule, comme l'exige le schéma réel de l'index.
+GITLEAKS_IMAGE="ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HELPER="$ROOT/src/rootfs/usr/sbin/scanoria-helper"
@@ -45,8 +46,7 @@ export SCANORIA_TEST_ROOT="$T" SCANORIA_TEST_BIN="$STUBS"
 echo 0.2.0 > "$T/opt/scanoria/current/VERSION"
 mkdir -p "$T/proc" && cp /proc/meminfo "$T/proc/meminfo" && grep '^processor' /proc/cpuinfo > "$T/proc/cpuinfo"
 echo '{"repo": "exemple/scanoria"}' > "$T/etc/scanoria/catalog.json"
-echo '{"type": "object", "required": ["schema", "version", "modules", "packs"]}' \
-	> "$T/usr/share/scanoria/schemas/catalog-index.schema.json"
+# Schéma réel de l'index (catalog-index.schema.json du dépôt), sans substitut.
 openssl genpkey -algorithm ed25519 -out "$TMP/sign.key" 2> /dev/null
 openssl pkey -in "$TMP/sign.key" -pubout -out "$T/etc/scanoria/update-pubkey.pem"
 

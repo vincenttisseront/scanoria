@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scanoria:schema:test-module:1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront. Schéma de remplacement pour b11 (le vrai : catalog/schema/module.schema.json).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "type", "version", "license", "categories"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"},
+    "name": {"type": "string", "minLength": 1},
+    "type": {"enum": ["scanner", "service", "feed", "runner"]},
+    "categories": {"type": "array", "items": {"type": "string"}},
+    "license": {"type": "object"},
+    "upstream": {"type": "object"},
+    "image": {"type": "string", "pattern": "@sha256:[0-9a-f]{64}$"},
+    "version": {"type": "string"},
+    "resources": {"type": "object"},
+    "hostname": {"type": ["string", "null"]},
+    "needs": {"type": "object"},
+    "requires": {"type": "object"},
+    "conflicts": {"type": "array"},
+    "options": {"type": "object"},
+    "scan": {"type": ["object", "null"]},
+    "outputs": {"type": "object"},
+    "service": {"type": ["object", "null"]},
+    "health": {"type": "object"},
+    "upgrade": {"type": "object"},
+    "testbed": {"type": "object"}
+  }
+}

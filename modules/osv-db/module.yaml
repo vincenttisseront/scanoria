@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Base OSV hors ligne pour OSV-Scanner (module feed). En 0.2, manifeste
+# seulement ; mise à jour et lots hors ligne en 0.6 (CLAUDE.md § 9).
+# Disposition attendue : /feeds/osv-db/osv-scalibr/<écosystème>/all.zip.
+# Licence relevée le 2026-11-24.
+id: osv-db
+name: OSV DB
+description:
+  fr: Base de vulnérabilités OSV hors ligne, par écosystème.
+  en: Offline OSV vulnerability database, per ecosystem.
+type: feed
+categories: [sca]
+license:
+  spdx: CC-BY-4.0
+  url: https://google.github.io/osv.dev/data/#data-dumps
+  restrictions: none
+  verified_at: "2026-11-24"
+  notes: Données OSV.dev en CC-BY-4.0 ; certaines sources gardent leurs propres conditions (voir la documentation OSV).
+upstream:
+  homepage: https://osv.dev
+  source: https://github.com/google/osv.dev
+version: "1"
+resources: { min_ram_mb: 16, min_cpu: 0.1, disk_mb: 2000 }
+hostname: null
+requires: { modules: [], feeds: [], appliance: ">=0.2.0" }
+conflicts: []
+options:
+  type: object
+  additionalProperties: false
+  properties:
+    ecosystems:
+      type: array
+      default: [npm, PyPI, Go, Maven, crates.io, NuGet, RubyGems, Packagist]
+      minItems: 1
+      uniqueItems: true
+      items: { type: string, pattern: "^[A-Za-z0-9.:-]{1,40}$" }
+      title: Écosystèmes
+      description: Écosystèmes dont la base est téléchargée.
+options_i18n:
+  ecosystems:
+    fr: { title: Écosystèmes, description: Écosystèmes dont la base est téléchargée. }
+    en: { title: Ecosystems, description: Ecosystems whose database is downloaded. }
+feed:
+  format: osv-zip
+  mount: /feeds/osv-db
+  max_age_days: 7
+  source: { kind: https, ref: "https://osv-vulnerabilities.storage.googleapis.com/{ecosystem}/all.zip" }
+  schedule: daily

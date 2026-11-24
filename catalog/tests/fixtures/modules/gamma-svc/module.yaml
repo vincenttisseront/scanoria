@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Service fictif (jeu d'essai du catalogue).
+id: gamma-svc
+name: Gamma Service
+type: service
+categories: [quality]
+license: { spdx: LGPL-3.0-only, restrictions: none }
+image: registry.exemple.test/outils/gamma@sha256:1111111111111111111111111111111111111111111111111111111111111111
+version: "10.0.0"
+hostname: gamma
+requires: { modules: [alpha-scan] }
+conflicts: []
+service: { port: 9000, health_path: /api/health, units: [gamma.container] }
+testbed:
+  path: testbed
+  expect: [{ category: quality, min: 1 }]

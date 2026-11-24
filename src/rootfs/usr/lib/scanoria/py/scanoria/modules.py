@@ -466,6 +466,9 @@ def route(reg):
     except ImportError:
         common.log("routing module not available: name-based routing not applied")
         return
+    if not services and routing.appliance_fqdn() is None:
+        # Aucun service et pas encore de nom (premier démarrage) : rien à aiguiller.
+        return
     res = routing.apply(None, services) or []
     by_id = {r["id"]: r for r in res if isinstance(r, dict) and isinstance(r.get("id"), str)}
     for k, e in reg["modules"].items():

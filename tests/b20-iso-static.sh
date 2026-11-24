@@ -105,6 +105,7 @@ refuse "aucun mot de passe en clair dans src/iso" grep -rniE '(^|[[:space:]])(pa
 	"$ROOT/src/iso/autoinstall"
 # Seul l'identifiant technique de la source d'installation (id: ubuntu-server) est admis.
 refuse "aucune mention d'Ubuntu (user-data, grub.cfg)" bash -c 'grep -hi ubuntu "$1" "$2" | grep -vqE "^[[:space:]]+id: ubuntu-server$"' _ "$UD" "$ROOT/src/iso/grub/grub.cfg"
+check "late-install : locale en_US.UTF-8 générée (createdb --locale)" grep -q "in_target locale-gen en_US.UTF-8" "$ROOT/src/iso/scripts/late-install.sh"
 check "grub.cfg : autoinstall nocloud" grep -q 'autoinstall ds=nocloud\\;s=/cdrom/nocloud/' "$ROOT/src/iso/grub/grub.cfg"
 check "grub.cfg : noyau et initrd" grep -qE '^\s*initrd\s+/casper/initrd' "$ROOT/src/iso/grub/grub.cfg"
 

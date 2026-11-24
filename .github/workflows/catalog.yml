@@ -1,0 +1,287 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Index du catalogue (CLAUDE.md § 4.3 et § 10, catalog/README.md), publié
+# indépendamment de la console.
+#   - Sur PR : construction (deux fois, mêmes octets attendus) et vérification
+#     de l'index ; si modules/ ou catalog/ change alors que catalog/VERSION de
+#     la base est déjà publié (tag catalog-v<N>), le numéro doit augmenter.
+#   - Sur main : si le tag catalog-v<N> n'existe pas encore, construction,
+#     attente de ci-ok sur le commit, puis signature de SHA256SUMS dans
+#     l'environment « release » (même clé et même script que release.yml), puis
+#     release catalog-v<N> marquée « not latest » (releases/latest reste la
+#     console). Un numéro publié n'est jamais reconstruit ; si le contenu
+#     construit diffère de catalog-v<N> déjà publié (hors date), le travail
+#     échoue : il faut augmenter catalog/VERSION.
+name: Catalog
+
+on:
+  pull_request:
+    paths:
+      - modules/**
+      - catalog/**
+      - src/rootfs/usr/lib/scanoria/py/scanoria/schema.py
+      - update-pubkey.pem
+      - .github/workflows/catalog.yml
+  push:
+    branches: [main]
+    paths:
+      - modules/**
+      - catalog/**
+      - src/rootfs/usr/lib/scanoria/py/scanoria/schema.py
+      - update-pubkey.pem
+      - .github/workflows/catalog.yml
+  workflow_dispatch:
+
+concurrency:
+  group: catalog-${{ github.event.pull_request.number || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  build:
+    name: construction de l'index
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.build.outputs.version }}
+      publish: ${{ steps.publish.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Dépendances (python3-yaml, zstd)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends python3-yaml zstd jq
+      - name: Numéro augmenté si modules/ ou catalog/ change après publication
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base=$(git show "$BASE_SHA:catalog/VERSION" 2>/dev/null | tr -d '[:space:]' || true)
+          head=$(tr -d '[:space:]' < catalog/VERSION)
+          if [ -z "$base" ]; then
+            echo "catalog/VERSION absent de la base : premier index ($head)"; exit 0
+          fi
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/catalog-v$base" > /dev/null || rc=$?
+          case "$rc" in
+            0) ;;
+            2) echo "catalog-v$base pas encore publié : numéro $head accepté"; exit 0 ;;
+            *) echo "::error::lecture des tags impossible (code $rc)"; exit 1 ;;
+          esac
+          changed=$(git diff --name-only "$BASE_SHA" HEAD -- modules catalog \
+            | grep -vE '^catalog/(tests/|README\.md$)' || true)
+          if [ -n "$changed" ] && [ "$head" -le "$base" ]; then
+            echo "::error::modules/ ou catalog/ change et catalog-v$base est publié : passer catalog/VERSION à $((base + 1))"
+            echo "$changed"
+            exit 1
+          fi
+          echo "catalog/VERSION : $base → $head"
+      - id: build
+        name: Construction (deux fois, octets identiques)
+        run: |
+          if ! compgen -G 'modules/*/module.yaml' > /dev/null; then
+            echo "::notice::aucun modules/*/module.yaml : rien à construire"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          python3 -I catalog/build.py build --out out/catalog
+          python3 -I catalog/build.py build --out "$RUNNER_TEMP/again"
+          diff -r out/catalog "$RUNNER_TEMP/again"
+          v=$(tr -d '[:space:]' < catalog/VERSION)
+          python3 -I catalog/build.py verify out/catalog --no-signature --expect-version "$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Catalogue $v"
+            echo
+            jq -r '"Modules : \([.modules[] | "\(.id) \(.version)"] | join(", "))", "Packs : \([.packs[].id] | join(", "))"' out/catalog/catalog-index.json
+          } >> "$GITHUB_STEP_SUMMARY"
+      - id: publish
+        name: Publication à faire (main, tag absent)
+        env:
+          VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          p=false
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$GITHUB_REF" = "refs/heads/main" ] && [ -n "$VERSION" ]; then
+            rc=0
+            git ls-remote --exit-code --tags origin "refs/tags/catalog-v$VERSION" > /dev/null || rc=$?
+            case "$rc" in
+              2) p=true ;;
+              0)
+                # Déjà publié : jamais reconstruit. Le contenu construit doit
+                # être celui de la release (date mise à part), sinon un
+                # changement resterait sans publication.
+                pub="https://github.com/$GITHUB_REPOSITORY/releases/download/catalog-v$VERSION"
+                curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/pub-index.json" \
+                  "$pub/catalog-index.json"
+                if ! diff <(jq -S 'del(.generated_at)' "$RUNNER_TEMP/pub-index.json") \
+                          <(jq -S 'del(.generated_at)' out/catalog/catalog-index.json) > /dev/null; then
+                  echo "::error::le contenu du catalogue a changé mais catalog-v$VERSION est déjà publié : passer catalog/VERSION à $((VERSION + 1))"
+                  exit 1
+                fi
+                echo "::notice::catalog-v$VERSION déjà publié avec ce contenu : rien à faire" ;;
+              *) echo "::error::lecture des tags impossible (code $rc)"; exit 1 ;;
+            esac
+          fi
+          echo "publish=$p" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.publish.outputs.publish == 'true'
+        with:
+          name: catalog-unsigned
+          path: out/catalog/
+          if-no-files-found: error
+          retention-days: 7
+
+  # CLAUDE.md § 16 : jamais de publication sans CI verte (même attente que release.yml).
+  ci-green:
+    name: CI verte sur le commit (ci-ok)
+    needs: [build]
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      checks: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Attente de ci-ok réussi sur ce commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/wait-ci-ok.sh 170
+
+  sign:
+    name: signature de l'index
+    needs: [build, ci-green]
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Publication réservée à main
+        if: github.ref != 'refs/heads/main'
+        run: exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            catalog
+            src/rootfs/usr/lib/scanoria/py
+            update-pubkey.pem
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: catalog-unsigned
+          path: dist
+      - name: Signature de SHA256SUMS (Ed25519 brute, sign-assets.sh)
+        env:
+          SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: .github/scripts/sign-assets.sh update-pubkey.pem dist/SHA256SUMS
+      - name: Vérification avec update-pubkey.pem versionné
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: python3 -I catalog/build.py verify dist --pubkey update-pubkey.pem --expect-version "$VERSION"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: catalog-signed
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: publication de catalog-v${{ needs.build.outputs.version }}
+    needs: [build, ci-green, sign]
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Publication réservée à main
+        if: github.ref != 'refs/heads/main'
+        run: exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            catalog
+            src/rootfs/usr/lib/scanoria/py
+            update-pubkey.pem
+          sparse-checkout-cone-mode: false
+      - name: zstd
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends zstd
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: catalog-signed
+          path: dist
+      - name: Vérification complète avant publication
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: python3 -I catalog/build.py verify dist --pubkey update-pubkey.pem --expect-version "$VERSION"
+      - name: Numéro toujours libre (brouillons compris)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/catalog-v$VERSION" > /dev/null; then
+            echo "::error::le tag catalog-v$VERSION existe déjà"; exit 1
+          fi
+          n=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq "[.[] | select(.tag_name == \"catalog-v$VERSION\")] | length" | awk '{s += $1} END {print s + 0}')
+          if [ "$n" -ne 0 ]; then
+            echo "::error::une release catalog-v$VERSION existe déjà (brouillon compris)"; exit 1
+          fi
+      - name: Release catalog-v${{ needs.build.outputs.version }} (not latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          {
+            echo "Index du catalogue Scanoria n° $VERSION, publié indépendamment de la console."
+            echo
+            jq -r '"Modules : \([.modules[] | "`\(.id)` \(.version)"] | join(", "))", "", "Packs : \([.packs[].id] | join(", "))"' dist/catalog-index.json
+            echo
+            echo "Vérification : \`SHA256SUMS.sig\` (Ed25519, \`update-pubkey.pem\`), puis empreintes de \`SHA256SUMS\`."
+          } > "$RUNNER_TEMP/notes.md"
+          cd dist
+          # Liste explicite : exactement les fichiers vérifiés de SHA256SUMS.
+          mapfile -t assets < <(awk '{ print $2 }' SHA256SUMS)
+          gh release create "catalog-v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --latest=false \
+            --title "Catalogue Scanoria $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "${assets[@]}" SHA256SUMS SHA256SUMS.sig
+      - name: Vérification depuis les adresses publiques (comme l'appliance)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          d="$RUNNER_TEMP/public"
+          mkdir -p "$d"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/catalog-v$VERSION"
+          for a in SHA256SUMS SHA256SUMS.sig; do
+            curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-all-errors -o "$d/$a" "$base/$a"
+          done
+          openssl pkeyutl -verify -pubin -inkey update-pubkey.pem -rawin -in "$d/SHA256SUMS" -sigfile "$d/SHA256SUMS.sig"
+          awk '{ print $2 }' "$d/SHA256SUMS" | while read -r a; do
+            [[ "$a" =~ ^(catalog-index\.json|testbed-[A-Za-z0-9._+-]+\.tar\.zst)$ ]] || { echo "::error::nom inattendu : $a"; exit 1; }
+            curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-all-errors -o "$d/$a" "$base/$a"
+          done
+          python3 -I catalog/build.py verify "$d" --pubkey update-pubkey.pem --expect-version "$VERSION"
+          echo "Catalogue publié : https://github.com/$GITHUB_REPOSITORY/releases/tag/catalog-v$VERSION" >> "$GITHUB_STEP_SUMMARY"
