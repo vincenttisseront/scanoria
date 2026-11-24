@@ -22,12 +22,22 @@ const text = (max: number) => z.string().max(max)
 const httpsUrl = z.string().max(512).regex(/^https:\/\/[^\s"<>]+$/)
 const nullableTimestamp = z.string().regex(TIMESTAMP_RE).nullable().optional()
 
+/** Texte traduit du catalogue, toujours servi sous la forme { fr, en }. */
+export interface LocalizedText { fr: string, en: string }
+const localizedText = z.union([
+  text(2000).transform(s => ({ fr: s, en: s })),
+  z.object({ fr: text(2000).optional(), en: text(2000).optional() })
+    .refine(o => o.fr !== undefined || o.en !== undefined)
+    .transform(o => ({ fr: o.fr ?? o.en ?? '', en: o.en ?? o.fr ?? '' })),
+])
+
 const moduleSchema = z.object({
   id,
   name: text(128),
   type: z.enum(MODULE_TYPES),
   version: z.string().regex(MODULE_VERSION_RE),
-  description: text(2000).optional(),
+  // Manifeste : { fr, en } (catalog/schema/module.schema.json) ; texte seul accepté.
+  description: localizedText.optional(),
   categories: z.array(text(32)).max(16).default([]),
   license: z.object({
     spdx: text(128),
@@ -67,7 +77,7 @@ const packSchema = z.object({
   name: text(128),
   modules: z.array(id).min(1).max(32),
   technologies: z.array(text(32)).max(32).default([]),
-  description: text(2000).optional(),
+  description: localizedText.optional(),
 })
 export type CatalogPack = z.infer<typeof packSchema>
 

@@ -33,7 +33,7 @@ const isAdmin = computed(() => session.can('admin'))
 const fmt = useFormat()
 const text = useModuleText()
 const { api, errorMessage } = useApi()
-const { data: catalog, refresh: refreshCatalog } = useCatalog()
+const { data: catalog, busy: catalogBusy, refresh: refreshCatalog } = useCatalog()
 
 const detail = ref<ModuleDetail | null>(null)
 const loadError = ref('')
@@ -47,6 +47,12 @@ async function load() {
   }
 }
 onMounted(load)
+// useCatalog interroge l'état toutes les 5 s pendant une opération : chaque
+// opération commencée ou terminée (lancée ici, depuis le catalogue ou un pack)
+// recharge la fiche, pour que statut et boutons suivent sans recharger la page.
+watch(() => (catalog.value?.operations ?? []).map(o => `${o.id}:${o.finished_at ?? ''}`).join('|'), (now, before) => {
+  if (before !== undefined && now !== before) void load()
+})
 async function reload() {
   await Promise.all([load(), refreshCatalog()])
 }
@@ -127,7 +133,9 @@ const updateAck = computed(() => {
   return t('catalog.detail.updateLicense', { version: detail.value!.update_available ?? '', spdx: l.spdx, restriction: text.restrictionLabel(l.restrictions) })
 })
 const dependentNames = computed(() => (detail.value?.dependents ?? []).map(d => names.value[d] ?? d).join(', '))
-const anyRunning = computed(() => stateReq.running.value || updateReq.running.value || uninstallReq.running.value)
+const ownRunning = computed(() => stateReq.running.value || updateReq.running.value || uninstallReq.running.value)
+// Une opération lancée ailleurs (autre onglet, pack) bloque aussi les actions de la fiche.
+const anyRunning = computed(() => ownRunning.value || catalogBusy.value)
 interface TestbedCase { rule: string | null, category: string | null, min: number, found: number, ok: boolean }
 const testbedCases = computed<TestbedCase[]>(() => {
   const d = inst.value?.testbed?.details
@@ -195,7 +203,7 @@ const testbedDetails = computed(() => {
             v-if="m.description"
             class="text-sm"
           >
-            {{ m.description }}
+            {{ text.localized(m.description) }}
           </p>
           <ul class="mt-3 space-y-1 text-sm">
             <li>

@@ -94,6 +94,7 @@ async function load() {
 }
 
 async function ask() {
+  if (requesting.value) return
   requesting.value = true
   try {
     await api('/api/ai/explain', { method: 'POST', body: { kind: props.kind, subject_id: props.subjectId, locale: locale.value } })
@@ -220,6 +221,8 @@ onBeforeUnmount(() => {
           size="xs"
           variant="outline"
           icon="i-lucide-rotate-cw"
+          :loading="requesting"
+          :disabled="requesting"
           :label="t('ai.explain.ask')"
           @click="ask"
         />
@@ -235,6 +238,8 @@ onBeforeUnmount(() => {
         size="xs"
         variant="outline"
         icon="i-lucide-rotate-cw"
+        :loading="requesting"
+        :disabled="requesting"
         :label="t('ai.explain.retry')"
         @click="ask"
       />

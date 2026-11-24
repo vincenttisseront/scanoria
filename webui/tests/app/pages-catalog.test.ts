@@ -45,7 +45,7 @@ const RES = { min_ram_mb: 256, min_cpu: 1, disk_mb: 200 }
 
 function entry(id: string, patch: Partial<CatalogEntry> = {}): CatalogEntry {
   return {
-    id, name: id.toUpperCase(), type: 'scanner', version: '1.0.0', description: `Module ${id}`, categories: ['sca'],
+    id, name: id.toUpperCase(), type: 'scanner', version: '1.0.0', description: { fr: `Module ${id}`, en: `Module ${id} (en)` }, categories: ['sca'],
     license: LICENSE, upstream: { homepage: 'https://exemple.test/h', source: 'https://exemple.test/s' }, resources: RES,
     hostname: null, requires: { modules: [], feeds: [], appliance: '>=0.2.0' }, conflicts: [], sysctl: {}, postgres: false,
     has_testbed: true, installed: null, update_available: null, compatible: true, blockers: [], auto_added: [], dependents: [],
@@ -88,9 +88,11 @@ function view(patch: Partial<CatalogView> = {}): CatalogView {
     ],
     orphans: [{ id: 'ancien', version: '1.0.0', type: 'scanner', status: 'healthy', enabled: true, options: {} }],
     packs: [
-      { id: 'iac', name: 'IaC', modules: ['trivy', 'checkov'], technologies: ['terraform'], description: 'Infra', unknown_modules: ['checkov'], installed_modules: [], pending_modules: ['trivy'], plan: plan({ checks: [{ kind: 'ram', needed: 99999, available: 8192, ok: false }, ...CHECKS.slice(1)] }) },
+      { id: 'iac', name: 'IaC', modules: ['trivy', 'checkov'], technologies: ['terraform'], description: { fr: 'Infra', en: 'Infra' }, unknown_modules: ['checkov'], installed_modules: [], pending_modules: ['trivy'], plan: plan({ checks: [{ kind: 'ram', needed: 99999, available: 8192, ok: false }, ...CHECKS.slice(1)] }) },
       { id: 'base', name: 'Base', modules: ['gitleaks'], technologies: [], unknown_modules: [], installed_modules: ['gitleaks'], pending_modules: [], plan: null },
       { id: 'ok', name: 'Pack OK', modules: ['trivy'], technologies: [], unknown_modules: [], installed_modules: [], pending_modules: ['trivy'], plan: plan() },
+      // Modules absents du catalogue, rien d'installé : le pack n'est pas « complet ».
+      { id: 'vide', name: 'Pack vide', modules: ['inconnu'], technologies: [], unknown_modules: ['inconnu'], installed_modules: [], pending_modules: [], plan: null },
     ],
     graph: [
       { from: 'trivy', to: 'trivy-db', kind: 'feed' },
@@ -138,6 +140,9 @@ describe('catalogue', () => {
     expect(text).toContain('Absent(s) du catalogue : checkov')
     expect(text).toContain('Ressources insuffisantes pour tout le pack')
     expect(text).toContain('Tous les modules du pack sont installés.')
+    const vide = document.body.querySelector('[data-pack="vide"]')!.textContent!
+    expect(vide).not.toContain('Tous les modules du pack sont installés.')
+    expect(vide).toContain('inconnu')
     expect(text).toContain('La machine a les ressources pour tout le pack.')
     expect(text).toContain('version 8.28.0 disponible')
     expect(text).toContain('incompatible')
@@ -350,7 +355,7 @@ describe('détail d’un module', () => {
 
   it('installé : banc d’essai, erreur, désactivation confirmée, mise à jour avec sauvegarde', async () => {
     setUser('admin')
-    route('GET', '/api/catalog', () => view())
+    route('GET', '/api/catalog', () => view({ operations: [] }))
     route('GET', '/api/catalog/modules/sonarqube', () => ({
       ...DETAIL,
       plan: null,
@@ -398,9 +403,30 @@ describe('détail d’un module', () => {
     expect(callsTo('POST', '/api/catalog/modules/sonarqube/update')[0]!.body).toEqual({ version: '25.11.0', accept_licenses: ['sonarqube'] })
   })
 
+  it('opération en cours ailleurs : actions bloquées, fiche rechargée à la fin', async () => {
+    setUser('admin')
+    const running = [{ id: 'o9', kind: 'install', module: 'trivy', step: 'pull', progress: 10, started_at: '2026-11-23T08:00:00Z', finished_at: null }]
+    let ops: CatalogView['operations'] = running
+    route('GET', '/api/catalog', () => view({ operations: ops }))
+    route('GET', '/api/catalog/modules/sonarqube', () => ({
+      ...DETAIL, plan: null, dependents: [],
+      installed: { id: 'sonarqube', version: '25.10.0', type: 'service', status: 'healthy', enabled: true, options: {} },
+    }))
+    const w = await mountIn(ModulePage, { route: '/catalog/sonarqube' })
+    await settle()
+    expect(button('Désinstaller').disabled).toBe(true)
+    expect(button('Désactiver').disabled).toBe(true)
+    const before = callsTo('GET', '/api/catalog/modules/sonarqube').length
+    ops = [{ ...running[0]!, finished_at: '2026-11-23T08:05:00Z', result: 'ok' }]
+    await (w.vm as unknown as { refreshCatalog: () => Promise<void> }).refreshCatalog()
+    await settle()
+    expect(callsTo('GET', '/api/catalog/modules/sonarqube').length).toBeGreaterThan(before)
+    expect(button('Désinstaller').disabled).toBe(false)
+  })
+
   it('désinstallation : garder par défaut, suppression des données avec case à cocher, activation', async () => {
     setUser('admin')
-    route('GET', '/api/catalog', () => view())
+    route('GET', '/api/catalog', () => view({ operations: [] }))
     route('GET', '/api/catalog/modules/gitleaks', () => ({
       ...DETAIL,
       module: entry('gitleaks'),
@@ -435,7 +461,7 @@ describe('détail d’un module', () => {
 
   it('module absent du catalogue mais installé ; module introuvable', async () => {
     setUser('viewer')
-    route('GET', '/api/catalog', () => view())
+    route('GET', '/api/catalog', () => view({ operations: [] }))
     route('GET', '/api/catalog/modules/ancien', () => ({
       ...DETAIL, module: null, options_schema: null, plan: null, versions: [],
       installed: { id: 'ancien', version: '1.0.0', type: 'scanner', status: 'healthy', enabled: true, options: {}, testbed: null },

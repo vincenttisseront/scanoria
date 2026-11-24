@@ -61,19 +61,25 @@ export interface StateResponse {
 export function useApplianceState(refreshMs = 30_000) {
   const { api } = useApi()
   const data = ref<StateResponse | null>(null)
-  const loading = ref(false)
+  // Compteur : un rafraîchissement manuel et le poll peuvent se chevaucher, le
+  // spinner reste affiché jusqu'à la fin du dernier.
+  const inflight = ref(0)
+  const loading = computed(() => inflight.value > 0)
+  // Échec du dernier appel : sans lui, une erreur réseau laissait une page vide.
+  const failed = ref(false)
   let timer: ReturnType<typeof setInterval> | undefined
 
   async function refresh(): Promise<void> {
-    loading.value = true
+    inflight.value++
     try {
       data.value = await api<StateResponse>('/api/state')
+      failed.value = false
     }
     catch {
-      // l'alerte d'état indisponible suffit
+      failed.value = true
     }
     finally {
-      loading.value = false
+      inflight.value--
     }
   }
 
@@ -86,5 +92,5 @@ export function useApplianceState(refreshMs = 30_000) {
   })
 
   const state = computed(() => data.value?.state ?? null)
-  return { data, state, loading, refresh }
+  return { data, state, loading, failed, refresh }
 }

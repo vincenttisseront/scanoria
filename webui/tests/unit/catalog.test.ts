@@ -5,6 +5,7 @@
 // helper, versions, options typées (G3), plan d'installation (G1, F11) avec
 // dépendances ajoutées, conflits, licences et ressources, vue du catalogue.
 
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -21,6 +22,7 @@ import { buildCatalogView, dependencyEdges, updateAvailable, type CatalogContext
 import { changedOptions, checkOption, optionDefaults, optionFields, resolveOptions } from '#shared/module-options'
 
 const FIXTURES = fileURLToPath(new URL('../fixtures/', import.meta.url))
+const REPO = fileURLToPath(new URL('../../../', import.meta.url))
 const SCHEMAS = fileURLToPath(new URL('../../../src/rootfs/usr/share/scanoria/schemas/', import.meta.url))
 const MACHINE: Machine = { cpu_count: 4, memory_mb: 8192, disks: [{ mount: '/', size_mb: 40960, avail_mb: 20000 }] }
 
@@ -50,6 +52,23 @@ describe('lecture des fichiers publiés', () => {
     expect(index.rejected).toBe(1)
     expect(index.modules.some(m => m.id === '../evil')).toBe(false)
     expect(index.packs.map(p => p.id)).toEqual(['secrets', 'iac', 'base'])
+  })
+
+  it('lit les descriptions traduites du manifeste { fr, en } et le texte seul', () => {
+    expect(findModule(index, 'osv-scanner')!.description).toEqual({ fr: 'Vulnérabilités des dépendances.', en: 'Dependency vulnerabilities.' })
+    expect(findModule(index, 'gitleaks')!.description).toEqual({ fr: 'Recherche de secrets dans l’historique Git.', en: 'Recherche de secrets dans l’historique Git.' })
+  })
+
+  // Régression : l'index réel (catalog/build.py sur modules/) était écarté en entier
+  // par la console (description { fr, en }) et le catalogue paraissait vide.
+  it.runIf(spawnSync('python3', ['-c', 'import yaml']).status === 0)('accepte sans rejet l’index construit depuis modules/', async () => {
+    const out = join(tmp, 'real')
+    const r = spawnSync('python3', ['-I', join(REPO, 'catalog/build.py'), 'build', '--out', out], { cwd: REPO, encoding: 'utf8' })
+    expect(r.status, r.stderr).toBe(0)
+    const real = (await readCatalogIndex(join(out, 'catalog-index.json')))!
+    expect(real.rejected).toBe(0)
+    expect(real.modules.length).toBeGreaterThan(0)
+    expect(real.modules.every(m => !m.description || (m.description.fr && m.description.en))).toBe(true)
   })
 
   it('refuse un index absent, illisible, trop gros ou d’un autre schéma', async () => {
