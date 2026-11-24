@@ -4,7 +4,7 @@ Le kit contient :
 
 | Fichier | Rôle |
 |---|---|
-| `CLAUDE.md` | Contexte complet du projet : objet, principes, architecture, catalogue, analyses, gate de release, mises à jour, itérations, fonctionnalités F1–F20, consignes |
+| `CLAUDE.md` | Contexte complet du projet : objet, principes, architecture, catalogue, analyses, gate de release, mises à jour, itérations, fonctionnalités F1–F20, G1–G20 et H1–H10, consignes |
 | `.claude/settings.json` | Sonnet 5.5 en session principale, Opus 5.5 en conseiller |
 | `.claude/agents/search.md`, `grep.md`, `audit.md` | Sous-agents Haiku 5.5 : exploration, points d'appel, relecture de diff dans un worktree isolé |
 | `.gitignore` | Sorties de construction, dépendances, et surtout **clés privées jamais versionnées** |
