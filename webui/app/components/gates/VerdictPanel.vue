@@ -110,6 +110,12 @@ function actionLabel(action: string): string {
           </p>
         </slot>
       </div>
+      <!-- Sans texte fourni : explication IA du verdict (I9), invisible sans connecteur. -->
+      <AiExplanation
+        v-else-if="scanId"
+        kind="explain-verdict"
+        :subject-id="scanId"
+      />
 
       <div class="flex flex-wrap gap-2 text-xs">
         <UBadge

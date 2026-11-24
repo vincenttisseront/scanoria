@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Tâches IA de Scanoria (CLAUDE.md § 3.5, I1) : file ai_tasks vers un serveur
+# Ollama externe. Sans privilège, utilisateur dédié, seul autorisé par
+# nftables (table inet scanoria_ai, meta skuid) à joindre les adresses
+# épinglées du serveur. Sans connecteur, le service reste au repos et la table
+# refuse toute sortie à cet utilisateur.
+#
+# ExecStartPre=+ (root) : table nftables, rôle PostgreSQL et droits
+# (ai-grants.sql), copie de ai.json, de l'AC et de la clé des secrets (si un
+# jeton est configuré) dans /run/scanoria-ai, seul répertoire lisible du service.
+[Unit]
+Description=Scanoria AI tasks (external Ollama connector)
+After=network-online.target postgresql.service scanoria-console.service
+Wants=postgresql.service
+ConditionPathExists=/opt/scanoria/current/webui/services/ai.mjs
+
+[Service]
+Type=simple
+User=scanoria-ai
+Group=scanoria-ai
+RuntimeDirectory=scanoria-ai
+RuntimeDirectoryMode=0700
+Environment=NODE_ENV=production
+Environment=SCANORIA_AI_RUNTIME_DIR=/run/scanoria-ai
+Environment=SCANORIA_AI_DATABASE_URL=postgresql:///scanoria?host=/var/run/postgresql
+ExecStartPre=+/usr/sbin/scanoria-ai-setup prestart
+ExecStart=/opt/scanoria/node/bin/node /opt/scanoria/current/webui/services/ai.mjs
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=180
+UMask=0077
+MemoryMax=512M
+TasksMax=64
+
+# Durcissement : aucune écriture sur disque, aucun privilège.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+InaccessiblePaths=-/var/lib/scanoria -/etc/scanoria
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+# Jamais la boucle locale ni le lien local (la base passe par le socket Unix) ;
+# le reste est filtré par nftables vers les seules adresses épinglées.
+IPAddressDeny=localhost link-local multicast
+
+[Install]
+WantedBy=multi-user.target

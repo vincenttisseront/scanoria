@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import Ajv2020 from 'ajv/dist/2020.js'
 import { describe, expect, it } from 'vitest'
 import {
-  ADDRESS_RE, CERT_PEM_RE, CIDR_RE, FQDN_RE, KEY_PEM_RE, MODULE_ID_RE, MODULE_VERSION_RE, REQUEST_TYPES, RESULT_CODES, TIMESTAMP_RE,
+  ADDRESS_RE, AI_URL_RE, CERT_PEM_RE, CIDR_RE, FQDN_RE, KEY_PEM_RE, MODULE_ID_RE, MODULE_VERSION_RE, REQUEST_TYPES, RESULT_CODES, TIMESTAMP_RE,
   USERNAME_RE, UUID_V4_RE, VERSION_RE, WINDOW_START_RE, envelopeSchema, resultSchema, type RequestType,
 } from '#shared/schemas'
 
@@ -151,6 +151,23 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
     valid: [{ id: 'gitleaks', version: '8.30.1' }],
     invalid: [{ id: 'gitleaks' }, { id: 'gitleaks', version: '' }, { id: 'gitleaks', version: '1', x: 1 }],
   },
+  'set-ai-endpoint': {
+    valid: [
+      { enabled: false },
+      { enabled: true, url: 'https://ollama.exemple.test:11434' },
+      { enabled: true, url: 'http://192.0.2.10:11434', allow_insecure: true },
+      { enabled: true, url: 'https://[2001:db8::10]:11434/', token: true },
+    ],
+    invalid: [
+      { enabled: true },
+      { enabled: false, url: 'https://ollama.exemple.test' },
+      { enabled: true, url: 'ftp://ollama.exemple.test' },
+      { enabled: true, url: 'https://user@ollama.exemple.test' },
+      { enabled: true, url: 'https://ollama.exemple.test/api' },
+      { enabled: true, url: 'https://ollama.exemple.test', ca_pem: 'not a certificate' },
+      { enabled: true, url: 'https://ollama.exemple.test', model: 'x' },
+    ],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {
@@ -177,6 +194,12 @@ describe('expressions régulières identiques au contrat', () => {
     const item = install.properties.params.properties.modules.items
     expect(MODULE_ID_RE.source).toBe(item.properties.id.pattern)
     expect(MODULE_VERSION_RE.source).toBe(item.properties.version.pattern)
+  })
+
+  it('reprend les motifs de set-ai-endpoint', () => {
+    const ai = loadSchema('set-ai-endpoint')
+    expect(AI_URL_RE.source.replace(/\\\//g, '/')).toBe(ai.properties.params.properties.url.pattern)
+    expect(CERT_PEM_RE.source).toBe(ai.properties.params.properties.ca_pem.pattern)
   })
 
   it('reprend la liste fermée des types et des codes', () => {

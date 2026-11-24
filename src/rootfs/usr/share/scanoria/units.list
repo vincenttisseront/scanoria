@@ -16,3 +16,5 @@ scanoria-dns-check.path
 scanoria-catalog-refresh.timer
 scanoria-runner.service
 scanoria-worker.service
+scanoria-ai.service
+scanoria-ai-check.timer

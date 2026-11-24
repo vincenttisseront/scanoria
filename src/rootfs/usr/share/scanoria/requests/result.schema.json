@@ -54,7 +54,8 @@
             "install-modules",
             "uninstall-module",
             "set-module-state",
-            "update-module"
+            "update-module",
+            "set-ai-endpoint"
           ]
         }
       ]
@@ -110,7 +111,11 @@
         "E_DEPENDENCY",
         "E_CONFLICT",
         "E_LICENSE",
-        "E_TESTBED"
+        "E_TESTBED",
+        "E_AI_URL",
+        "E_AI_UNRESOLVED",
+        "E_AI_FORBIDDEN_ADDRESS",
+        "E_AI_CA"
       ]
     },
     "message": {

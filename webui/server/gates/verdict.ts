@@ -6,6 +6,7 @@
 // marqué comme tel et jamais pris en compte dans le verdict.
 
 import type { Queryable } from '../utils/db'
+import { connectorEnabled } from '../ai/enqueue'
 import { VerdictDetails, type ScanStatus, type Verdict } from '#shared/analysis'
 
 export interface AiSummary {
@@ -65,11 +66,14 @@ export async function getScanVerdict(db: Queryable, scanId: string, locale: 'fr'
 }
 
 async function aiSummary(db: Queryable, scanId: string, locale: 'fr' | 'en'): Promise<AiSummary | null> {
+  // Sans connecteur, la réponse est celle d'une appliance sans IA (CLAUDE.md § 3.5).
+  if (!(await connectorEnabled())) return null
   const res = await db.query<{ output: unknown, model: string | null, model_digest: string | null, finished_at: string | null }>(
     `SELECT output, model, model_digest,
             to_char(finished_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS finished_at
        FROM ai_tasks
       WHERE kind = 'explain-verdict' AND subject_type = 'scan' AND subject_id = $1 AND status = 'done'
+        AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = ai_tasks.project_id AND p.ai_opt_out)
       ORDER BY (locale = $2) DESC, finished_at DESC NULLS LAST
       LIMIT 1`,
     [scanId, locale],
