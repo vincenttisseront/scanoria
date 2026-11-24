@@ -69,7 +69,8 @@ applies() { python3 -I -c 'import json, sys
 sys.path.insert(0, sys.argv[1])
 from scanoria.applicability import applies
 print(applies(json.load(open(sys.argv[2])), {}, sys.argv[3:]) or "runs")' "$ROOT/src/rootfs/usr/lib/scanoria/py" "$TMP/m.json" "$@"; }
-expect "applies_to : modèles du banc d'essai" "$(cd "$MOD/testbed" && applies $(find . -type f | sed 's|^\./||'))" runs
+mapfile -t TB_FILES < <(cd "$MOD/testbed" && find . -type f | sed 's|^\./||')
+expect "applies_to : modèles du banc d'essai" "$(applies "${TB_FILES[@]}")" runs
 expect "applies_to : extension en majuscules, poids sous weights/" "$(applies a/B.PT)/$(applies weights/x/w.bin)" runs/runs
 expect "applies_to : dépôt sans modèle non lancé" "$(applies src/app.py bin/tool.bin README.md)" no-matching-files
 grep -E '^export const RECOMMENDED_IDS' "$ROOT/webui/server/utils/catalog.ts" | grep -q "'modelscan'" \
