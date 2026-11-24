@@ -153,8 +153,8 @@ expect "unité Quadlet active" "$(systemctl is-active scanoria-mod-web.service)"
 expect "page servie par le proxy local" "$(http /)" 200
 expect "réseau propre en /24 fixe" "$(podman network inspect scanoria-mod-web --format '{{range .Subnets}}{{.Subnet}}{{end}}')" 10.90.0.0/24
 expect "réseau de scan interne" "$(podman network inspect scanoria-mod-web_scan --format '{{.Internal}}')" true
-expect "secret monté dans le conteneur" "$(podman exec scanoria-mod-web cat /run/secrets/admin-password)" "$(cat "$SECDIR/admin-password")"
-expect "secret en variable dans le conteneur" "$(podman exec scanoria-mod-web printenv APP_DB_PASSWORD)" "$(cat "$SECDIR/db-password")"
+expect "secret monté dans le conteneur" "$(podman exec scanoria-mod-web cat /run/secrets/admin-password)" "$(cat "$SECDIR/admin-password" 2>/dev/null || echo absent)"
+expect "secret en variable dans le conteneur" "$(podman exec scanoria-mod-web printenv APP_DB_PASSWORD)" "$(cat "$SECDIR/db-password" 2>/dev/null || echo absent)"
 expect "aucun secret dans l'inspection du conteneur" "$(podman inspect scanoria-mod-web | grep -c -F "$(cat "$SECDIR/db-password")" || true)" 0
 expect "limite nofile appliquée" "$(podman exec scanoria-mod-web sh -c 'ulimit -n')" 65536
 expect "sysctl appliqué, jamais baissé" "$(( $(sysctl -n fs.inotify.max_user_instances) >= 256 ))/$([[ -f /etc/sysctl.d/60-scanoria-web.conf ]] || echo absent)" "1/absent"

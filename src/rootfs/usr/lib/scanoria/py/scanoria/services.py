@@ -166,7 +166,11 @@ def register_podman_secrets(m):
         path = secret_path(mid, name)
         if not os.path.isfile(path):
             raise Fail("E_INTERNAL", "secret %s of %s missing" % (name, mid))
-        r = common.run("podman", ["secret", "create", "--replace", podman_secret(mid, name), path], timeout=120)
+        # « create --replace » échoue sur Podman 4.9 quand le secret n'existe
+        # pas encore (« deleting secret : no secret data ») : suppression
+        # préalable sans contrôle, puis création.
+        common.run("podman", ["secret", "rm", podman_secret(mid, name)], timeout=120)
+        r = common.run("podman", ["secret", "create", podman_secret(mid, name), path], timeout=120)
         if r.returncode != 0:
             raise Fail("E_INTERNAL", "podman secret of %s could not be created" % mid)
 

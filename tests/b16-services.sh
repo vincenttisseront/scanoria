@@ -256,7 +256,7 @@ expect "secrets générés en 0600 dans un répertoire 0700" "$(stat -c %a "$SEC
 expect "secrets aléatoires (48 hex) et distincts" "$(grep -c -E '^[0-9a-f]{48}$' "$SECDIR/db-password" "$SECDIR/admin-password" | grep -c ':1$')/$([[ "$(cat "$SECDIR/db-password")" != "$(cat "$SECDIR/admin-password")" ]] && echo distincts)" 2/distincts
 PW=$(cat "$SECDIR/db-password")
 expect "aucun secret dans les unités ni l'environnement" "$(grep -r -l -F -e "$PW" -e "$(cat "$SECDIR/admin-password")" "$UNITS" "$T/etc/scanoria" "$CALLS" | wc -l)" 0
-expect "secret Podman créé depuis le fichier root" "$(called "\"secret\",\"create\",\"--replace\",\"scanoria-mod-app-db-password\",\"$SECDIR/db-password\"")" 1
+expect "secret Podman créé depuis le fichier root" "$(called "\"secret\",\"create\",\"scanoria-mod-app-db-password\",\"$SECDIR/db-password\"")" 1
 expect "mot de passe injecté par variable" "$(grep -c -x 'Secret=scanoria-mod-app-db-password,type=env,target=APP_JDBC_PASSWORD' "$CONT")" 1
 expect "secret admin monté en /run/secrets" "$(grep -c -x 'Secret=scanoria-mod-app-admin-password,type=mount,target=admin-password' "$CONT")" 1
 expect "réseau propre en /24 fixe" "$(grep -c -x 'Subnet=10.90.0.0/24' "$UNITS/scanoria-mod-app.network")/$(grep -c -x 'Gateway=10.90.0.1' "$UNITS/scanoria-mod-app.network")" 1/1
