@@ -48,6 +48,12 @@ interface FindingRow {
   is_new: boolean
   first_seen_at: string
   updated_at: string
+  // 0.5 (chantier C) : EPSS et KEV (H3), groupe de résultats recoupés (F16).
+  epss?: number | null
+  epss_percentile?: number | null
+  kev?: boolean
+  kev_added?: string | null
+  group?: { confirmations: number, tools: string[], members: { id: string, tool: string, severity: string, status: string }[] } | null
 }
 interface FindingDetail extends FindingRow {
   message: string | null
@@ -94,6 +100,9 @@ const filters = reactive({
   is_new: q.is_new === 'true',
   secret: q.secret === 'true',
   malicious: q.malicious === 'true',
+  epss_min: ['0.01', '0.1', '0.5'].includes(str(q.epss_min)) ? str(q.epss_min) : 'all',
+  kev: q.kev === 'true',
+  grouped: q.grouped !== 'false',
 })
 const items = ref<FindingRow[]>([])
 const total = ref(0)
@@ -122,6 +131,9 @@ function query(): Record<string, unknown> {
   if (filters.is_new) out.is_new = 'true'
   if (filters.secret) out.secret = 'true'
   if (filters.malicious) out.malicious = 'true'
+  if (filters.epss_min !== 'all') out.epss_min = filters.epss_min
+  if (filters.kev) out.kev = 'true'
+  if (filters.grouped) out.grouped = 'true'
   return out
 }
 
@@ -185,7 +197,7 @@ watch(filters, () => {
 onBeforeUnmount(() => clearTimeout(debounce))
 
 function resetFilters() {
-  Object.assign(filters, { project_id: 'all', scan_id: '', tool: '', severity: 'all', category: 'all', status: 'open', q: '', is_new: false, secret: false, malicious: false })
+  Object.assign(filters, { project_id: 'all', scan_id: '', tool: '', severity: 'all', category: 'all', status: 'open', q: '', is_new: false, secret: false, malicious: false, epss_min: 'all', kev: false, grouped: true })
 }
 
 const totals = computed(() => summary.value.reduce((acc, p) => ({
@@ -218,6 +230,8 @@ const statusColor = (s: string) => (s === 'new' ? 'warning' : s === 'confirmed' 
 
 const UBadge = resolveComponent('UBadge')
 const SeverityBadge = resolveComponent('FindingsSeverityBadge')
+const IntelBadges = resolveComponent('FindingsIntelBadges')
+const CorrelationBadge = resolveComponent('FindingsCorrelationBadge')
 const columns = computed<TableColumn<FindingRow>[]>(() => [
   { accessorKey: 'severity', header: t('findings.columns.severity'), cell: ({ row }) => h(SeverityBadge, { severity: row.original.severity }) },
   {
@@ -228,8 +242,10 @@ const columns = computed<TableColumn<FindingRow>[]>(() => [
       row.original.secret_type ? h(UBadge, { color: 'warning', variant: 'outline', icon: 'i-lucide-key-round', label: t('findings.badges.secret') }) : null,
       row.original.is_new ? h(UBadge, { color: 'info', variant: 'subtle', label: t('findings.badges.new') }) : null,
       h('span', { class: 'font-medium' }, row.original.title),
+      h(CorrelationBadge, { group: row.original.group }),
     ]),
   },
+  { id: 'intel', header: t('intel.epss'), cell: ({ row }) => h(IntelBadges, { epss: row.original.epss, epssPercentile: row.original.epss_percentile, kev: row.original.kev, kevAdded: row.original.kev_added }) },
   { accessorKey: 'project_name', header: t('findings.columns.project') },
   { accessorKey: 'tool', header: t('findings.columns.tool'), cell: ({ row }) => h('span', { class: 'font-mono text-xs' }, row.original.tool) },
   { id: 'location', header: t('findings.columns.location'), cell: ({ row }) => h('span', { class: 'font-mono text-xs break-all' }, location(row.original)) },
@@ -279,7 +295,9 @@ async function post(path: string, body: Record<string, unknown>, key: string): P
   if (!detail.value) return false
   busy.value = key
   try {
-    detail.value = await api<FindingDetail>(`/api/findings/${detail.value.id}/${path}`, { method: 'POST', body })
+    const res = await api<FindingDetail>(`/api/findings/${detail.value.id}/${groupPath(path)}`, { method: 'POST', body })
+    // F16 : le tri d'un groupe renvoie la liste des résultats triés ; le détail est relu.
+    detail.value = groupPath(path) === path ? res : await api<FindingDetail>(`/api/findings/${detail.value.id}`)
     toast.add({ title: t('findings.saved'), color: 'success' })
     void reloadAll()
     return true
@@ -292,6 +310,9 @@ async function post(path: string, body: Record<string, unknown>, key: string): P
     busy.value = null
   }
 }
+// F16 : tri appliqué à tout le groupe de résultats recoupés (case du détail, cochée par défaut).
+const applyToGroup = ref(true)
+const groupPath = (path: string) => (path === 'status' && applyToGroup.value && (detail.value?.group?.members.length ?? 0) > 1 ? 'group-status' : path)
 const setStatus = (status: 'new' | 'confirmed') => post('status', { status }, status)
 
 // Modale de motif (faux positif) ou de motif + date de fin (acceptation).
@@ -472,6 +493,11 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
         @click="resetFilters"
       />
     </div>
+    <FindingsIntelFilters
+      v-model:epss-min="filters.epss_min"
+      v-model:kev="filters.kev"
+      v-model:grouped="filters.grouped"
+    />
 
     <UCard>
       <p class="mb-2 text-xs text-muted">
@@ -535,6 +561,17 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
           <h3 class="text-base font-semibold break-words">
             {{ detail.title }}
           </h3>
+          <FindingsCorrelationGroup
+            v-model:apply-to-group="applyToGroup"
+            :finding-id="detail.id"
+            :epss="detail.epss"
+            :epss-percentile="detail.epss_percentile"
+            :kev="detail.kev"
+            :kev-added="detail.kev_added"
+            :vulnerability="detail.vuln_ids.length > 0"
+            :group="detail.group"
+            @open="openDetail"
+          />
 
           <UAlert
             v-if="detail.malicious"

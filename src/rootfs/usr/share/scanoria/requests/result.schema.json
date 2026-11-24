@@ -127,7 +127,8 @@
         "E_BACKUP_INVALID",
         "E_SONAR_UNAVAILABLE",
         "E_SONAR_ADMIN",
-        "E_SONAR_API"
+        "E_SONAR_API",
+        "E_EXPORT_FAILED"
       ]
     },
     "message": {

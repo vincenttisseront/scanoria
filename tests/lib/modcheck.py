@@ -174,7 +174,9 @@ def repo_errors(root):
             errs.append(f"{mid}: conflit avec lui-même")
         if m.get("type") == "feed":
             users = [o for o, om in manifests.items() if m["id"] in om.get("requires", {}).get("feeds", [])]
-            if not users:
+            # Un feed exporté pour la console (feed.export, 0.5 contrat 17 : EPSS, KEV)
+            # est lu par la console elle-même, sans scanner qui le monte.
+            if not users and not (m.get("feed") or {}).get("export"):
                 errs.append(f"{mid}: feed requis par aucun module")
     return errs
 

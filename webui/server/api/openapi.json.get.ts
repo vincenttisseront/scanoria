@@ -122,6 +122,9 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/findings/{id}': { get: { summary: 'Finding detail (masked snippet, scans where it appears); never a secret value', role: 'viewer' } },
   '/api/findings/{id}/status': { post: { summary: 'Triage a finding (accepted needs reason and end date; refused 409 E_MALICIOUS for a malicious package)', role: 'operator', body: 'FindingStatus' } },
   '/api/findings/{id}/secret': { post: { summary: 'Secret follow-up (to-revoke, revoked, false-positive) with date and author', role: 'operator', body: 'SecretState' } },
+  '/api/findings/{id}/group': { get: { summary: 'Group of correlated findings (F16): tools, confirmations (distinct tools), member findings; null without correlation. /api/findings also accepts epss_min, kev and grouped (0.5)', role: 'viewer' } },
+  '/api/findings/{id}/group-status': { post: { summary: 'Triage every finding of a correlated group (one audit line per finding; 409 E_MALICIOUS if a member is a malicious package)', role: 'operator', body: 'FindingStatus' } },
+  '/api/intel/status': { get: { summary: 'EPSS and KEV import state (H3): CVE count, import date, published database date', role: 'viewer' } },
   '/api/exceptions': {
     get: { summary: 'Project exceptions (query project_id; all=true includes expired and revoked)', role: 'viewer' },
     post: { summary: 'Create a dated exception (at most one year; refused 409 E_MALICIOUS for MAL- advisories)', role: 'operator', body: 'ExceptionCreate', status: 201 },

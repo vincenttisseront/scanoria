@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Probabilité d'exploitation EPSS de FIRST (module feed, 0.5, H3). Le helper
+# télécharge chaque jour le fichier CSV compressé de tous les scores, le valide
+# ligne par ligne (CVE, score et percentile dans [0, 1]) et le publie pour la
+# console (feed.export, contrat 17). La console l'importe dans vuln_intel : le
+# quality gate bloque une vulnérabilité dont l'EPSS dépasse epss_block_from,
+# même sous le seuil de gravité. Aucun conteneur, aucun scanner ne le monte.
+# Format : « #model_version:…,score_date:… », puis « cve,epss,percentile ».
+id: epss
+name: EPSS
+description:
+  fr: Probabilité d'exploitation des CVE (EPSS de FIRST), mise à jour chaque jour.
+  en: Exploit prediction scores for CVEs (FIRST EPSS), updated daily.
+type: feed
+categories: [sca]
+license:
+  spdx: LicenseRef-FIRST-EPSS
+  url: https://www.first.org/epss/faq
+  restrictions: none
+  notes: Données EPSS mises à disposition gratuitement par FIRST, avec attribution demandée (« EPSS, FIRST.org »). Conditions relevées par des sources secondaires le 2026-11-24, first.org étant inaccessible depuis l'environnement de développement ; à revérifier à la source.
+upstream:
+  homepage: https://www.first.org/epss/
+  source: https://www.first.org/epss/data_stats
+version: "1"
+resources: { min_ram_mb: 64, min_cpu: 0.1, disk_mb: 200 }
+hostname: null
+requires: { modules: [], feeds: [], appliance: ">=0.5.0" }
+conflicts: []
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+feed:
+  format: epss-csv
+  mount: /feeds/epss
+  max_age_days: 7
+  source:
+    kind: https
+    ref: "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
+    mirrors: ["https://epss.cyentia.com/epss_scores-current.csv.gz"]
+  schedule: daily
+  export: { format: jsonl.gz }

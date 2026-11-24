@@ -61,6 +61,7 @@ export const RESULT_CODES = [
   'E_FEED_UNAVAILABLE',
   'E_SERVICE_RESOURCES', 'E_BACKUP_FAILED', 'E_BACKUP_NOT_FOUND', 'E_BACKUP_INVALID',
   'E_SONAR_UNAVAILABLE', 'E_SONAR_ADMIN', 'E_SONAR_API',
+  'E_EXPORT_FAILED',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 

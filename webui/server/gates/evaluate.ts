@@ -21,6 +21,8 @@ import {
   ExceptionTargets, GateRules, SEVERITIES, SEVERITY_RANK, VerdictDetails,
   type ExceptionKind, type ScanModuleStatus, type Severity,
 } from '#shared/analysis'
+import { collapseCorrelated } from '../findings/correlation'
+import { intelJoin } from '../intel/lookup'
 
 type Reason = z.infer<typeof VerdictDetails>['reasons'][number]
 type Action = Reason['actions'][number]
@@ -44,6 +46,11 @@ export interface GateFinding {
   status: string
   status_until: string | null
   is_new: boolean
+  /** H3 (0.5) : probabilité d'exploitation (EPSS), CVE du catalogue KEV. */
+  epss?: number | null
+  kev?: boolean | null
+  /** F16 (0.5) : clé de recoupement ; un groupe compte une seule fois. */
+  correlation_key?: string | null
 }
 
 export interface GateModule {
@@ -71,6 +78,8 @@ export interface GateInput {
   /** Date du jour (AAAA-MM-JJ), pour les exceptions et les acceptations datées. */
   today: string
   evaluatedAt: string
+  /** F16 (0.5) : regrouper les résultats recoupés (faux pour le rejeu d'un plan d'avant la 0.5, G11). */
+  correlate?: boolean
 }
 
 const MAX_IDS = 50
@@ -216,6 +225,9 @@ export function computeVerdict(input: GateInput): VerdictDetails {
     }
     counted.push(f)
   }
+  // F16 (0.5) : un même problème vu par plusieurs outils compte une seule fois,
+  // à la gravité la plus haute du groupe. Un résultat seul est inchangé.
+  if (input.correlate !== false) counted.splice(0, counted.length, ...collapseCorrelated(counted))
 
   const counts = Object.fromEntries(SEVERITIES.map(s => [s, 0])) as Record<Severity, number>
   for (const f of counted) counts[f.severity]++
@@ -244,6 +256,12 @@ export function computeVerdict(input: GateInput): VerdictDetails {
       reason('secret', blocking, sortBySeverity(secrets), maxSeverity(secrets), blocking ? ['fix', 'request-exception'] : []),
     )
   }
+
+  // 3 bis. H3 (0.5) : KEV puis EPSS, bloquants même sous vuln_block_from. Un
+  //    résultat retenu ici ne figure plus dans les raisons par gravité.
+  const intel = intelReasons(byFamily.get('vuln') ?? [], rules)
+  blockingReasons.push(...intel.reasons)
+  if (intel.consumed.size) byFamily.set('vuln', (byFamily.get('vuln') ?? []).filter(f => !intel.consumed.has(f.id)))
 
   // 4. Vulnérabilités, SAST, IaC : une raison par famille et par gravité.
   const thresholds: [GateFamily, Reason['code'], Severity | null][] = [
@@ -310,6 +328,24 @@ export function computeVerdict(input: GateInput): VerdictDetails {
   })
 }
 
+/**
+ * H3 (0.5, contrat 15) : vulnérabilités retenues (après tri, nouveau code et
+ * exceptions datées) qui bloquent par leur exploitation, quelle que soit leur
+ * gravité : CVE du catalogue KEV si kev_blocks, puis EPSS ≥ epss_block_from.
+ * Les paquets malveillants (H4) sont traités avant, sans exception possible.
+ */
+export function intelReasons(vulns: GateFinding[], rules: GateRules): { reasons: Reason[], consumed: Set<string> } {
+  const bySev = (list: GateFinding[]) => [...list].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]
+    || (b.epss ?? 0) - (a.epss ?? 0))
+  const kev = rules.kev_blocks ? vulns.filter(f => f.kev) : []
+  const threshold = rules.epss_block_from
+  const epss = threshold === null ? [] : vulns.filter(f => !kev.includes(f) && typeof f.epss === 'number' && f.epss >= threshold)
+  const reasons: Reason[] = []
+  if (kev.length) reasons.push(reason('kev', true, bySev(kev), maxSeverity(kev), ['fix', 'request-exception']))
+  if (epss.length) reasons.push(reason('epss', true, bySev(epss), maxSeverity(epss), ['fix', 'request-exception']))
+  return { reasons, consumed: new Set([...kev, ...epss].map(f => f.id)) }
+}
+
 function maxSeverity(list: GateFinding[]): Severity {
   return list.reduce<Severity>((m, f) => (SEVERITY_RANK[f.severity] > SEVERITY_RANK[m] ? f.severity : m), 'info')
 }
@@ -330,6 +366,12 @@ const PRE_05_RULES = { license_denied_blocks: false, kev_blocks: false, epss_blo
 function isPre05(rules: unknown): rules is Record<string, unknown> {
   return typeof rules === 'object' && rules !== null && !Array.isArray(rules)
     && !Object.keys(PRE_05_RULES).some(k => k in rules)
+}
+
+/** G11 : plan figé avant la 0.5 (règles du gate sans aucune règle de la 0.5). */
+export function planIsPre05(plan: unknown): boolean {
+  const rules = (plan as { gate?: { rules?: unknown } } | null)?.gate?.rules
+  return rules !== undefined && isPre05(rules)
 }
 
 export function rulesFromPlan(plan: unknown): GateRules | null {
@@ -368,8 +410,10 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
     db.query<GateFinding>(
       `SELECT f.id, f.tool, f.rule_id, f.category, f.severity, f.path, f.vuln_ids,
               f.package->>'name' AS package_name, f.malicious, f.secret_type, f.secret_state, f.status,
-              to_char(f.status_until, 'YYYY-MM-DD') AS status_until, sf.is_new
+              to_char(f.status_until, 'YYYY-MM-DD') AS status_until, sf.is_new,
+              intel.epss::float8 AS epss, intel.kev, f.correlation_key
          FROM scan_findings sf JOIN findings f ON f.id = sf.finding_id
+         ${intelJoin('f')}
         WHERE sf.scan_id = $1`,
       [scanId],
     ),
@@ -389,6 +433,7 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
     findings: findings.rows,
     exceptions: exceptions.rows,
     coverage: row.coverage,
+    correlate: !planIsPre05(row.plan),
     today: row.today,
     evaluatedAt: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
   })
