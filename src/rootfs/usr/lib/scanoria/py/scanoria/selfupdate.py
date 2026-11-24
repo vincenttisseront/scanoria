@@ -556,6 +556,17 @@ def extract(archive, version, dest_parent=None):
                 with os.fdopen(fd, "wb") as out:
                     _own_release(out.fileno(), fmode)
                     shutil.copyfileobj(src, out, 1 << 20)
+        # tarfile s'arrête au marqueur de fin d'archive : le reste du flux
+        # (bourrage de bloc tar) doit être lu, sinon zstd, encore en train
+        # d'écrire son dernier bloc, meurt de SIGPIPE à la fermeture du tube.
+        drained = 0
+        while True:
+            chunk = proc.stdout.read(1 << 16)
+            if not chunk:
+                break
+            drained += len(chunk)
+            if drained > (1 << 20):
+                raise Fail("E_ARCHIVE", "trailing data after end of archive")
     except (tarfile.TarError, EOFError, OSError) as e:
         shutil.rmtree(tmp, ignore_errors=True)
         raise Fail("E_ARCHIVE", "unreadable archive: %s" % type(e).__name__)
