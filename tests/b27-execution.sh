@@ -70,7 +70,7 @@ git -c init.defaultBranch=main init -q "$G/forge/depot"
 	printf '* filter=piege\n' > .gitattributes
 	printf '[submodule "sous"]\n\tpath = sous\n\turl = https://forge.exemple.test/sous.git\n' > .gitmodules
 	git add -A
-	git update-index --add --cacheinfo "160000,$(printf 'sous' | sha1sum | cut -c1-40),sous"
+	git update-index --add --cacheinfo "160000,5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e,sous"
 	git commit -qm un
 	echo deux > deux.txt && git add deux.txt && git commit -qm deux
 ) > /dev/null
@@ -432,7 +432,7 @@ SCANS="$T/var/lib/scanoria/scans"
 SCEN="$TMP/scenario"
 COMMIT=$(printf 'b27' | sha256sum | cut -c1-40)
 GOOD_JAR="contenu de l'extension"
-GOOD_KEY=$(printf '%s' "$GOOD_JAR" | md5sum | cut -c1-32)
+GOOD_KEY=$(printf '%s' "$GOOD_JAR" | sha256sum | cut -c1-64)
 cat > "$STUBS/podman" <<EOF
 #!/usr/bin/env python3
 # Bouchon de podman : récupération et scanners simulés.
