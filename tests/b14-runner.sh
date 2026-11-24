@@ -360,7 +360,8 @@ t = tarfile.open(sys.argv[1] + "/source.tar.gz", "w:gz")
 def add(name, data=b"x", **kw):
     i = tarfile.TarInfo(name); i.size = len(data); [setattr(i, k, v) for k, v in kw.items()]
     t.addfile(i, io.BytesIO(data) if i.isreg() else None)
-add("src/app.py", b"print(1)\n")
+add("./", type=tarfile.DIRTYPE, size=0)
+add("./src/app.py", b"print(1)\n")
 add("src/lien", type=tarfile.SYMTYPE, linkname="/etc/passwd", size=0)
 add("src/dur", type=tarfile.LNKTYPE, linkname="src/app.py", size=0)
 add("src/tube", type=tarfile.FIFOTYPE, size=0)

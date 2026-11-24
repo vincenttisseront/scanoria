@@ -555,6 +555,8 @@ class _Tree:
 
 def _safe_rel(name):
     """Chemin relatif sûr (ni absolu, ni « .. », ni « \\ ») ; sinon archive piégée."""
+    if isinstance(name, str) and name.strip("./") == "" and ".." not in name and "\x00" not in name:
+        return None                      # racine de l'archive (« ./ ») : rien à écrire
     rel = testbed._member_path(name)
     if rel is None:
         raise SourceError("E_ARCHIVE_UNSAFE", "input", "unsafe path in the archive: %s" % str(name)[:200])
@@ -573,6 +575,8 @@ def _extract_tar(f, tree):
                 if i >= MAX_FILES * 2:
                     raise SourceError("E_ARCHIVE_INVALID", "input", "too many entries in the archive")
                 rel = _safe_rel(m.name)
+                if rel is None:
+                    continue
                 if m.isdir():
                     tree.mkdirs(rel)
                 elif m.issym() or m.islnk():
@@ -599,6 +603,8 @@ def _extract_zip(f, tree):
         for info in infos:
             tree.tick(info.file_size)
             rel = _safe_rel(info.filename)
+            if rel is None:
+                continue
             mode = (info.external_attr >> 16) & 0o170000
             if info.is_dir():
                 tree.mkdirs(rel)
