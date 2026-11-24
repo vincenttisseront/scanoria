@@ -89,7 +89,11 @@ def confined_args(manifest, mounts=(), name=None):
             "--security-opt=no-new-privileges", "--user", "%d:%d" % (NOBODY, NOBODY),
             "--memory", "%dm" % mem, "--memory-swap", "%dm" % mem, "--cpus", str(cpu),
             "--pids-limit", "512", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777",
-            "--pull=never", "--log-driver=none"]
+            "--pull=never", "--log-driver=none",
+            # Utilisateur 65534 sans répertoire personnel dans la plupart des
+            # images : sans HOME, certains outils (OSV-Scanner) s'arrêtent en
+            # erreur générale (code 127) avant même d'analyser.
+            "--env", "HOME=/tmp", "--env", "TMPDIR=/tmp"]
     if name:
         args += ["--name", name]
     for host, target, mode in mounts:
