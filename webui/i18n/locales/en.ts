@@ -146,6 +146,11 @@ export default {
     E_SONAR_UNAVAILABLE: 'SonarQube did not reach the “UP” state in time: installation rolled back.',
     E_SONAR_ADMIN: 'The SonarQube administrator password is no longer the one known to the appliance.',
     E_SONAR_API: 'A SonarQube API call failed while setting it up.',
+    E_SERVICE_MISSING: 'The service this tool depends on is not installed, healthy and enabled.',
+    E_SERVICE_TOKEN: 'The service analysis token is missing or unreadable: re-enable the service.',
+    E_MODULE_INVALID: 'This module cannot be run by this appliance version: update the appliance.',
+    E_REF_NOT_DEFAULT: 'Tool limited to the default branch: reference skipped.',
+    E_PROJECT_UNKNOWN: 'The project of this scan is unknown to the runner.',
   },
   request: {
     pending: 'Queued…',

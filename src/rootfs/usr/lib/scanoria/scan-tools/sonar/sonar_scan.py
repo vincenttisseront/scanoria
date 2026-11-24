@@ -38,7 +38,7 @@ HOST_RE = re.compile(r"http:/{2}[a-z0-9][a-z0-9._-]{0,100}(:[0-9]{1,5})?\Z")
 PROJECT_KEY_RE = re.compile(r"scanoria-([0-9a-f]{12}|testbed)\Z")
 TASK_RE = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
 PAGE_SIZE = 500
-MAX_PAGES = 10
+MAX_PAGES = 20         # 20 × 500 = 10 000, plafond de api/issues/search
 HTTP_TIMEOUT = 30
 MAX_RESPONSE = 32 << 20
 OUT_DIR = os.environ.get("SCANORIA_OUT_DIR", "/out")
@@ -104,11 +104,18 @@ def run_scanner(host, token, key, work, cache, deadline):
     os.makedirs(cache, exist_ok=True)
     binaries = os.path.join(work, "empty-binaries")
     os.makedirs(binaries, exist_ok=True)
+    # Le dépôt analysé ne règle jamais sa propre analyse : son
+    # sonar-project.properties (exclusions, règles ignorées…) est remplacé
+    # par un fichier vide, hors de /src.
+    settings = os.path.join(work, "scanoria-project.properties")
+    with open(settings, "w", encoding="utf-8") as f:
+        f.write("# Scanoria : réglages du dépôt ignorés\n")
     args = [SCANNER,
             "-Dsonar.host.url=" + host,
             "-Dsonar.projectKey=" + key,
             "-Dsonar.projectName=" + key,
             "-Dsonar.projectBaseDir=" + SRC_DIR,
+            "-Dproject.settings=" + settings,
             "-Dsonar.sources=.",
             "-Dsonar.working.directory=" + os.path.join(work, "scannerwork"),
             "-Dsonar.scm.disabled=true",
@@ -154,8 +161,10 @@ def wait_task(api, task, deadline):
 
 
 def pages(api, path, params, items_key):
-    """Pages successives (au plus MAX_PAGES) ; s'arrête à la dernière."""
+    """Pages successives (au plus MAX_PAGES) ; s'arrête à la dernière.
+    Retourne (pages, total annoncé par le serveur ou None)."""
     out = []
+    announced = None
     for p in range(1, MAX_PAGES + 1):
         page = api.get(path, dict(params, ps=PAGE_SIZE, p=p))
         if not isinstance(page, dict):
@@ -164,18 +173,24 @@ def pages(api, path, params, items_key):
         items = page.get(items_key)
         paging = page.get("paging") if isinstance(page.get("paging"), dict) else {}
         total = paging.get("total", page.get("total"))
+        if isinstance(total, int) and not isinstance(total, bool):
+            announced = total
         if not isinstance(items, list) or len(items) < PAGE_SIZE:
             break
         if isinstance(total, int) and p * PAGE_SIZE >= total:
             break
-    return out
+    return out, announced
 
 
 def export(api, key, version):
-    issues = pages(api, "api/issues/search", {"components": key, "resolved": "false",
-                                              "additionalFields": "_all"}, "issues")
-    hotspots = pages(api, "api/hotspots/search", {"project": key, "status": "TO_REVIEW"}, "hotspots")
+    issues, n_issues = pages(api, "api/issues/search", {"components": key, "resolved": "false",
+                                                        "additionalFields": "_all"}, "issues")
+    hotspots, n_hotspots = pages(api, "api/hotspots/search", {"project": key, "status": "TO_REVIEW"}, "hotspots")
     conv = sonar_sarif.Converter(key, version)
+    # Au-delà de ce que l'API rend (10 000), le document est marqué tronqué :
+    # trou de couverture signalé par la console, jamais « tout a été lu ».
+    conv.declare_total(n_issues)
+    conv.declare_total(n_hotspots)
     for p in issues:
         conv.add_issues(p)
     for p in hotspots:

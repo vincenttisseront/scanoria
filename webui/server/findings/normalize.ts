@@ -188,13 +188,13 @@ export function fixedFromHelp(markdown: string, name: string): string[] {
 /** Identifiants codés en dur : mot de passe (259), identifiants (798), clé (321). */
 const SECRET_CWES = new Set(['CWE-259', 'CWE-321', 'CWE-798'])
 
+/** Préfixe d'étiquette SARIF qui fixe la catégorie d'un résultat (chantier B de la 0.4). */
+export const EXPLICIT_CATEGORY_TAG = 'scanoria-category:'
+
 /**
  * Catégorie d'un résultat (findings.category) : déduite des étiquettes, des
  * identifiants d'avis et des catégories déclarées par le module.
  */
-/** Préfixe d'étiquette SARIF qui fixe la catégorie d'un résultat (chantier B de la 0.4). */
-export const EXPLICIT_CATEGORY_TAG = 'scanoria-category:'
-
 export function inferCategory(opts: {
   moduleCategories: string[]
   tags: string[]

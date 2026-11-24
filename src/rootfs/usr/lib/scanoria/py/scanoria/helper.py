@@ -585,6 +585,7 @@ def cmd_run():
     # la fin d'une mise à jour : attendre plutôt qu'échouer et être relancé en boucle.
     with Lock(wait=3300):
         recover_work()
+        provision.purge_oneshot()   # valeurs à lecture unique échues (mot de passe admin d'un service)
         for _ in range(10000):
             names = sorted(os.listdir(os.path.join(common.REQ, "incoming")))
             if not names:

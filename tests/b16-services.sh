@@ -59,6 +59,15 @@ cat > "$PYLIB/scanoria/provision.py" <<-'EOF'
 	def act_reset_service_admin(c):
 	    """Demande reset-service-admin du vrai provision.py (chantier SonarQube), hors du sujet de b16."""
 	    raise Fail("E_PRECONDITION", "not provided by the test provision.py")
+
+
+	def purge_oneshot(now=None):
+	    """Purge des valeurs à lecture unique, appelée à chaque passage du helper."""
+
+
+	def data_secrets(mid):
+	    """Secrets de mise en service sauvegardés avec la base : aucun pour les modules de b16."""
+	    return ()
 EOF
 
 T="$TMP/root"

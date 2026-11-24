@@ -48,6 +48,13 @@ describe('SonarQube : SARIF du convertisseur', () => {
     expect(out.issues).toEqual([])
     expect(out.findings).toHaveLength(7)
   })
+  it('troncature déclarée par le convertisseur : signalée (trou de couverture G15)', () => {
+    const doc = structuredClone(recorded('sonar-scanner')) as { runs: { properties: { scanoria: { truncated: boolean } } }[] }
+    doc.runs[0]!.properties.scanoria.truncated = true
+    const res = parseSarif(doc, { moduleId: 'sonar-scanner', moduleCategories: m.categories })
+    expect(res.issues).toEqual([{ code: 'truncated', detail: 'declared' }])
+    expect(res.findings).toHaveLength(7)
+  })
   it('code smells et bugs en qualité, vulnérabilités et hotspots en SAST', () => {
     expect(byRule['python:S1481']!.category).toBe('quality')
     expect(byRule['python:S1192']!.category).toBe('quality')

@@ -12,16 +12,11 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Queryable } from '../utils/db'
 
-/** Modules dont l'appliance gère le compte administrateur (provision.py). */
-export const MANAGED_ADMIN_MODULES = ['sonarqube'] as const
+export { MANAGED_ADMIN_MODULES, managesAdmin } from '#shared/admin-access'
 
 export const ONESHOT_DIR = process.env.NUXT_ONESHOT_DIR || '/run/scanoria/oneshot'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const PASSWORD_RE = /^[A-Za-z0-9#%+=_.-]{20,128}$/
-
-export function managesAdmin(id: string): boolean {
-  return (MANAGED_ADMIN_MODULES as readonly string[]).includes(id)
-}
 
 export type RevealOutcome
   = | { ok: true, login: string, password: string }
@@ -53,7 +48,7 @@ export async function revealAdminPassword(db: Queryable, opts: { requestId: stri
     parsed = JSON.parse(buf.toString('utf8'))
   }
   catch {
-    // Fichier déjà purgé par le helper (10 minutes) ou machine redémarrée.
+    // Fichier déjà effacé (2 minutes après son dépôt) ou machine redémarrée.
     return { ok: false, code: 'E_GONE' }
   }
   const password = (parsed as { password?: unknown } | null)?.password

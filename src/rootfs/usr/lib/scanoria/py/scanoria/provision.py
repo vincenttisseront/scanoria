@@ -22,7 +22,10 @@ n'est configuré (OIDC en 1.0).
 
 reset_admin(mid) : nouveau mot de passe admin, déposé une seule fois dans
 /run/scanoria/oneshot/<id de demande> (mémoire vive, root:scanoria 0640) ; la
-console le lit une seule fois et le helper efface ces fichiers après 10 minutes.
+console le lit une seule fois, juste après la fin de la demande. Le fichier est
+effacé au plus tard ONESHOT_TTL_S après son dépôt : minuteur systemd transitoire
+posé à l'écriture, purge à chaque passage du helper, et tmpfiles en dernier
+recours.
 """
 
 import base64
@@ -48,7 +51,7 @@ SCAN_TOKEN_FILE = "scan-token"
 HTTP_TIMEOUT = 30
 MAX_RESPONSE = 4 << 20
 ONESHOT = common.RUN + "/oneshot"
-ONESHOT_TTL_S = 600
+ONESHOT_TTL_S = 120   # la console lit la valeur dès la fin de la demande
 PASSWORD_RE = re.compile(r"[A-Za-z0-9#%+=_.-]{20,128}\Z")
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]{10,200}\Z")
 
@@ -282,6 +285,16 @@ def provision_sonarqube(m, info):
 
 PROVISIONERS = {"sonarqube": provision_sonarqube}
 
+# Secrets créés par la mise en service et liés au contenu de la base du
+# service (mot de passe admin, jeton) : sauvegardés et restaurés avec elle.
+# Le mot de passe de la base (db-password) n'y est pas : il suit le rôle
+# PostgreSQL, que pg_restore ne change pas.
+DATA_SECRETS = {"sonarqube": (ADMIN_FILE, SCAN_TOKEN_FILE)}
+
+
+def data_secrets(mid):
+    return DATA_SECRETS.get(mid, ())
+
 
 # --------------------------------------------------------------------------
 # reset-service-admin
@@ -310,7 +323,19 @@ def write_oneshot(request_id, value):
     if not common.TEST_ROOT:
         os.chown(ONESHOT, 0, common.scanoria_ids()[1])
         os.chmod(ONESHOT, 0o750)
-    common.write_json(os.path.join(ONESHOT, request_id + ".json"), {"password": value}, 0o640)
+    path = os.path.join(ONESHOT, request_id + ".json")
+    common.write_json(path, {"password": value}, 0o640)
+    if common.TEST_ROOT:
+        return
+    # Effacement programmé, indépendant du helper (qui s'arrête après la demande).
+    try:
+        r = common.run("systemd-run", ["--quiet", "--collect", "--unit", "scanoria-oneshot-" + request_id,
+                                       "--on-active=%ds" % ONESHOT_TTL_S, "--timer-property=AccuracySec=1s",
+                                       "/usr/bin/rm", "-f", "--", path], timeout=30)
+        if r.returncode != 0:
+            common.log("cannot schedule the removal of a one-shot value: purged at the next helper run")
+    except Exception as e:  # noqa: BLE001 (repli : purge au prochain passage du helper)
+        common.log("cannot schedule the removal of a one-shot value: %r" % e)
 
 
 def act_reset_service_admin(c):

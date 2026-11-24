@@ -9,6 +9,7 @@ irréversible : garder ou supprimer les données).
 -->
 
 <script setup lang="ts">
+import { managesAdmin } from '#shared/admin-access'
 import type { DnsStatus, FeedStatus, InstallPlan, InstalledModule, ModuleOperation, ModuleSummary } from '~/composables/useCatalog'
 
 interface ModuleDetail {
@@ -335,7 +336,7 @@ const testbedDetails = computed(() => {
       </div>
 
       <ServiceAdminAccess
-        v-if="inst?.status === 'healthy' && inst.enabled && id === 'sonarqube'"
+        v-if="inst?.status === 'healthy' && inst.enabled && managesAdmin(id)"
         :module-id="id"
         :name="title"
         :app-url="appUrl"

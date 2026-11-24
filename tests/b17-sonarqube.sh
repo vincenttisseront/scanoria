@@ -151,6 +151,17 @@ out("pagination : 1 200 issues sur 3 pages", len(results(d)) == 1200)
 d = s.convert(K, pages, max_results=1000)
 info = d["runs"][0]["properties"]["scanoria"]
 out("borne : 1 000 résultats gardés, troncature signalée", len(results(d)) == 1000 and info["truncated"] is True and info["total"] == 1200)
+c = s.Converter(K)
+for p in pages:
+    c.add_issues(p)
+c.declare_total(12000)
+info = c.sarif()["runs"][0]["properties"]["scanoria"]
+out("total annoncé par le serveur au-delà du lu : troncature signalée", info["truncated"] is True and info["total"] == 12000 and info["kept"] == 1200)
+c = s.Converter(K)
+for p in pages:
+    c.add_issues(p)
+c.declare_total(1200)
+out("total annoncé égal au lu : pas de troncature", c.sarif()["runs"][0]["properties"]["scanoria"]["truncated"] is False)
 # Champs manquants ou malformés.
 d = s.convert(K, [page([{"rule": "python:S1"}, "pas un objet", issue(message=None), issue(rule=None), issue(rule="a b"), issue()])])
 info = d["runs"][0]["properties"]["scanoria"]
@@ -230,6 +241,8 @@ jq -e --arg t "$SCANTOK" '.args | map(contains($t)) | any | not' "$TMP/c/scanner
 expect "sonar_scan : jeton passé par SONAR_TOKEN" "$(jq -r .token_env "$TMP/c/scanner-args.json")" true
 jq -e --arg k "-Dsonar.projectKey=$PKEY" '.args | index($k) != null and index("-Dsonar.scm.disabled=true") != null' "$TMP/c/scanner-args.json" > /dev/null \
 	&& ok "sonar_scan : clé de projet et SCM coupé" || ko "sonar_scan : arguments inattendus"
+jq -e '.args | map(select(startswith("-Dproject.settings="))) | length == 1 and (.[0] | contains("/src") | not)' "$TMP/c/scanner-args.json" > /dev/null \
+	&& ok "sonar_scan : sonar-project.properties du dépôt remplacé par un fichier vide hors de /src" || ko "sonar_scan : réglages du dépôt lus"
 [[ ! -e "$TMP/c/out/.work" ]] && ok "sonar_scan : répertoire de travail supprimé" || ko "sonar_scan : répertoire de travail laissé"
 grep -qF "$SCANTOK" "$TMP/c/stderr" "$TMP/c/stdout" && ko "sonar_scan : jeton dans le journal" || ok "sonar_scan : jeton absent du journal"
 rm -f "$TMP/c/out/result.sarif"
@@ -487,10 +500,11 @@ expect "provision : admin inconnu et jeton révoqué → E_SONAR_ADMIN" "$(prov 
 jq --arg p "$ADMIN_PW" '.admin_password = $p' "$STATE" > "$STATE.n" && mv "$STATE.n" "$STATE"
 expect "provision : jeton révoqué → renouvelé" "$(prov run | jq -r .token_renewed)" true
 # Reprise après un arrêt entre le changement de mot de passe et le remplacement du fichier.
-printf 'Sq#reprise-0123456789abcdef9a\n' > "$SEC/admin-password.new"; chmod 0600 "$SEC/admin-password.new"
-jq '.admin_password = "Sq#reprise-0123456789abcdef9a"' "$STATE" > "$STATE.n" && mv "$STATE.n" "$STATE"
+REPRISE="Sq#$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')9reprise"
+printf '%s\n' "$REPRISE" > "$SEC/admin-password.new"; chmod 0600 "$SEC/admin-password.new"
+jq --arg p "$REPRISE" '.admin_password = $p' "$STATE" > "$STATE.n" && mv "$STATE.n" "$STATE"
 prov run > /dev/null
-expect "provision : reprise du changement interrompu" "$(cat "$SEC/admin-password")" "Sq#reprise-0123456789abcdef9a"
+expect "provision : reprise du changement interrompu" "$(cat "$SEC/admin-password")" "$REPRISE"
 jq '.status = "DB_MIGRATION_NEEDED"' "$STATE" > "$STATE.n" && mv "$STATE.n" "$STATE"
 prov run > /dev/null
 expect "provision : migration de base lancée après mise à jour" "$(jq -r .migrated "$STATE")" true
@@ -517,9 +531,51 @@ expect "réinitialisation : appliance à jour" "$(cat "$SEC/admin-password")" "$
 expect "réinitialisation : dépôt unique 0640" "$(stat -c %a "$T/run/scanoria/oneshot/$RID.json")" 640
 expect "réinitialisation : module sans compte géré → E_PRECONDITION" "$(prov reset dtrack "$(uuid)" | jq -r .code)" E_PRECONDITION
 expect "réinitialisation : id de demande hostile → E_INVALID_PARAM" "$(prov reset sonarqube "../../etc/x" | jq -r .code)" E_INVALID_PARAM
-touch -d '-11 minutes' "$T/run/scanoria/oneshot/$RID.json"
-prov reset sonarqube "$(uuid)" > /dev/null
-[[ ! -e "$T/run/scanoria/oneshot/$RID.json" ]] && ok "réinitialisation : dépôts de plus de 10 minutes effacés" || ko "réinitialisation : dépôt périmé laissé"
+touch -d '-3 minutes' "$T/run/scanoria/oneshot/$RID.json"
+RID2=$(uuid)
+prov reset sonarqube "$RID2" > /dev/null
+[[ ! -e "$T/run/scanoria/oneshot/$RID.json" ]] && ok "réinitialisation : dépôts de plus de 2 minutes effacés" || ko "réinitialisation : dépôt périmé laissé"
+[[ -e "$T/run/scanoria/oneshot/$RID2.json" ]] && ok "réinitialisation : dépôt récent gardé pour la console" || ko "réinitialisation : dépôt récent effacé"
+grep -q 'provision.purge_oneshot()' "$PYLIB/scanoria/helper.py" \
+	&& ok "helper : purge des dépôts échus à chaque passage" || ko "helper : purge absente de cmd_run"
+
+# Sauvegarde : mot de passe admin et jeton suivent la base (restauration cohérente).
+python3 -I -B - "$PYLIB" "$TMP/bk" > "$TMP/bk.out" <<'EOF'
+import os, sys
+sys.path.insert(0, sys.argv[1])
+from scanoria import backup, services
+from scanoria.common import Fail
+d = sys.argv[2]
+os.makedirs(d, mode=0o700)
+def out(label, cond):
+    print(("ok   " if cond else "FAIL ") + label)
+adm, tok = services.secret_path("sonarqube", "admin-password"), services.secret_path("sonarqube", "scan-token")
+before = (open(adm).read(), open(tok).read())
+backup.save_secrets("sonarqube", d)
+names = sorted(os.listdir(d))
+out("sauvegarde : secrets de mise en service copiés", names == ["secret-admin-password", "secret-scan-token"])
+out("sauvegarde : copies 0600", all(oct(os.stat(os.path.join(d, n)).st_mode & 0o777) == "0o600" for n in names))
+out("sauvegarde : noms acceptés par le manifeste", all(backup.FILE_RE.match(n) for n in names))
+out("sauvegarde : db-password jamais copié", not os.path.exists(os.path.join(d, "secret-db-password")))
+for path in (adm, tok):
+    with open(path, "w") as f:
+        f.write("valeur-posterieure-a-la-sauvegarde\n")
+backup.restore_secrets("sonarqube", d, set(names))
+out("restauration : secrets de la sauvegarde remis", (open(adm).read(), open(tok).read()) == before)
+out("restauration : 0600", oct(os.stat(adm).st_mode & 0o777) == "0o600")
+open(os.path.join(d, "secret-db-password"), "w").write("x\n")
+try:
+    backup.restore_secrets("sonarqube", d, {"secret-db-password"})
+    out("restauration : secret inattendu refusé", False)
+except Fail as e:
+    out("restauration : secret inattendu refusé", e.code == "E_BACKUP_INVALID")
+backup.restore_secrets("sonarqube", d, {"db.dump"})
+out("restauration d'une sauvegarde sans secrets : secrets en place gardés", open(adm).read() == before[0])
+EOF
+while IFS= read -r line; do
+	case "$line" in "ok   "*) ok "${line#ok   }" ;; *) ko "${line#FAIL }" ;; esac
+done < "$TMP/bk.out"
+[[ -s "$TMP/bk.out" ]] || ko "sauvegarde : contrôles Python non exécutés"
 
 python3 -I -B - "$PYLIB" > "$TMP/req.out" <<'EOF'
 import sys

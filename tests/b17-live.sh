@@ -114,7 +114,8 @@ expect "visibilité privée par défaut" "$(curl -s -u "admin:$ADMIN_PW" "http:/
 
 python3 -I "$LIVE" provision "$WORK/sonarqube.json" "$PORT" enable > "$WORK/prov2.json" || ko "mise en service rejouée"
 expect "idempotence : jeton conservé" "$(jq -r .token_renewed "$WORK/prov2.json")" false
-expect "idempotence : même mot de passe" "$(cat "$SEC/admin-password")" "$ADMIN_PW"
+# Valeurs secrètes comparées sans jamais être affichées (journal CI public).
+[[ "$(cat "$SEC/admin-password")" == "$ADMIN_PW" ]] && ok "idempotence : même mot de passe" || ko "idempotence : mot de passe changé"
 
 RID=$(python3 -c 'import uuid; print(uuid.uuid4())')
 python3 -I "$LIVE" reset "$WORK/sonarqube.json" "$PORT" "$RID" > "$WORK/reset.json" || ko "réinitialisation"

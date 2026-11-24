@@ -8,6 +8,8 @@ Une sauvegarde est un répertoire root 0700 :
   /var/lib/scanoria/backups/modules/<id>/<AAAAMMJJTHHMMSSZ>/
       db.dump              pg_dump -Fc de la base mod_<id> (si needs.postgres)
       volume-<nom>.tar     un par volume de service.backup (module arrêté)
+      secret-<nom>         secrets de mise en service liés à la base (mot de
+                           passe admin, jeton d'analyse : provision.DATA_SECRETS)
       manifest.json        écrit en dernier : version du module, empreinte de
                            l'image, taille et SHA-256 de chaque fichier
 Un répertoire sans manifest.json est une sauvegarde interrompue : il n'est
@@ -25,13 +27,13 @@ import shutil
 import stat
 import subprocess
 
-from . import common, pgadmin, quadlet, services
+from . import common, pgadmin, provision, quadlet, services
 from .common import Fail
 
 ROOT = common.VARLIB + "/backups/modules"
 KEEP = 3
 STAMP_RE = re.compile(r"[0-9]{8}T[0-9]{6}Z(-[0-9])?\Z")
-FILE_RE = re.compile(r"(db\.dump|volume-[a-z0-9][a-z0-9-]{0,30}\.tar)\Z")
+FILE_RE = re.compile(r"(db\.dump|volume-[a-z0-9][a-z0-9-]{0,30}\.tar|secret-[a-z0-9][a-z0-9-]{0,40})\Z")
 REASONS = ("manual", "update", "scheduled")
 MANIFEST = "manifest.json"
 MAX_MANIFEST = 64 * 1024
@@ -224,6 +226,7 @@ def create(m, entry, reason, stop, start, timeout=1800):
             finally:
                 if was_running:
                     start()
+        save_secrets(mid, d)
         files = []
         for name in sorted(os.listdir(d)):
             if not FILE_RE.match(name):
@@ -254,10 +257,52 @@ def verify(mid, stamp):
     return d, man
 
 
+def save_secrets(mid, d):
+    """Copie (0600) des secrets de mise en service liés à la base du module."""
+    for name in provision.data_secrets(mid):
+        src = services.secret_path(mid, name)
+        try:
+            fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | os.O_NOCTTY | os.O_NONBLOCK)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise Fail("E_BACKUP_FAILED", "secret %s of %s is not readable" % (name, mid))
+        with os.fdopen(fd, "rb") as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                raise Fail("E_BACKUP_FAILED", "secret %s of %s is not a regular file" % (name, mid))
+            data = f.read(4097)
+        if len(data) > 4096:
+            raise Fail("E_BACKUP_FAILED", "secret %s of %s is too large" % (name, mid))
+        out = os.open(os.path.join(d, "secret-" + name), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(out, "wb") as f:
+            f.write(data)
+
+
+def restore_secrets(mid, d, names):
+    """Remet les secrets de mise en service de la sauvegarde (une sauvegarde
+    antérieure au chantier B n'en a pas : les secrets en place sont gardés)."""
+    allowed = set(provision.data_secrets(mid))
+    for fname in sorted(names):
+        if not fname.startswith("secret-"):
+            continue
+        name = fname[7:]
+        if name not in allowed:
+            raise Fail("E_BACKUP_INVALID", "backup has an unexpected secret")
+        with open(os.path.join(d, fname), "rb") as f:
+            data = f.read(4097)
+        if len(data) > 4096:
+            raise Fail("E_BACKUP_INVALID", "secret %s is too large" % name)
+        dest = services.secret_path(mid, name)
+        os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
+        common.atomic_write(dest, data, 0o600, group_scanoria=False)
+
+
 def restore_data(m, d, man, timeout=1800):
-    """Remet la base et les volumes d'une sauvegarde vérifiée (module arrêté)."""
+    """Remet la base, les volumes et les secrets de mise en service d'une
+    sauvegarde vérifiée (module arrêté)."""
     mid = m["id"]
     names = {f["name"] for f in man["files"]}
+    restore_secrets(mid, d, names)
     if "db.dump" in names:
         if not (m.get("needs") or {}).get("postgres"):
             raise Fail("E_BACKUP_INVALID", "backup has a database but the module has none")

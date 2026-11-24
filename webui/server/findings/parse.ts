@@ -149,8 +149,13 @@ export function parseSarif(doc: unknown, ctx: ParseContext): ParseOutput {
   let outside = 0
   let invalid = 0
   let total = 0
+  let declaredTruncated = false
   for (const run of doc.runs.slice(0, 32)) {
     if (!isObj(run)) continue
+    // Troncature déclarée par l'outil lui-même (run.properties.scanoria.truncated,
+    // convertisseur SonarQube) : elle ne peut qu'ajouter un trou de couverture.
+    const runProps = isObj(run.properties) && isObj(run.properties.scanoria) ? run.properties.scanoria : {}
+    if (runProps.truncated === true) declaredTruncated = true
     const tool = isObj(run.tool) ? run.tool : {}
     const driver = isObj(tool.driver) ? tool.driver : {}
     const rules: Obj[] = arr(driver.rules).filter(isObj)
@@ -229,6 +234,7 @@ export function parseSarif(doc: unknown, ctx: ParseContext): ParseOutput {
     }
   }
   if (total > MAX_RESULTS) issues.push({ code: 'truncated', detail: `${total}` })
+  else if (declaredTruncated) issues.push({ code: 'truncated', detail: 'declared' })
   if (outside) issues.push({ code: 'path-outside', detail: `${outside}` })
   if (invalid) issues.push({ code: 'invalid-result', detail: `${invalid}` })
   return { findings: dedupe(drafts.map(d => finish(ctx, d))), issues }

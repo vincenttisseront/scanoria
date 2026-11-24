@@ -341,6 +341,7 @@ def recover():
     for n in os.listdir(WORKSPACES) if os.path.isdir(WORKSPACES) else []:
         shutil.rmtree(os.path.join(WORKSPACES, n), ignore_errors=True)
     shutil.rmtree(fetch.CRED_DIR, ignore_errors=True)
+    svcnet.remove_orphan_secrets()
     fetch.reset_network()
 
 
@@ -582,13 +583,17 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
             stack.close()
             return finish("error", _err(f.code, "infra", f.message))
         secrets = list(secrets or []) + [svc["token"]]
-    args += ["--timeout", str(timeout)]
-    for k in sorted(scan.get("env") or {}):
-        args += ["--env", "%s=%s" % (k, scan["env"][k])]
-    cmd = spec["command"]
-    args += ["--entrypoint", json.dumps([cmd[0]]), m["image"]] + list(cmd[1:])
-    sampler = Sampler(name)
-    sampler.start()
+    try:
+        args += ["--timeout", str(timeout)]
+        for k in sorted(scan.get("env") or {}):
+            args += ["--env", "%s=%s" % (k, scan["env"][k])]
+        cmd = spec["command"]
+        args += ["--entrypoint", json.dumps([cmd[0]]), m["image"]] + list(cmd[1:])
+        sampler = Sampler(name)
+        sampler.start()
+    except BaseException:
+        stack.close()   # secret Podman du jeton jamais laissé derrière
+        raise
     try:
         rc, _, timed_out = fetch.run_logged(args, log_tmp, timeout + 30, None, secrets)
         sampler.sample()

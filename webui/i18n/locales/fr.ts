@@ -146,6 +146,11 @@ export default {
     E_SONAR_UNAVAILABLE: 'SonarQube n’a pas atteint l’état « UP » à temps : installation annulée.',
     E_SONAR_ADMIN: 'Le mot de passe administrateur de SonarQube n’est plus celui connu de l’appliance.',
     E_SONAR_API: 'Un appel à l’API de SonarQube a échoué pendant sa mise en service.',
+    E_SERVICE_MISSING: 'Le service dont dépend cet outil n’est pas installé, sain et actif.',
+    E_SERVICE_TOKEN: 'Le jeton d’analyse du service est absent ou illisible : réactivez le service.',
+    E_MODULE_INVALID: 'Ce module ne peut pas être lancé par cette version de l’appliance : mettez-la à jour.',
+    E_REF_NOT_DEFAULT: 'Outil limité à la branche principale : référence ignorée.',
+    E_PROJECT_UNKNOWN: 'Le projet de cette analyse est inconnu de l’exécuteur.',
   },
   request: {
     pending: 'En file d’attente…',

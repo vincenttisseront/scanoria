@@ -24,7 +24,7 @@ impact SECURITY ou un hotspot, « scanoria-category:quality » sinon.
 import re
 
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
-MAX_RESULTS = 5000
+MAX_RESULTS = 10000   # plafond de api/issues/search et de la console (findings/parse.ts)
 MAX_TEXT = 2000
 MAX_TAGS = 20
 MAX_PATH = 1024
@@ -178,6 +178,13 @@ class Converter:
         self.outside = 0
         self.truncated = False
         self.total = 0
+        self.server_total = 0
+
+    def declare_total(self, n):
+        """Nombre d'entrées annoncé par le serveur (paging.total) : s'il dépasse ce qui a
+        été lu, le document est marqué tronqué (couverture incomplète, G15)."""
+        if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+            self.server_total += n
 
     def _room(self):
         if len(self.results) >= self.max_results:
@@ -263,6 +270,8 @@ class Converter:
                 self.rules[r["key"]]["name"] = name
 
     def sarif(self):
+        if self.server_total > self.total:
+            self.truncated = True
         driver = {"name": "SonarQube", "informationUri": "https://www.sonarsource.com/products/sonarqube/",
                   "rules": []}
         if self.tool_version:
@@ -276,7 +285,7 @@ class Converter:
         run = {
             "tool": {"driver": driver},
             "results": self.results,
-            "properties": {"scanoria": {"total": self.total, "kept": len(self.results), "truncated": self.truncated,
+            "properties": {"scanoria": {"total": max(self.total, self.server_total), "kept": len(self.results), "truncated": self.truncated,
                                         "skipped": self.skipped, "outside": self.outside}},
         }
         return {"$schema": SARIF_SCHEMA, "version": "2.1.0", "runs": [run]}

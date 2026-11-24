@@ -331,6 +331,7 @@ SYSTEM_CMDS = {
     "hostnamectl": "/usr/bin/hostnamectl",
     "systemd-sysusers": "/usr/bin/systemd-sysusers",
     "systemd-tmpfiles": "/usr/bin/systemd-tmpfiles",
+    "systemd-run": "/usr/bin/systemd-run",
     "timedatectl": "/usr/bin/timedatectl",
     "getent": "/usr/bin/getent",
     "ip": "/usr/sbin/ip",

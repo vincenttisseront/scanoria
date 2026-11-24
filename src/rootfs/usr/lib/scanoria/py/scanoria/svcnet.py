@@ -169,10 +169,18 @@ class Attachment:
         try:
             with os.fdopen(fd, "w", encoding="ascii") as f:
                 f.write(self.svc["token"])
+            # Marqué avant la création : une création interrompue (délai) est
+            # quand même suivie d'une suppression à la sortie.
+            self.created = True
             r = common.run("podman", ["secret", "create", self.secret, tmp], timeout=60)
+        except BaseException:
+            self.__exit__()
+            raise
         finally:
             os.unlink(tmp)
         if r.returncode != 0:
+            self.__exit__()
+            self.created = False
             raise Unavailable(E_SERVICE_TOKEN, "cannot create the podman secret of the analysis token")
         self.created = True
         return self
@@ -188,8 +196,32 @@ class Attachment:
 
     def __exit__(self, *exc):
         if self.created:
-            common.run("podman", ["secret", "rm", self.secret], timeout=60)
+            try:
+                common.run("podman", ["secret", "rm", self.secret], timeout=60)
+            except Exception as e:  # noqa: BLE001 (repris par remove_orphan_secrets au démarrage)
+                common.log("runner: cannot remove podman secret %s: %r" % (self.secret, e))
         return False
+
+
+SECRET_RE = re.compile(r"scanoria-scan-[0-9a-f]{16}\Z")
+
+
+def remove_orphan_secrets():
+    """Au démarrage du runner (aucune analyse en cours) : secrets Podman de jeton
+    laissés par un arrêt brutal, supprimés."""
+    try:
+        r = common.run("podman", ["secret", "ls", "--format", "{{.Name}}"], timeout=60)
+    except Exception as e:  # noqa: BLE001
+        common.log("runner: cannot list podman secrets: %r" % e)
+        return
+    if r.returncode != 0:
+        return
+    for name in r.text.split():
+        if SECRET_RE.match(name):
+            try:
+                common.run("podman", ["secret", "rm", name], timeout=60)
+            except Exception as e:  # noqa: BLE001
+                common.log("runner: cannot remove podman secret %s: %r" % (name, e))
 
 
 def network_args(args, extra):
