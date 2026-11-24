@@ -32,6 +32,8 @@ export interface FindingFilter {
   kev?: boolean
   /** F16 (0.5) : un résultat par problème (groupe de résultats recoupés). */
   grouped?: boolean
+  /** J6 (0.6) : origine du résultat. */
+  origin?: 'module' | 'external'
   limit: number
   offset: number
 }
@@ -66,6 +68,9 @@ export interface FindingRow {
   kev: boolean
   kev_added: string | null
   /** F16 (0.5) : groupe de résultats recoupés (null sans clé de recoupement). */
+  /** J6 (0.6) : origine, et source du dernier téléversement d'un résultat externe. */
+  origin: 'module' | 'external'
+  external_source: { tool: string, version: string | null, format: string, uploaded_via: string } | null
   correlation_key: string | null
   group?: FindingGroup | null
 }
@@ -91,6 +96,7 @@ function where(f: Omit<FindingFilter, 'limit' | 'offset'>, params: unknown[]): s
   if (f.malicious !== undefined) add('f.malicious = ?', f.malicious)
   if (f.epss_min !== undefined) add('round(intel.epss::numeric, 6) >= ?::numeric', f.epss_min)
   if (f.kev !== undefined) clauses.push(f.kev ? 'intel.kev' : 'NOT intel.kev')
+  if (f.origin) add('f.origin = ?', f.origin)
   if (f.q) {
     const like = `%${f.q.replace(/[\\%_]/g, m => `\\${m}`)}%`
     add('(f.title ILIKE ? OR f.rule_id ILIKE $X OR f.path ILIKE $X OR array_to_string(f.vuln_ids, \' \') ILIKE $X OR f.package->>\'name\' ILIKE $X)'.replace(/\$X/g, `$${params.length + 1}`), like)
@@ -103,7 +109,8 @@ const LIST_COLUMNS = `f.id, f.project_id, p.slug AS project_slug, p.name AS proj
   f.secret_type, f.secret_state, ${EFFECTIVE_STATUS} AS status, to_char(f.status_until, 'YYYY-MM-DD') AS status_until,
   (${IS_NEW}) AS is_new,
   ${TS('f.created_at')} AS first_seen_at, ${TS('f.updated_at')} AS updated_at,
-  ${INTEL_COLUMNS}, f.correlation_key`
+  ${INTEL_COLUMNS}, f.correlation_key,
+  f.origin, (SELECT s.external_source FROM scans s WHERE s.id = f.last_scan_id AND f.origin = 'external') AS external_source`
 
 const SEV_RANK = `CASE f.severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END`
 /**

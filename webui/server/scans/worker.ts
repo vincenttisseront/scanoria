@@ -33,6 +33,8 @@ import { isRecorrelation, recorrelationPlan, recorrelationSource, reportRecorrel
 import { loadPins } from '../vigilance/pins'
 import { readVigilanceState } from '../vigilance/state'
 import { TRIAL_TRIGGER, concludeTrial, isTrialScan, recordTrialModule } from '../vigilance/trials'
+import { loadDurations, orderModules } from './order'
+import { recordOrchestration } from './orchestration'
 
 export interface WorkerPaths {
   modulesStateFile: string
@@ -81,6 +83,8 @@ class Deferred extends Error {
 
 /** Délai avant de reprendre une analyse laissée en « ingesting » sans tâche (arrêt du worker). */
 const ORPHAN_INGEST_S = 120
+/** J6 : téléversement externe abandonné (console arrêtée pendant l'ingestion). */
+const ORPHAN_EXTERNAL_S = 3600
 /** Âge minimal d'une tâche de incoming/ sans analyse « dispatched » avant son retrait. */
 const ORPHAN_JOB_S = 60
 /** Nouvel essai quand l'état des modules ou le catalogue est illisible. */
@@ -269,7 +273,7 @@ export class ScanWorker {
     if (catalog.size === 0 && state.modules.length > 0) throw new Deferred(err('E_CATALOG', 'infra', 'catalog index is unavailable'))
     // 0.5 (B, contrat 16) : une re-corrélation ne lance que les modules SCA qui lisent un SBOM.
     const recorrelate = scan.trigger === 'recorrelate'
-    const { modules, gaps } = recorrelate
+    const resolved = recorrelate
       ? recorrelationPlan({ installed: state.modules, catalog })
       : resolveProfile({
           profile: prof.rows[0]!,
@@ -281,6 +285,9 @@ export class ScanWorker {
           // 0.6 (B, contrat 24) : versions figées du projet (G6).
           pins: await loadPins(client, scan.project_id),
         })
+    // 0.6 (V3, V5) : graphe SBOM et ordre par durée mesurée.
+    const modules = orderModules(resolved.modules, catalog, await loadDurations(client, scan.project_id, resolved.modules.map(m => m.id)))
+    const gaps = resolved.gaps
     const plan: ScanPlan = {
       version: PLAN_VERSION,
       created_at: new Date().toISOString(),
@@ -336,10 +343,12 @@ export class ScanWorker {
       project_id: scan.project_id,
       created_at: new Date().toISOString(),
       source,
-      modules: modules.map(m => ({ id: m.id, version: m.version, options: m.options,
+      // 0.6 : graphe limité aux modules de la tâche (V3) ; une analyse d'essai ne lit pas le cache (V4, contrat 21).
+      modules: modules.map(m => ({ id: m.id, version: m.version, options: m.options, ...jobAfter(m, modules),
         // 0.6 (B, contrats 24 et 25) : le runner ne lance cette empreinte que si le helper la retient.
         ...(m.alternate && m.image_digest ? { image_digest: m.image_digest } : {}) })),
       ...(scan.trigger === TRIAL_TRIGGER ? { trial: true } : {}),
+      cache: scan.trigger !== TRIAL_TRIGGER,
     }
     const parsed = scanJobSchema.safeParse(job)
     // Message générique : la tâche peut contenir un secret, jamais recopié.
@@ -465,6 +474,8 @@ export class ScanWorker {
     }
     const complete = await this.recordModules(scan, result, plan, redact)
     await this.mergeSourceCoverage(scan.id, result)
+    await recordOrchestration(this.pool, result, { scanId: scan.id, jobId: scan.job_id, scansDir: this.cfg.scansDir, log: this.log })
+      .catch((e: unknown) => this.log(`scan ${scan.id}: orchestration: ${(e as Error).message}`))
     await this.conclude(scan.id, {
       status: result.status === 'ok' ? 'done' : 'error',
       error: result.status === 'ok' ? null : (result.error ?? err('E_RUNNER', 'infra', 'runner reported an error')),
@@ -535,7 +546,7 @@ export class ScanWorker {
           errorClass = 'tool'
         }
       }
-      if (status !== 'ok' && status !== 'skipped') complete = false
+      if (status !== 'ok' && status !== 'skipped' && status !== 'not-applicable') complete = false
       let logPath: string | null = null
       if (m.log) {
         try {
@@ -616,13 +627,28 @@ export class ScanWorker {
    * occuperaient le quota du projet pour toujours.
    */
   async recoverOrphans(): Promise<number> {
+    // J6 (0.6) : une analyse externe est ingérée par la console dans la requête de
+    // téléversement, jamais par le worker ; seule une ingestion abandonnée depuis
+    // longtemps (console arrêtée) est close, en erreur, sans verdict.
     const r = await this.pool.query<{ id: string, error: RunnerError | null }>(
       `SELECT id, error FROM scans
-        WHERE status = 'ingesting' AND job_id IS NULL AND started_at < now() - make_interval(secs => $1)`, [ORPHAN_INGEST_S])
+        WHERE status = 'ingesting' AND job_id IS NULL AND trigger <> 'external'
+          AND started_at < now() - make_interval(secs => $1)`, [ORPHAN_INGEST_S])
     for (const row of r.rows) {
       await this.withScanLock(row.id, () => this.conclude(row.id, { status: row.error ? 'error' : 'done', error: row.error, complete: false }))
     }
-    return r.rows.length
+    const ext = await this.pool.query<{ id: string }>(
+      `UPDATE scans SET status = 'error', finished_at = now(),
+              error = '{"code":"E_EXTERNAL_INGEST","class":"infra","message":"external results ingestion abandoned"}'::jsonb
+        WHERE status = 'ingesting' AND job_id IS NULL AND trigger = 'external'
+          AND started_at < now() - make_interval(secs => $1)
+       RETURNING id`, [ORPHAN_EXTERNAL_S])
+    if (ext.rows.length) {
+      await this.pool.query(
+        `UPDATE scan_modules SET status = 'error', error_class = 'infra', finished_at = now()
+          WHERE scan_id = ANY($1::uuid[]) AND status = 'running'`, [ext.rows.map(x => x.id)])
+    }
+    return r.rows.length + ext.rows.length
   }
 
   /**
@@ -786,6 +812,12 @@ export async function cancelScan(db: Pick<pg.Pool, 'query'>, scanId: string): Pr
   if (!r.rowCount) return false
   await db.query(`UPDATE scan_modules SET status = 'skipped' WHERE scan_id = $1 AND status IN ('pending', 'running')`, [scanId])
   return true
+}
+
+/** Graphe d'un module dans la tâche (V3) : seulement les modules lancés par cette tâche. */
+function jobAfter(m: PlannedModule, modules: PlannedModule[]): { after?: string[] } {
+  const after = (m.after ?? []).filter(id => id !== m.id && modules.some(x => x.id === id))
+  return after.length ? { after } : {}
 }
 
 /** Copie du résultat dont les messages d'erreur sont masqués. */

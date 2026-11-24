@@ -92,6 +92,10 @@ function gapText(g: CoverageGap): string {
   if (g.kind === 'profile-category' || (!g.kind && g.category)) {
     return t('scans.gaps.category', { category: label('category', g.category), reason: label('gapReason', g.reason) })
   }
+  // 0.6 (V6, V3) : module sans fichier concerné ; module qui a lu le dépôt faute de SBOM.
+  if (g.kind === 'not-applicable' || g.kind === 'sbom-fallback') {
+    return t(g.kind === 'not-applicable' ? 'scans.gaps.notApplicable' : 'scans.gaps.sbomFallback', { module: g.module ?? '?' })
+  }
   if (g.kind === 'profile-module' || (!g.kind && g.module)) {
     return t('scans.gaps.module', { module: g.module ?? '?', reason: label('gapReason', g.reason) })
   }
@@ -198,6 +202,11 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
             </dt>
             <dd>
               {{ label('triggers', scan.trigger) }}
+              <FindingsExternalBadge
+                v-if="scan.external_source"
+                origin="external"
+                :source="scan.external_source"
+              />
               <NuxtLink
                 v-if="scan.replay_of"
                 :to="`/scans/${scan.replay_of}`"
@@ -306,7 +315,20 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
                   variant="subtle"
                   :label="label('moduleStatus', moduleRow(m.id)!.status)"
                 />
-                <span class="text-muted">{{ duration(moduleRow(m.id)!.duration_ms) }}</span>
+                <span
+                  v-if="moduleRow(m.id)!.reused"
+                  class="text-muted"
+                >
+                  <ULink
+                    v-if="moduleRow(m.id)!.reused_from_scan"
+                    :to="`/scans/${moduleRow(m.id)!.reused_from_scan}`"
+                  >{{ t('scans.reusedFrom', { number: moduleRow(m.id)!.reused_from_number }) }}</ULink>
+                  <template v-else>{{ t('scans.reused') }}</template>
+                </span>
+                <span
+                  v-else
+                  class="text-muted"
+                >{{ duration(moduleRow(m.id)!.duration_ms) }}</span>
                 <span
                   v-if="moduleRow(m.id)!.results_count !== null"
                   class="text-muted"

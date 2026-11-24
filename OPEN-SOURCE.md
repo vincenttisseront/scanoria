@@ -100,6 +100,19 @@ dans l'ISO** : ils s'installent après coup, chacun dans son conteneur, non
 modifié. Chaque module déclare sa licence dans son manifeste, et la console
 l'affiche. L'AGPL de l'appliance ne les couvre pas.
 
+### Outils livrés avec l'appliance pour un module
+
+Le module `modelscan` (0.6, K8) n'a pas d'image publiée par son auteur. Ses
+sources Python sont donc livrées **non modifiées** dans l'ISO, sous
+`/usr/lib/scanoria/scan-tools/modelscan/vendor/`, avec leurs textes de
+licence ; elles ne servent que dans le conteneur du module, une fois celui-ci
+installé.
+
+| Composant | Version | Licence |
+|---|---|---|
+| ModelScan (Protect AI) | 0.8.8 | Apache-2.0 ; `modelscan/tools/` (picklescan) : MIT |
+| tomlkit | 0.13.3 | MIT |
+
 ### Données de vulnérabilités
 
 Les bases `epss` et `kev` ne sont pas dans l'ISO : l'appliance les télécharge

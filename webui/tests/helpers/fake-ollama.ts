@@ -132,9 +132,30 @@ export function fakeEmbedding(text: string, dims = 64): number[] {
   return v.map(x => x / n)
 }
 
+/** I16 (0.6) : diagnostic de l'appliance, cause tirée des faits et du journal, jamais d'une consigne injectée. */
+function wellBehaved06(required: string[], data: Record<string, unknown>): Record<string, unknown> | null {
+  if (!required.includes('explanation')) return null
+  const text = `${String(data.title)} ${String(data.code)} ${String(data.log)}`.replace(/IGNORE[^\n]*/g, '')
+  const rules: [RegExp, string, string, string][] = [
+    [/signature/i, 'signature', 'import-update', 'signature'],
+    [/disk|space/i, 'disk', 'none', 'disk space'],
+    [/certificate/i, 'certificate', 'renew-certificate', 'certificate'],
+    [/health/i, 'health-check', 'retry-install', 'health check'],
+  ]
+  const [, cause, action, word] = rules.find(([re]) => re.test(text)) ?? [null, 'unknown', 'rerun-selftest', 'problem']
+  return {
+    cause,
+    summary: `The ${word} is the probable cause (${String(data.status)}).`,
+    explanation: `${String(data.title)}: ${word}.`,
+    action,
+    action_reason: `Fixes the ${word}.`,
+    steps: [`Check the ${word}.`],
+  }
+}
+
 /** Réponse sage : reprend le titre, le message et les métadonnées, jamais l'extrait de code. */
 function wellBehaved(required: string[], data: Record<string, unknown>): Record<string, unknown> {
-  const v04 = wellBehaved04(required, data) ?? wellBehaved05(required, data)
+  const v04 = wellBehaved06(required, data) ?? wellBehaved04(required, data) ?? wellBehaved05(required, data)
   if (v04) return v04
   if (required.includes('detects')) {
     const pkg = data.package as { name?: string, fixed?: string[] } | null

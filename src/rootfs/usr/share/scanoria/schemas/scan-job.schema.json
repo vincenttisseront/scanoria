@@ -223,9 +223,23 @@
             "type": "string",
             "pattern": "^sha256:[0-9a-f]{64}$",
             "description": "0.6 (contrats 24 et 25) : empreinte voulue, version figée par le projet ou candidate d'un essai ; le runner ne lance qu'une image installée ou retenue par le helper."
+          },
+          "after": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+            },
+            "description": "0.6 (V3, V5) : modules de la tâche qui doivent être terminés avant celui-ci (graphe du plan)."
           }
         }
       }
+    },
+    "cache": {
+      "type": "boolean",
+      "description": "0.6 (V4, contrat 21) : le runner peut réutiliser une sortie rangée dans le cache de résultats de la console. Absent ou false (analyse d'essai F13) : jamais."
     }
   }
 }

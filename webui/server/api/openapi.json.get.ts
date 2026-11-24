@@ -79,6 +79,11 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/ai/diagnosis/proposal': { get: { summary: 'Safe setting proposed for a failed scan (I15), recomputed from facts, never taken from the AI output', role: 'operator' } },
   '/api/ai/diagnosis/apply': { post: { summary: 'Apply the proposed module timeout (409 E_AI_STALE if it changed); audited', role: 'operator', body: 'AiDiagnosisApply' } },
   '/api/ai/similar': { get: { summary: 'Similar findings of the same project (I7, embeddings), with the state of the feature; a suggestion only, never part of the quality gate', role: 'viewer' } },
+  '/api/ai/appliance/subjects': { get: { summary: 'Appliance subjects an AI diagnosis can explain now (I16): alerts, last failed self-test, failed updates and modules; empty without connector', role: 'admin' } },
+  '/api/ai/appliance/diagnosis': {
+    get: { summary: 'Latest AI diagnosis of an appliance subject (I16), marked as AI with model and digest; enabled false without connector', role: 'admin' },
+    post: { summary: 'Request the AI diagnosis of an appliance subject (I16): masked, neutralised context of at most 16 KB; proposes one console action, never runs it', role: 'admin', body: 'AiApplianceDiagnosis', status: 202 },
+  },
   '/api/ai/license-key': { get: { summary: 'Key (licence|project licence) of the AI explanation of a component licence (I18); null for opted-out projects', role: 'viewer' } },
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
@@ -102,10 +107,13 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/projects/{id}/scans': {
     post: { summary: 'Queue a scan {ref, profile?} → 202 {scan_id, number, url}; API token of the project (trigger api) or operator session', role: 'operator', body: 'ProjectScanCreate', status: 202, token: true },
   },
+  '/api/projects/{id}/results': {
+    post: { summary: 'Upload external results (J6): raw SARIF 2.1.0 or CycloneDX 1.5/1.6 body, 32 MiB max; query ref, commit, tool, version, category (default sast); creates an external scan, findings marked external, gate evaluated (not a release verdict) → 201 {scan_id, number, module, source, results, new, components, verdict}; 413 too large, 415 unknown format, 422 invalid document {issues}; 429 E_EXTERNAL_BUSY (one upload per project at a time, Retry-After)', role: 'operator', status: 201, token: true },
+  },
   '/api/scans/{id}/verdict': {
     get: { summary: 'Scan state, verdict and ordered reasons (VerdictDetails), optional ai_summary (I9); ?locale=fr|en', role: 'viewer', token: true },
   },
-  '/api/badges/{name}': { get: { summary: 'Latest verdict badge, /api/badges/<project slug>.svg (404 unless enabled for the project)', role: 'public' } },
+  '/api/badges/{name}': { get: { summary: 'Latest verdict badge (appliance scans only, never an external upload), /api/badges/<project slug>.svg (404 unless enabled for the project)', role: 'public' } },
   '/api/badges/projects/{id}': { put: { summary: 'Enable or disable the public badge of a project (disabled by default)', role: 'operator', body: 'BadgeUpdate' } },
   ...PROJECT_OPS,
   ...VIGILANCE_OPS,
@@ -249,6 +257,13 @@ export default defineEventHandler(async () => {
         AiFeedback: {
           type: 'object', additionalProperties: false, required: ['task_id', 'vote'],
           properties: { task_id: { type: 'string', format: 'uuid' }, vote: { enum: [1, -1] }, correction: { type: ['string', 'null'], minLength: 1, maxLength: 4000 } },
+        },
+        AiApplianceDiagnosis: {
+          type: 'object', additionalProperties: false, required: ['subject_id'],
+          properties: {
+            subject_id: { type: 'string', maxLength: 200, description: 'alert:update-rollback | alert:tls-expiry | alert:service:<name> | alert:disk:<mount> | selftest:last | update:<n> | install:<module>' },
+            locale: { enum: ['fr', 'en'] },
+          },
         },
         AiDiagnosisApply: {
           type: 'object', additionalProperties: false, required: ['scan_id', 'module', 'proposed_s'],
