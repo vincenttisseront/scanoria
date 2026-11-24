@@ -9,6 +9,7 @@ au groupe » est reprise par la page pour trier tout le groupe en une fois.
 
 <script setup lang="ts">
 interface Member { id: string, tool: string, severity: string, status: string }
+interface Group { confirmations: number, tools: string[], members: Member[], size?: number }
 const props = defineProps<{
   findingId: string
   epss: number | null | undefined
@@ -16,7 +17,7 @@ const props = defineProps<{
   kev: boolean | null | undefined
   kevAdded?: string | null
   vulnerability: boolean
-  group: { confirmations: number, tools: string[], members: Member[] } | null | undefined
+  group: Group | null | undefined
 }>()
 const applyToGroup = defineModel<boolean>('applyToGroup', { default: true })
 const emit = defineEmits<{ open: [id: string] }>()
@@ -93,7 +94,7 @@ const others = computed(() => (props.group?.members ?? []).filter(m => m.id !== 
       <UCheckbox
         v-model="applyToGroup"
         class="mt-3"
-        :label="t('intel.correlation.applyToGroup', { count: group.members.length })"
+        :label="t('intel.correlation.applyToGroup', { count: group.size ?? group.members.length })"
         :description="t('intel.correlation.applyToGroupHelp')"
         data-testid="apply-to-group"
       />

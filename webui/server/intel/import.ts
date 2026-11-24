@@ -45,6 +45,8 @@ const LINE = {
 } as const
 
 export interface ImportState {
+  /** Dernier export refusé (taille et date) : pas relu tant qu'il ne change pas. */
+  failed?: { size: number, mtime_ms: number, error: string } | null
   size: number
   mtime_ms: number
   sha256: string
@@ -111,9 +113,20 @@ export async function readExport(feed: IntelFeed, file: string): Promise<{ rows:
 
 type Db = pg.Pool | Queryable
 
-function inTransaction<T>(db: Db, fn: (q: Queryable) => Promise<T>): Promise<T> {
-  // Un pool ouvre sa transaction ; un client reçu est déjà dans celle de l'appelant.
-  return 'connect' in db && typeof db.connect === 'function' ? withTransaction(db as pg.Pool, fn) : fn(db)
+async function inTransaction<T>(db: Db, fn: (q: Queryable) => Promise<T>): Promise<T> {
+  if ('connect' in db && typeof db.connect === 'function') return withTransaction(db as pg.Pool, fn)
+  // Client reçu : point de sauvegarde, qui exige une transaction ouverte par l'appelant
+  // (sinon PostgreSQL refuse : jamais d'import à moitié en autocommit).
+  await db.query('SAVEPOINT intel_import')
+  try {
+    const out = await fn(db)
+    await db.query('RELEASE SAVEPOINT intel_import')
+    return out
+  }
+  catch (err) {
+    await db.query('ROLLBACK TO SAVEPOINT intel_import').catch(() => {})
+    throw err
+  }
 }
 
 export const settingKey = (feed: IntelFeed) => `intel.import_${feed}`
@@ -222,13 +235,14 @@ export async function syncIntel(db: pg.Pool | Queryable, opts: { modulesStateFil
       }
       continue
     }
-    if (prev && prev.size === st.size && prev.mtime_ms === Math.trunc(st.mtimeMs)) {
-      out.push({ feed, action: 'unchanged' })
+    const mtime = Math.trunc(st.mtimeMs)
+    if (prev && ((prev.size === st.size && prev.mtime_ms === mtime) || (prev.failed?.size === st.size && prev.failed.mtime_ms === mtime))) {
+      out.push(prev.failed?.size === st.size && prev.failed.mtime_ms === mtime ? { feed, action: 'error', error: prev.failed.error } : { feed, action: 'unchanged' })
       continue
     }
     try {
       const { rows, skipped, sha256 } = await readExport(feed, file)
-      const base = { size: st.size, mtime_ms: Math.trunc(st.mtimeMs), sha256, rows: rows.size, skipped, source_updated_at: published?.updated_at ?? null }
+      const base = { failed: null, size: st.size, mtime_ms: mtime, sha256, rows: rows.size, skipped, source_updated_at: published?.updated_at ?? null }
       if (prev && prev.sha256 === sha256) {
         await writeState(db, feed, { ...prev, ...base, imported_at: prev.imported_at })
         out.push({ feed, action: 'unchanged' })
@@ -239,7 +253,10 @@ export async function syncIntel(db: pg.Pool | Queryable, opts: { modulesStateFil
       out.push({ feed, action: 'imported', rows: rows.size, skipped, ...r })
     }
     catch (err) {
-      out.push({ feed, action: 'error', error: err instanceof IntelImportError ? err.code : (err as Error).message })
+      const error = err instanceof IntelImportError ? err.code : (err as Error).message
+      // Mémorisé : le même fichier n'est pas relu chaque minute ; les valeurs précédentes restent.
+      await writeState(db, feed, { ...(prev ?? { size: 0, mtime_ms: 0, sha256: '', rows: 0, skipped: 0, imported_at: '', source_updated_at: null }), failed: { size: st.size, mtime_ms: mtime, error: error.slice(0, 200) } })
+      out.push({ feed, action: 'error', error })
     }
   }
   return out
@@ -257,7 +274,7 @@ export async function intelStatus(db: Queryable): Promise<IntelStatus[]> {
   const out: IntelStatus[] = []
   for (const feed of INTEL_FEEDS) {
     const st = await readState(db, feed)
-    out.push({ id: feed, rows: st?.rows ?? null, imported_at: st?.imported_at ?? null, source_updated_at: st?.source_updated_at ?? null })
+    out.push({ id: feed, rows: st?.imported_at ? st.rows : null, imported_at: st?.imported_at || null, source_updated_at: st?.imported_at ? st.source_updated_at : null })
   }
   return out
 }

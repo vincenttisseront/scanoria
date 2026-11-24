@@ -15,7 +15,7 @@ import { writeAudit } from '../../../utils/audit'
 import { setFindingStatus, TriageError } from '../../../findings/triage'
 import { isoDay, MAX_EXCEPTION_DAYS } from '../../../findings/exceptions'
 import { statusChangeSchema, uuidParam } from '../../../findings/schemas'
-import { groupOf } from '../../../findings/correlation'
+import { groupMemberIds, groupOf } from '../../../findings/correlation'
 
 export default defineEventHandler(async (event) => {
   const auth = requireRole(event, 'operator')
@@ -31,7 +31,9 @@ export default defineEventHandler(async (event) => {
   try {
     return await withTransaction(pool, async (db) => {
       const group = await groupOf(db, id)
-      const ids = group ? [...new Set([id, ...group.members.map(m => m.id)])] : [id]
+      // Tous les membres (sans le plafond d'affichage), verrouillés dans l'ordre des id :
+      // deux tris simultanés du même groupe ne s'interbloquent pas.
+      const ids = [...new Set([id, ...(await groupMemberIds(db, id) ?? [])])].sort()
       for (const fid of ids) {
         const { before } = await setFindingStatus(db, fid, { status: body.status, reason: body.reason ?? null, until }, auth.user.id)
         await writeAudit(db, {

@@ -227,7 +227,11 @@ export function computeVerdict(input: GateInput): VerdictDetails {
   }
   // F16 (0.5) : un même problème vu par plusieurs outils compte une seule fois,
   // à la gravité la plus haute du groupe. Un résultat seul est inchangé.
-  if (input.correlate !== false) counted.splice(0, counted.length, ...collapseCorrelated(counted))
+  if (input.correlate !== false) {
+    const collapsed = collapseCorrelated(counted)
+    counted.length = 0
+    for (const f of collapsed) counted.push(f)
+  }
 
   const counts = Object.fromEntries(SEVERITIES.map(s => [s, 0])) as Record<Severity, number>
   for (const f of counted) counts[f.severity]++
@@ -411,7 +415,7 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
       `SELECT f.id, f.tool, f.rule_id, f.category, f.severity, f.path, f.vuln_ids,
               f.package->>'name' AS package_name, f.malicious, f.secret_type, f.secret_state, f.status,
               to_char(f.status_until, 'YYYY-MM-DD') AS status_until, sf.is_new,
-              intel.epss::float8 AS epss, intel.kev, f.correlation_key
+              round(intel.epss::numeric, 6)::float8 AS epss, intel.kev, f.correlation_key
          FROM scan_findings sf JOIN findings f ON f.id = sf.finding_id
          ${intelJoin('f')}
         WHERE sf.scan_id = $1`,

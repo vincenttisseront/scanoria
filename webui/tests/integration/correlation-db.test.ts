@@ -20,7 +20,7 @@ import { createUser } from '../../server/utils/users'
 import { finalizeScanFindings, ingestModuleOutputs } from '../../server/findings/ingest'
 import { getFinding, listFindings } from '../../server/findings/triage'
 import { evaluateGate } from '../../server/gates/evaluate'
-import { BACKFILL_SETTING, backfillCorrelationKeys, correlationKey, groupOf } from '../../server/findings/correlation'
+import { BACKFILL_SETTING, backfillCorrelationKeys, correlationKey, groupMemberIds, groupOf } from '../../server/findings/correlation'
 import { fingerprintOf } from '../../server/findings/normalize'
 import type { Role } from '#shared/schemas'
 import groupGet from '../../server/api/findings/[id]/group.get'
@@ -142,6 +142,9 @@ describe.skipIf(!DATABASE_URL)('recoupement entre outils (PostgreSQL réel)', ()
     const m = flat.items.find(i => i.rule_id === 'CVE-2021-44906')!
     expect(m.group).toMatchObject({ confirmations: 2, tools: ['osv-scanner', 'trivy'] })
     expect(m.group!.members).toHaveLength(2)
+    expect(m.group!.size).toBe(2)
+    expect(await groupMemberIds(db.pool, m.id)).toEqual(m.group!.members.map(x => x.id).sort())
+    expect(await groupMemberIds(db.pool, crypto.randomUUID())).toBeNull()
     expect(flat.items.find(i => i.rule_id === 'CVE-2026-0001')!.group).toMatchObject({ confirmations: 1 })
 
     const grouped = await listFindings(db.pool, { limit: 50, offset: 0, grouped: true })

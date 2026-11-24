@@ -140,8 +140,9 @@ describe.skipIf(!DATABASE_URL)('EPSS et KEV (PostgreSQL réel)', () => {
     expect(all.items[0]!.epss).toBeCloseTo(0.02, 5)
     expect(all.items[1]!.epss_percentile).toBeCloseTo(0.97, 5)
     const everything = await listFindings(db.pool, { limit: 50, offset: 0 })
-    // Hors vulnérabilités : KEV en tête, puis la gravité avant l'EPSS.
-    expect(everything.items.map(i => i.id)).toEqual([ids.kev, ids.sast, ids.epss, ids.calm])
+    // Tri par ligne : KEV en tête ; une vulnérabilité à EPSS élevé passe devant un SAST
+    // critique, une vulnérabilité à EPSS faible reste rangée par sa gravité.
+    expect(everything.items.map(i => i.id)).toEqual([ids.kev, ids.epss, ids.sast, ids.calm])
     expect(everything.items.find(i => i.id === ids.sast)).toMatchObject({ epss: null, kev: false })
     expect((await listFindings(db.pool, { limit: 50, offset: 0, kev: true })).items.map(i => i.id)).toEqual([ids.kev])
     expect((await listFindings(db.pool, { limit: 50, offset: 0, kev: false })).total).toBe(3)
@@ -188,6 +189,11 @@ describe.skipIf(!DATABASE_URL)('EPSS et KEV (PostgreSQL réel)', () => {
     await rm(join(dir, 'kev.jsonl.gz'))
     await writeFile(join(dir, 'kev.jsonl.gz'), Buffer.from('pas du gzip'))
     expect((await sync())[1]).toEqual({ feed: 'kev', action: 'error', error: 'unreadable' })
+    // Échec mémorisé : le même fichier n'est pas relu, l'erreur reste signalée, l'état publié est intact.
+    expect((await sync())[1]).toEqual({ feed: 'kev', action: 'error', error: 'unreadable' })
+    const st = (await db.pool.query(`SELECT value FROM appliance_settings WHERE key = 'intel.import_kev'`)).rows[0]!.value
+    expect(st.failed).toMatchObject({ error: 'unreadable' })
+    expect(st.imported_at).not.toBe('')
     await expect(readExport('kev', join(dir, 'absent.gz'))).rejects.toThrow()
     expect(new IntelImportError('too-large').code).toBe('too-large')
   })

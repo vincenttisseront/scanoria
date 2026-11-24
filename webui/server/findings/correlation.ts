@@ -196,6 +196,8 @@ export interface FindingGroup {
   /** Nombre d'outils distincts : indice de confiance. */
   confirmations: number
   tools: string[]
+  /** Nombre total de résultats du groupe (members est limité à 50). */
+  size: number
   members: GroupMember[]
 }
 
@@ -216,13 +218,24 @@ export async function groupsFor(db: Queryable, pairs: { project_id: string, key:
   )
   for (const m of r.rows) {
     const id = `${m.project_id}|${m.correlation_key}`
-    const g = out.get(id) ?? { key: m.correlation_key, project_id: m.project_id, confirmations: 0, tools: [], members: [] }
+    const g = out.get(id) ?? { key: m.correlation_key, project_id: m.project_id, confirmations: 0, tools: [], size: 0, members: [] }
     if (!g.tools.includes(m.tool)) g.tools.push(m.tool)
+    g.size++
     if (g.members.length < MAX_MEMBERS) g.members.push({ id: m.id, tool: m.tool, severity: m.severity, status: m.status })
     g.confirmations = g.tools.length
     out.set(id, g)
   }
   return out
+}
+
+/** Tous les résultats (hors corrigés) du groupe d'un résultat, sans plafond, triés par id. */
+export async function groupMemberIds(db: Queryable, findingId: string): Promise<string[] | null> {
+  const r = await db.query<{ id: string }>(
+    `SELECT g.id FROM findings f JOIN findings g ON g.project_id = f.project_id AND g.correlation_key = f.correlation_key
+      WHERE f.id = $1 AND g.status <> 'fixed' ORDER BY g.id`,
+    [findingId],
+  )
+  return r.rows.length ? r.rows.map(x => x.id) : null
 }
 
 /** Groupe d'un résultat (lui compris), ou null s'il n'a pas de clé. */

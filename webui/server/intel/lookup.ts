@@ -20,5 +20,6 @@ export function intelJoin(alias = 'f'): string {
 }
 
 /** Colonnes publiées dans l'API des résultats. */
-export const INTEL_COLUMNS = `intel.epss::float8 AS epss, intel.epss_percentile::float8 AS epss_percentile,
+// real (migration 009) arrondi à 6 décimales : 0.01 reste 0.01 une fois converti en float8.
+export const INTEL_COLUMNS = `round(intel.epss::numeric, 6)::float8 AS epss, round(intel.epss_percentile::numeric, 6)::float8 AS epss_percentile,
   intel.kev AS kev, intel.kev_added AS kev_added`

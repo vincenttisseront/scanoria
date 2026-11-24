@@ -89,7 +89,7 @@ function where(f: Omit<FindingFilter, 'limit' | 'offset'>, params: unknown[]): s
   }
   if (f.secret !== undefined) clauses.push(`f.secret_type IS ${f.secret ? 'NOT ' : ''}NULL`)
   if (f.malicious !== undefined) add('f.malicious = ?', f.malicious)
-  if (f.epss_min !== undefined) add('intel.epss >= ?', f.epss_min)
+  if (f.epss_min !== undefined) add('round(intel.epss::numeric, 6) >= ?::numeric', f.epss_min)
   if (f.kev !== undefined) clauses.push(f.kev ? 'intel.kev' : 'NOT intel.kev')
   if (f.q) {
     const like = `%${f.q.replace(/[\\%_]/g, m => `\\${m}`)}%`
@@ -106,17 +106,16 @@ const LIST_COLUMNS = `f.id, f.project_id, p.slug AS project_slug, p.name AS proj
   ${INTEL_COLUMNS}, f.correlation_key`
 
 const SEV_RANK = `CASE f.severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END`
-const VULN_CATEGORIES = new Set(['sca', 'container', 'sbom'])
-
 /**
- * Tri par défaut : paquets malveillants, puis CVE exploitées (KEV) ; pour les
- * vulnérabilités, EPSS avant la gravité (H3), sinon la gravité avant l'EPSS.
+ * Tri par défaut : paquets malveillants, CVE exploitées (KEV), puis, pour les
+ * vulnérabilités (sca, container, sbom), EPSS avant la gravité (H3) ; les
+ * autres résultats sont rangés par gravité. Décidé ligne par ligne.
  */
-function orderBy(filter: FindingFilter): string {
-  const vulns = !!filter.category && VULN_CATEGORIES.has(filter.category)
-  const epss = 'x.epss DESC NULLS LAST'
-  const sev = 'x.sev_rank DESC'
-  return `ORDER BY x.malicious DESC, x.kev DESC, ${vulns ? `${epss}, ${sev}` : `${sev}, ${epss}`}, x.updated_at DESC, x.id`
+const VULN_ROW = `f.category IN ('sca', 'container', 'sbom')`
+const PRIORITY = `CASE WHEN ${VULN_ROW} THEN COALESCE(round(intel.epss::numeric, 6), 0) * 10 + ${SEV_RANK} / 10.0 ELSE ${SEV_RANK} / 10.0 END`
+
+function orderBy(): string {
+  return 'ORDER BY x.malicious DESC, x.kev DESC, x.priority DESC, x.sev_rank DESC, x.updated_at DESC, x.id'
 }
 
 export async function listFindings(db: Queryable, filter: FindingFilter): Promise<{ items: FindingRow[], total: number }> {
@@ -132,17 +131,17 @@ export async function listFindings(db: Queryable, filter: FindingFilter): Promis
     params,
   )
   params.push(filter.limit, filter.offset)
-  const rows = await db.query<FindingRow & { sev_rank?: number, grp_rn?: number }>(
+  const rows = await db.query<FindingRow & { sev_rank?: number, grp_rn?: number, priority?: number }>(
     `SELECT x.* FROM (
-       SELECT ${LIST_COLUMNS}, ${SEV_RANK} AS sev_rank,
+       SELECT ${LIST_COLUMNS}, ${SEV_RANK} AS sev_rank, ${PRIORITY} AS priority,
               row_number() OVER (${group} ORDER BY f.malicious DESC, ${SEV_RANK} DESC, f.id) AS grp_rn
          ${from}
      ) x ${filter.grouped ? 'WHERE x.grp_rn = 1' : ''}
-     ${orderBy(filter)}
+     ${orderBy()}
      LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
   )
-  const items = rows.rows.map(({ sev_rank: _s, grp_rn: _g, ...r }) => r as FindingRow)
+  const items = rows.rows.map(({ sev_rank: _s, grp_rn: _g, priority: _p, ...r }) => r as FindingRow)
   await attachGroups(db, items)
   return { items, total: Number(total.rows[0]?.n ?? 0) }
 }
