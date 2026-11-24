@@ -10,7 +10,7 @@
 import type { AiSubjectType } from '#shared/analysis'
 import type { Queryable } from '../utils/db'
 import { aiPaths, loadEndpoint } from './config'
-import { sanitizeContext } from './context'
+import { CONTEXT_KINDS, CONTEXT_REQUIRED, sanitizeContext } from './context'
 import { UUID_RE } from './task-kit'
 import { TASKS } from './tasks'
 
@@ -70,25 +70,33 @@ export async function enqueueAiTask(db: Queryable, req: AiTaskRequest): Promise<
     // Les outils écrivent en anglais : rien à traduire pour un lecteur anglophone (I17).
     if (req.kind === 'translate-rule' && locale === 'en') return null
     const priority = Math.max(0, Math.min(100, Math.trunc(req.priority ?? AI_PRIORITY.precompute)))
-    // Une demande identique en attente suffit ; un précalcul déjà fait avec le modèle retenu n'est pas refait.
-    const existing = await db.query<{ id: string, status: string }>(
-      `SELECT id, status FROM ai_tasks
+    const given = sanitizeContext(req.kind, req.context)
+    // Une demande identique en attente suffit ; un précalcul déjà fait avec le modèle retenu
+    // (modèle d'embedding pour I7) n'est pas refait. Un nouveau contexte (I11 : index d'une
+    // nouvelle analyse) donne une nouvelle tâche.
+    const existing = await db.query<{ id: string, status: string, context: unknown }>(
+      `SELECT id, status, context FROM ai_tasks
         WHERE kind = $1 AND subject_type = $2 AND subject_id = $3 AND locale = $4
           AND (status IN ('queued', 'running') OR ($5 AND status = 'done' AND model_digest IS NOT DISTINCT FROM (
-                SELECT output->'selection'->'tasks'->$1->>'digest' FROM ai_tasks
-                 WHERE kind = 'probe' AND status = 'done' ORDER BY finished_at DESC LIMIT 1)))
+                SELECT (CASE WHEN $6 THEN output->'selection'->'embedding' ELSE output->'selection'->'tasks'->$1 END)->>'digest'
+                  FROM ai_tasks WHERE kind = 'probe' AND status = 'done' ORDER BY finished_at DESC LIMIT 1)))
         ORDER BY created_at DESC LIMIT 1`,
-      [req.kind, req.subjectType, req.subjectId, locale, priority < AI_PRIORITY.interactive],
+      [req.kind, req.subjectType, req.subjectId, locale, priority < AI_PRIORITY.interactive, !!def.embed],
     )
-    const found = existing.rows[0]
+    const sameContext = (c: unknown) => !given || JSON.stringify(c ?? null) === JSON.stringify(given)
+    const found = existing.rows.find(r => r.status !== 'done' || sameContext(r.context))
     if (found) {
+      // Tâche encore en file avec un autre contexte (nouvelle analyse) : elle prend le plus récent.
+      if (found.status === 'queued' && given && !sameContext(found.context)) {
+        await db.query(`UPDATE ai_tasks SET context = $2 WHERE id = $1 AND status = 'queued'`, [found.id, JSON.stringify(given)])
+      }
       if (found.status === 'queued' && priority >= AI_PRIORITY.interactive) {
         await db.query('UPDATE ai_tasks SET priority = GREATEST(priority, $2) WHERE id = $1', [found.id, priority])
       }
       return found.id
     }
-    let context = sanitizeContext(req.kind, req.context)
-    if (!context && req.context === undefined && req.kind === 'diagnose-scan') {
+    let context = given
+    if (!context && req.context === undefined && (CONTEXT_KINDS as readonly string[]).includes(req.kind)) {
       // Nouvelle demande (depuis la console) : le contexte joint par la file d'analyses est repris.
       const prev = await db.query<{ context: unknown }>(
         `SELECT context FROM ai_tasks WHERE kind = $1 AND subject_type = $2 AND subject_id = $3 AND context IS NOT NULL
@@ -97,6 +105,8 @@ export async function enqueueAiTask(db: Queryable, req: AiTaskRequest): Promise<
       )
       context = sanitizeContext(req.kind, prev.rows[0]?.context)
     }
+    // I11 sans index (module reach-index absent, ou index purgé) : rien à évaluer.
+    if (!context && (CONTEXT_REQUIRED as readonly string[]).includes(req.kind)) return null
     const { rows } = await db.query<{ id: string }>(
       `INSERT INTO ai_tasks (kind, project_id, subject_type, subject_id, locale, priority, requested_by, context)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,

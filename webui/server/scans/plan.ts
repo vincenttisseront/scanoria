@@ -24,6 +24,12 @@ const scanSpecSchema = z.object({
   inputs: z.array(z.string()).max(8).default([]),
   timeout_s: z.number().int().min(1).max(86_400).default(900),
   history: z.enum(['shallow', 'full']).optional(),
+  /**
+   * Module d'appoint (0.5, reach-index pour I11) : lancé seulement quand un
+   * autre module du plan couvre cette catégorie, jamais compté dans la
+   * couverture (G15) ni bloquant pour le verdict (G13).
+   */
+  companion: z.enum(CATEGORIES).optional(),
 })
 export type ScanSpec = z.infer<typeof scanSpecSchema>
 
@@ -56,8 +62,8 @@ export interface PlannedModule {
   timeout_s: number
   history: 'shallow' | 'full'
   outputs: string[]
-  /** Pourquoi le module est dans le plan (affiché dans la console). */
-  reason: 'category' | 'included'
+  /** Pourquoi le module est dans le plan (affiché dans la console) ; « companion » : module d'appoint. */
+  reason: 'category' | 'included' | 'companion'
 }
 
 export interface CoverageGap {
@@ -171,12 +177,17 @@ export function resolveProfile(input: ResolveInput): { modules: PlannedModule[],
     return null
   }
 
+  const companions: InstalledModule[] = []
   for (const m of [...input.installed].sort((a, b) => a.id.localeCompare(b.id))) {
     if (m.type !== 'scanner' || exclude.has(m.id)) continue
     const entry = input.catalog.get(`${m.id}@${m.version}`)
     // Modules système (git-fetch, catégorie « system ») : utilisés par le runner, jamais planifiés.
     if (entry?.categories.includes(SYSTEM_CATEGORY)) continue
     const explicit = include.has(m.id)
+    if (entry?.scan?.companion && !explicit) {
+      companions.push(m)
+      continue
+    }
     const matching = entry ? entry.categories.filter(c => categories.has(c)) : []
     if (!explicit && matching.length === 0) continue
     const problem = usable(m)
@@ -204,6 +215,26 @@ export function resolveProfile(input: ResolveInput): { modules: PlannedModule[],
       reason: matching.length ? 'category' : 'included',
     })
     for (const c of matching) covered.add(c)
+  }
+  // Modules d'appoint : seulement si un module planifié couvre leur catégorie ; un appoint
+  // indisponible est simplement omis (ce n'est pas un trou de couverture).
+  for (const m of companions) {
+    const e = input.catalog.get(`${m.id}@${m.version}`)!
+    if (!modules.some(x => x.categories.includes(e.scan!.companion!))) continue
+    if (usable(m) || !e.scan!.inputs.includes(want) || (e.restrictions === 'private-code-forbidden' && !input.projectLicense)) continue
+    modules.push({
+      id: m.id,
+      version: m.version,
+      image: e.image,
+      image_digest: digestOf(e.image),
+      categories: e.categories,
+      options: resolveOptions(e.options, m.options).values,
+      feeds: e.feeds.map(id => ({ id, version: feedsById.get(id)?.version ?? null })),
+      timeout_s: Math.min(86_400, Math.max(e.scan!.timeout_s, input.timeoutOverrides?.[m.id] ?? 0)),
+      history: 'shallow',
+      outputs: e.outputs,
+      reason: 'companion',
+    })
   }
   for (const id of include) {
     if (!modules.some(m => m.id === id) && !gaps.some(g => g.module === id)) {
@@ -252,7 +283,7 @@ const plannedModuleSchema = z.object({
   timeout_s: z.number().int().min(1),
   history: z.enum(['shallow', 'full']),
   outputs: z.array(z.string()),
-  reason: z.enum(['category', 'included']),
+  reason: z.enum(['category', 'included', 'companion']),
 })
 
 export const scanPlanSchema = z.object({

@@ -40,6 +40,12 @@ export interface TaskDefinition<I = unknown, O = unknown> {
   finalize: (output: O, input: I) => O
   /** Délai d'un appel, en millisecondes. */
   timeoutMs: number
+  /**
+   * Tâche d'embedding (I7, /api/embed) : texte envoyé au modèle d'embedding,
+   * déjà masqué. Une telle tâche n'appelle jamais /api/chat ; instruction,
+   * jsonSchema, output et finalize ne servent pas.
+   */
+  embed?: (input: I) => string
 }
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/

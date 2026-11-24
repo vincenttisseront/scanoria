@@ -57,7 +57,7 @@ def main(argv):
     if cmd == "scan":
         sc, src, out, timeout, name = load(argv[2]), argv[3], argv[4], int(argv[5]), argv[6]
         svc = svcnet.resolve(registry(sq, 0), sc)
-        args = modcheck.podman_args(sc, src, out, "/nonexistent")
+        args = modcheck.podman_args(sc, src, out, "/nonexistent", tool=False)
         args[args.index("--network=slirp4netns")] = "--network=none"
         args.insert(1, "--name=" + name)
         mounts = svcnet.tool_mount(sc)

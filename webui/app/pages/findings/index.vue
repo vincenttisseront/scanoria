@@ -649,6 +649,8 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
             :status="detail.status"
             :title="detail.title"
             :secret="!!detail.secret_type"
+            @triaged="reloadAll"
+            @open="openDetail"
           />
 
           <UCard v-if="detail.secret_type">

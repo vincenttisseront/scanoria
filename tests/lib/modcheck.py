@@ -223,7 +223,7 @@ def expect_report(manifest, sarif):
     return report
 
 
-def podman_args(manifest, src, out, feeds):
+def podman_args(manifest, src, out, feeds, tool=True):
     """Arguments de « podman run » d'un scanner confiné (CLAUDE.md § 6.4)."""
     scan = manifest["scan"]
     res = manifest["resources"]
@@ -240,6 +240,11 @@ def podman_args(manifest, src, out, feeds):
     ]
     for feed in manifest["requires"]["feeds"]:
         args.append(f"--volume={os.path.join(feeds, feed)}:/feeds/{feed}:ro")
+    # Outil de l'appliance (scan.tool) monté en lecture seule sur /scanoria, comme svcnet.tool_mount
+    # (tool=False : l'appelant monte lui-même celui de sa racine de test, comme sonar_live).
+    if tool and scan.get("tool"):
+        tools = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src", "rootfs", "usr", "lib", "scanoria", "scan-tools")
+        args.append(f"--volume={os.path.realpath(os.path.join(tools, scan['tool']))}:/scanoria:ro")
     for k, v in sorted((scan.get("env") or {}).items()):
         args.append(f"--env={k}={v}")
     cmd = render_defaults(manifest, scan["command"])

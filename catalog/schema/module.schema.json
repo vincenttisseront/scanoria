@@ -596,6 +596,10 @@
           "type": "boolean",
           "default": false,
           "description": "Avec scan.network: service:<id> : si le service est désactivé ou indisponible, le module est « skipped » (complément facultatif, comme l'envoi des SBOM à Dependency-Track) au lieu d'être manquant (G13)."
+        },
+        "companion": {
+          "enum": ["quality", "sast", "secrets", "sca", "iac", "container", "sbom", "dast", "lint", "licenses", "vuln-management", "ci"],
+          "description": "Module d'appoint (0.5) : planifié seulement quand un autre module du plan couvre cette catégorie (reach-index avec sca, pour I11) ; jamais compté dans la couverture (G15), et son échec ne rend pas le verdict non concluant (G13). Il ne produit aucun résultat d'analyse."
         }
       }
     },

@@ -4,7 +4,8 @@ Copyright (C) 2026 Vincent Tisseront
 
 Sorties IA d'un résultat dans le panneau de détail : pré-tri suggéré à côté
 du statut « nouveau » (I3), explication (I2) et traduction de la règle
-(I17). Sans connecteur IA, rien n'est affiché et rien d'autre ne change
+(I17) ; 0.5 : résultats semblables (I7) et atteignabilité d'une
+vulnérabilité de dépendance (I11). Sans connecteur IA, rien n'est affiché et rien d'autre ne change
 (CLAUDE.md § 3.5). Aucune de ces sorties ne modifie le statut du résultat.
 -->
 
@@ -16,6 +17,8 @@ defineProps<{
   title?: string
   secret?: boolean
 }>()
+// I7 : un tri commun fait depuis les semblables rafraîchit la page ; un semblable s'ouvre dans le panneau.
+const emit = defineEmits<{ triaged: [], open: [id: string] }>()
 </script>
 
 <template>
@@ -35,6 +38,12 @@ defineProps<{
       v-if="!secret && title"
       :finding-id="findingId"
       :original="title"
+    />
+    <AiReachability :finding-id="findingId" />
+    <AiSimilarFindings
+      :finding-id="findingId"
+      @triaged="emit('triaged')"
+      @open="emit('open', $event)"
     />
   </div>
 </template>
