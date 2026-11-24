@@ -212,6 +212,7 @@ R=$(res "$id")
 SARIF="$SCANS/results/$id/$(jq -r '.modules[0].outputs.sarif' <<< "$R")"
 expect "base remplacée en cours d'analyse : l'analyse garde sa version" "$(jq -r '.runs[0].results[0].ruleId' "$SARIF" 2> /dev/null)" v-un-un
 expect "base : date de la version épinglée enregistrée" "$(jq -r '.modules[0].feeds[0].updated_at' <<< "$R")" 2026-11-24T01:00:00Z
+expect "base : version montée enregistrée (G11)" "$(jq -r '.modules[0].feeds[0].revision' <<< "$R")" 20261124T010000Z-00000001
 expect "base : bail rendu en fin d'analyse" "$(find "$T/var/lib/scanoria/feeds/.store/demo-db/.leases" -type f 2> /dev/null | wc -l)" 0
 id=$(uuid)
 drop "$id" "$(job "$id" "[$LB]" "$C2")"

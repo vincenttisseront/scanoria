@@ -469,11 +469,18 @@ def feeds_info(reg, m, leases=None):
         ver = (fe.get("manifest") or {}).get("version") if isinstance(fe, dict) else None
         # Date du dernier téléchargement réussi de la base (feeds.py, 0.3.4), ou
         # celle de la version épinglée pour l'analyse (V7).
+        revision = None
         if leases is not None and isinstance(leases.get(fid), dict):
             updated = leases[fid].get("updated_at")
+            # G11 : répertoire exact de la base montée pour cette analyse (V7).
+            rev = leases[fid].get("version")
+            revision = rev if isinstance(rev, str) and feeds.VERSION_DIR_RE.match(rev) else None
         else:
             updated = feeds.public_status(fid).get("updated_at")
-        res.append({"id": fid, "version": ver if isinstance(ver, str) else None, "updated_at": updated})
+        entry = {"id": fid, "version": ver if isinstance(ver, str) else None, "updated_at": updated}
+        if revision:
+            entry["revision"] = revision
+        res.append(entry)
     return res
 
 

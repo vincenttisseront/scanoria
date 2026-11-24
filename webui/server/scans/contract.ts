@@ -117,6 +117,8 @@ export const scanResultSchema = z.strictObject({
     feeds: z.array(z.strictObject({
       id: moduleId,
       version: z.string().max(128).nullable(),
+      // 0.6 (V7, G11) : répertoire de la version de la base montée pour cette analyse.
+      revision: z.string().regex(/^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/).optional(),
       updated_at: timestamp.nullable(),
     })),
     started_at: timestamp.nullable().optional(),

@@ -271,6 +271,11 @@
                   ],
                   "maxLength": 128
                 },
+                "revision": {
+                  "description": "0.6 (V7, G11) : répertoire de la version de la base montée pour cette analyse.",
+                  "type": "string",
+                  "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$"
+                },
                 "updated_at": {
                   "oneOf": [
                     {

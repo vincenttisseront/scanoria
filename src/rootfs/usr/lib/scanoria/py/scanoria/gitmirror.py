@@ -219,6 +219,10 @@ def sanitize(p):
     """Configuration réécrite, et retrait de tout ce qui pourrait faire exécuter ou détourner git."""
     for rel in REMOVED:
         q = os.path.join(p, rel)
+        # Jamais à travers un lien : chaque répertoire intermédiaire est vérifié par lstat.
+        parts = rel.split("/")[:-1]
+        if any(os.path.islink(os.path.join(p, *parts[:i + 1])) for i in range(len(parts))):
+            raise MirrorError("E_GITMIRROR_LAYOUT", "unexpected link in the git mirror")
         if os.path.isdir(q) and not os.path.islink(q):
             shutil.rmtree(q, ignore_errors=True)
         elif os.path.lexists(q):
@@ -313,8 +317,8 @@ def purge_orphans(live, extra=(), now=None):
                     f(pid)
         except MirrorError:
             continue
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(_lock_path(pid))
+        # Le fichier de verrou reste : le supprimer après libération laisserait deux
+        # tâches tenir deux verrous « exclusifs » différents sur le même miroir.
         done.append(pid)
         common.log("git mirror of deleted project %s removed" % pid)
     return done

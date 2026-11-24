@@ -53,6 +53,21 @@ describe('contrat 22 : source du résultat', () => {
   })
 })
 
+describe('contrat 22 : version de base montée (V7, G11)', () => {
+  const withFeed = (feed: Record<string, unknown>) => ({
+    ...result({}),
+    modules: [{ id: 'trivy', version: '0.76.2', status: 'ok', image_digest: null, feeds: [{ id: 'trivy-db', version: null, updated_at: '2026-11-24T01:00:00Z', ...feed }], outputs: {}, log: null }],
+  })
+  it.each([[{}], [{ revision: '20261124T010000Z-0a1b2c3d' }]])('accepté %j', (f) => {
+    expect(resultV(withFeed(f)), JSON.stringify(resultV.errors)).toBe(true)
+    expect(scanResultSchema.safeParse(withFeed(f)).success).toBe(true)
+  })
+  it.each([[{ revision: '../x' }], [{ revision: 'legacy-0a1b2c3d' }], [{ revision: null }]])('refusé %j', (f) => {
+    expect(resultV(withFeed(f))).toBe(false)
+    expect(scanResultSchema.safeParse(withFeed(f)).success).toBe(false)
+  })
+})
+
 describe('demande prefetch-images', () => {
   const pin = { module_id: 'gitleaks', version: '8.30.1', image_digest: `sha256:${'a'.repeat(64)}` }
   it('paramètres : versions figées seulement, empreintes complètes', () => {

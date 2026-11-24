@@ -27,10 +27,9 @@ PYLIB="$ROOT/src/rootfs/usr/lib/scanoria/py"
 TMP=$(mktemp -d)
 trap 'chmod -R u+rwX "$TMP" 2> /dev/null; rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
-ok() { PASS=$((PASS + 1)); printf 'ok   %s\n' "$1"; }
-ko() { FAIL=$((FAIL + 1)); printf 'FAIL %s\n' "$1"; }
+# Compteurs tenus dans un fichier : report tourne dans le sous-shell d'un tube.
+ok() { echo + >> "$TMP/tally"; printf 'ok   %s\n' "$1"; }
+ko() { echo - >> "$TMP/tally"; printf 'FAIL %s\n' "$1"; }
 expect() { # libellé valeur_obtenue valeur_attendue
 	if [[ "$2" == "$3" ]]; then ok "$1"; else ko "$1 (obtenu « $2 », attendu « $3 »)"; fi
 }
@@ -43,7 +42,8 @@ export SCANORIA_TEST_ROOT="$T" SCANORIA_TEST_BIN="$STUBS"
 unset SCANORIA_TEST_OWNER_UID SCANORIA_SCANS_DIR SCANORIA_RUNNER_STATE
 printf 'MemTotal:       16384000 kB\nMemAvailable:    8192000 kB\n' > "$T/proc/meminfo"
 for i in 0 1 2 3; do printf 'processor\t: %d\n' "$i"; done > "$T/proc/cpuinfo"
-py() { python3 -I -B - "$PYLIB" "$@"; }
+# Un bloc Python interrompu (exception) compte comme un échec.
+py() { python3 -I -B - "$PYLIB" "$@" || echo "ko bloc Python interrompu (code $?)"; }
 
 # Lanceur commun des cas Python : chaque ligne « ok|ko libellé » est reportée.
 report() {
@@ -213,6 +213,12 @@ open(p + "/objects/gros", "w").write("x" * 100)
 p, st = gitmirror.prepare(pid, "https://forge.exemple.test/autre.git")
 check("prepare : trop gros → recréé", st == "created")
 gitmirror.MAX_MIRROR_BYTES = 8 << 30
+os.makedirs(p + "/info", exist_ok=True); os.rename(p + "/info", p + "/info.reel"); os.symlink("/etc", p + "/info")
+try:
+    gitmirror.sanitize(p); check("sanitize : lien intermédiaire refusé", False)
+except gitmirror.MirrorError as e:
+    check("sanitize : lien intermédiaire refusé", e.code == "E_GITMIRROR_LAYOUT" and os.path.isdir("/etc"))
+os.unlink(p + "/info"); os.rename(p + "/info.reel", p + "/info")
 os.mkfifo(p + "/objects/tube")
 p, st = gitmirror.prepare(pid, "https://forge.exemple.test/autre.git")
 check("prepare : fichier spécial → recréé", st == "created")
@@ -329,6 +335,25 @@ try:
     feeds.lease("trivy-db", J1); check("bail : lien hors du magasin refusé", False)
 except common.Fail:
     check("bail : lien hors du magasin refusé", True)
+# Base héritée (répertoire réel, 0.2 à 0.3.3) montée pendant la première bascule.
+os.makedirs(feeds.store_dir("osv-db"), exist_ok=True)
+os.makedirs(feeds.link_path("osv-db") + "/db"); open(feeds.link_path("osv-db") + "/db/all.zip", "w").write("ancienne")
+l = feeds.lease("osv-db", J1)
+check("base héritée : bail pris", l["path"] == feeds.link_path("osv-db") and feeds.leased_versions("osv-db") == {"legacy"})
+n1 = os.path.join(feeds.store_dir("osv-db"), "20261124T010000Z-00000001"); os.makedirs(n1)
+prev = feeds.swap("osv-db", n1); feeds.prune("osv-db", prev)
+kept = [n for n in os.listdir(feeds.store_dir("osv-db")) if n.startswith("legacy-")]
+check("base héritée : gardée pendant l'analyse", len(kept) == 1 and os.path.isfile(os.path.join(feeds.store_dir("osv-db"), kept[0], "db/all.zip")))
+feeds.release("osv-db", J1); feeds.prune("osv-db")
+check("base héritée : retirée après le bail", not [n for n in os.listdir(feeds.store_dir("osv-db")) if n.startswith("legacy-")])
+# G11 : la version montée figure dans le résultat.
+from scanoria import runner
+reg = {"modules": {}}
+m = {"id": "lecteur", "requires": {"feeds": ["osv-db"]}}
+fi = runner.feeds_info(reg, m, {"osv-db": {"path": n1, "version": "20261124T010000Z-00000001", "updated_at": "2026-11-24T01:00:00Z"}})
+check("résultat : version montée enregistrée (G11)", fi == [{"id": "osv-db", "version": None, "updated_at": "2026-11-24T01:00:00Z", "revision": "20261124T010000Z-00000001"}])
+fi = runner.feeds_info(reg, m, {"osv-db": {"path": "x", "version": None, "updated_at": None}})
+check("résultat : base héritée sans révision", "revision" not in fi[0])
 EOF
 
 # --- 5. V1 : prefetch-images -------------------------------------------------------------------
@@ -575,6 +600,8 @@ print(("ok " if not os.path.exists(gitmirror.path_of(pid)) else "ko ") + "purge 
 print(("ok " if not os.path.exists(os.path.join(runner.SCAN_CACHE, "sonarish", pid)) else "ko ") + "purge : cache du projet supprimé retiré")
 EOF
 
+PASS=$(grep -c '^+' "$TMP/tally" || true)
+FAIL=$(grep -c '^-' "$TMP/tally" || true)
 echo
 echo "b27 : $PASS réussis, $FAIL échoués"
 [[ $FAIL -eq 0 ]]

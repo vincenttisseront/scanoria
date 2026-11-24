@@ -732,6 +732,9 @@ def prune(mid, previous=None):
     for n in names:
         if n in ("status.json", ".leases") or n in keep:
             continue
+        if "legacy" in keep and n.startswith("legacy-"):
+            # Base héritée montée par une analyse en cours (bail « legacy »).
+            continue
         path = os.path.join(sd, n)
         if os.path.isdir(path) and not os.path.islink(path):
             shutil.rmtree(path, ignore_errors=True)
@@ -775,7 +778,7 @@ def leased_versions(mid, now=None):
                 v = f.read(100).strip()
         except (OSError, UnicodeDecodeError):
             continue
-        if VERSION_DIR_RE.match(v) or v.startswith("legacy-"):
+        if VERSION_DIR_RE.match(v) or v == "legacy" or v.startswith("legacy-"):
             out.add(v)
     return out
 
@@ -802,7 +805,11 @@ def lease(mid, job_id):
         if os.path.islink(lp) and os.path.dirname(real) != os.path.realpath(store_dir(mid)):
             raise Fail("E_FEED_UNAVAILABLE", "database %s points outside its store" % mid)
         if not os.path.islink(lp):
-            # Base antérieure à la bascule par lien (0.2 à 0.3.3) : montée telle quelle.
+            # Base antérieure à la bascule par lien (0.2 à 0.3.3) : montée telle quelle,
+            # avec un bail « legacy » : la bascule la range en legacy-*, que prune garde
+            # tant que ce bail n'est pas rendu.
+            os.makedirs(_lease_dir(mid), mode=0o700, exist_ok=True)
+            common.atomic_write(os.path.join(_lease_dir(mid), job_id), b"legacy\n", 0o600, group_scanoria=False)
             return {"path": lp, "version": None, "updated_at": (read_status(mid) or {}).get("updated_at")}
         os.makedirs(_lease_dir(mid), mode=0o700, exist_ok=True)
         common.atomic_write(os.path.join(_lease_dir(mid), job_id), (name + "\n").encode("ascii"), 0o600,
