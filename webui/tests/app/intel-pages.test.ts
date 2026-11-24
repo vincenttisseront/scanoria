@@ -80,6 +80,7 @@ describe('Résultats : EPSS, KEV et recoupement', () => {
     expect(callsTo('GET', '/api/findings')[0]!.query).toMatchObject({ grouped: 'true' })
     expect(callsTo('GET', '/api/findings')[0]!.query.kev).toBeUndefined()
     expect(document.body.querySelector('[data-testid="intel-status"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-testid="epss-attribution"]')!.textContent).toBe('EPSS, FIRST.org')
   })
 
   it('filtres EPSS et KEV lus dans l’adresse ; regroupement désactivable', async () => {
@@ -113,6 +114,7 @@ describe('Résultats : EPSS, KEV et recoupement', () => {
     const text = bodyText()
     expect(text).toContain('Exploitation')
     expect(text).toContain('Oui, ajoutée le 2026-11-20')
+    expect(document.body.querySelector('[data-testid="epss-attribution-detail"]')!.textContent).toBe('EPSS, FIRST.org')
     expect(text).toContain('Recoupement entre outils')
     expect(text).toContain('osv-scanner')
     await click(document.body.querySelector(`[data-testid="correlation-open-${F2}"]`)!)

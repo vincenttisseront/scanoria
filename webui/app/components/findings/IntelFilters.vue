@@ -61,7 +61,7 @@ const oldest = computed(() => imported.value.map(f => f.source_updated_at ?? f.i
       class="text-xs text-muted"
       :title="t('intel.sortHelp')"
       data-testid="intel-status"
-    >{{ t('intel.status', { date: fmt.date(oldest) }) }}</span>
+    >{{ t('intel.status', { date: fmt.date(oldest) }) }} · <span data-testid="epss-attribution">{{ t('intel.attribution') }}</span></span>
     <span
       v-else-if="feeds"
       class="text-xs text-muted"

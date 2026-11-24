@@ -47,6 +47,11 @@ const others = computed(() => (props.group?.members ?? []).filter(m => m.id !== 
               :epss-percentile="epssPercentile"
               :kev="false"
             />
+            <span
+              v-if="typeof epss === 'number'"
+              class="ms-1 text-xs text-muted"
+              data-testid="epss-attribution-detail"
+            >{{ t('intel.attribution') }}</span>
           </dd>
         </div>
         <div>

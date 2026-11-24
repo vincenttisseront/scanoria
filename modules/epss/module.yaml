@@ -19,7 +19,13 @@ license:
   spdx: LicenseRef-FIRST-EPSS
   url: https://www.first.org/epss/faq
   restrictions: none
-  notes: Données EPSS mises à disposition gratuitement par FIRST, avec attribution demandée (« EPSS, FIRST.org »). Conditions relevées par des sources secondaires le 2026-11-24, first.org étant inaccessible depuis l'environnement de développement ; à revérifier à la source.
+  verified_at: "2026-11-24"
+  notes: >-
+    Aucune licence nommée. FAQ de FIRST (« Is EPSS free to use? »), vérifiée à la source le 2026-11-24 :
+    « Yes. EPSS scores are published freely via CSV download and API with no registration required. »
+    et « Attribution is requested when EPSS data is used in publications or products. »
+    Rien ne restreint l'usage commercial ni la redistribution des scores (seules les données
+    d'entraînement ne sont pas redistribuées). Attribution affichée dans la console : « EPSS, FIRST.org ».
 upstream:
   homepage: https://www.first.org/epss/
   source: https://www.first.org/epss/data_stats

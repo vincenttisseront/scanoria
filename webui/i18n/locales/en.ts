@@ -313,6 +313,7 @@ export default {
     sourceUnavailable: 'The source repository is unknown to this installation (update-source.json missing).',
     licenseLink: 'License text',
     modulesNote: 'Each catalog module keeps its own license, shown in the console.',
+    dataNotices: 'Vulnerability data: EPSS scores provided by FIRST.org (EPSS, FIRST.org); CISA Known Exploited Vulnerabilities catalog (CC0-1.0).',
   },
   updates: {
     title: 'Updates',
@@ -1779,7 +1780,8 @@ export default {
   intel: {
     epss: 'EPSS',
     epssValue: '{pct} · percentile {percentile}',
-    epssHelp: 'Probability of exploitation in the next 30 days (FIRST EPSS), and rank among all CVEs.',
+    epssHelp: 'Probability of exploitation in the next 30 days (FIRST EPSS), and rank among all CVEs. Source: EPSS, FIRST.org.',
+    attribution: 'EPSS, FIRST.org',
     kev: 'KEV',
     kevHelp: 'Known exploited vulnerability: CISA KEV catalog (added on {date}).',
     kevHelpNoDate: 'Known exploited vulnerability: CISA KEV catalog.',
