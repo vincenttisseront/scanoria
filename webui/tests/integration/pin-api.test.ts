@@ -73,7 +73,7 @@ describe.skipIf(!DATABASE_URL)('API de vigilance (PostgreSQL réel)', () => {
     setConfig(loadConfig({
       NUXT_DATABASE_URL: db.url, NUXT_CATALOG_INDEX_FILE: join(root, 'catalog-index.json'), NUXT_MODULES_STATE_FILE: join(root, 'modules-state.json'),
       NUXT_REQUESTS_DIR: join(root, 'requests'), NUXT_STATE_FILE: join(root, 'state.json'), NUXT_VIGILANCE_STATE_FILE: join(root, 'vigilance', 'state.json'),
-      NUXT_VIGILANCE_SELF_DIR: join(root, 'vigilance', 'self'), NUXT_PINS_FILE: join(root, 'console', 'pins.json'),
+      NUXT_VIGILANCE_SELF_DIR: join(root, 'vigilance', 'self'), NUXT_PINS_FILE: join(root, 'pins', 'pins.json'),
     }))
     for (const role of ['viewer', 'operator', 'admin'] as const) {
       users[role] = Number((await createUser(db.pool, { username: role, role, password: `${role}-long-password` })).id)
@@ -151,7 +151,7 @@ describe.skipIf(!DATABASE_URL)('API de vigilance (PostgreSQL réel)', () => {
     const ok = await call(`/api/projects/${project}/pins/gitleaks`, 'admin', { method: 'PUT', json: { reason: 'audit de la release' } })
     expect(ok.status).toBe(200)
     expect(ok.data.pin).toMatchObject({ version: '8.30.0', image_digest: D_OLD })
-    expect(JSON.parse(await readFile(join(root, 'console', 'pins.json'), 'utf8')).pins).toEqual([{ module: 'gitleaks', version: '8.30.0', image_digest: D_OLD }])
+    expect(JSON.parse(await readFile(join(root, 'pins', 'pins.json'), 'utf8')).pins).toEqual([{ module: 'gitleaks', version: '8.30.0', image_digest: D_OLD }])
     const list = await call(`/api/projects/${project}/pins`, 'viewer')
     expect(list.data.pins).toEqual([expect.objectContaining({ module_id: 'gitleaks', installed_version: '8.30.0', warnings: ['vulnerable'] })])
     expect(list.data.pinnable).toEqual([])
@@ -161,7 +161,7 @@ describe.skipIf(!DATABASE_URL)('API de vigilance (PostgreSQL réel)', () => {
     expect((await call(`/api/projects/${project}/pins/gitleaks`, 'operator', { method: 'DELETE' })).status).toBe(403)
     expect((await call(`/api/projects/${project}/pins/gitleaks`, 'admin', { method: 'DELETE' })).status).toBe(200)
     expect((await call(`/api/projects/${project}/pins/gitleaks`, 'admin', { method: 'DELETE' })).status).toBe(404)
-    expect(JSON.parse(await readFile(join(root, 'console', 'pins.json'), 'utf8')).pins).toEqual([])
+    expect(JSON.parse(await readFile(join(root, 'pins', 'pins.json'), 'utf8')).pins).toEqual([])
     expect((await call('/api/projects/00000000-0000-4000-8000-000000000000/pins', 'viewer')).status).toBe(404)
   })
 

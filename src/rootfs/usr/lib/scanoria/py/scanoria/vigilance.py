@@ -3,7 +3,7 @@
 """Vigilance de l'appliance (0.6, chantier B), exécutée en root par le helper.
 
 - G6, version figée par projet (contrat 24) : la console publie les versions
-  figées dans /var/lib/scanoria/console/pins.json (lu sans confiance). Une mise
+  figées dans /var/lib/scanoria/pins/pins.json (lu sans confiance). Une mise
   à jour de module garde alors l'image de l'ancienne version et son manifeste
   vérifié (« image retenue ») ; le runner ne lance une version différente de
   la version installée que si elle est retenue ici. Une version figée ne peut
@@ -36,7 +36,7 @@ VIG_DIR = common.VARLIB + "/vigilance"
 STATE = VIG_DIR + "/state.json"
 SELF_DIR = VIG_DIR + "/self"
 SELF_STATUS = SELF_DIR + "/status.json"
-PINS_FILE = common.VARLIB + "/console/pins.json"
+PINS_FILE = common.VARLIB + "/pins/pins.json"
 WORK = common.VARLIB + "/modules/work"
 MAX_PINS_BYTES = 1024 * 1024   # 5000 entrées de la console, environ 110 octets chacune
 MAX_PINS = 5000

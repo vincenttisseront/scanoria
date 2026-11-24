@@ -54,7 +54,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConsoleConfig 
     dnsStatusFile: env.NUXT_DNS_STATUS_FILE || '/var/lib/scanoria/dns/status.json',
     vigilanceStateFile: env.NUXT_VIGILANCE_STATE_FILE || '/var/lib/scanoria/vigilance/state.json',
     vigilanceSelfDir: env.NUXT_VIGILANCE_SELF_DIR || '/var/lib/scanoria/vigilance/self',
-    pinsFile: env.NUXT_PINS_FILE || '/var/lib/scanoria/console/pins.json',
+    pinsFile: env.NUXT_PINS_FILE || '/var/lib/scanoria/pins/pins.json',
     trustProxy: bool(env.NUXT_TRUST_PROXY, true),
     migrateOnStart: bool(env.NUXT_MIGRATE_ON_START, true),
     ingestIntervalMs: Number.isFinite(interval) && interval >= 200 ? interval : 5000,

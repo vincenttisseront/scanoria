@@ -48,7 +48,7 @@ T="$TMP/root"
 STUBS="$TMP/stubs"
 REL="$TMP/rel/catalog-v1"
 SCANS="$T/var/lib/scanoria/scans"
-mkdir -p "$T"/var/lib/scanoria/requests/{tmp,incoming,work,done,failed} "$T/var/lib/scanoria/console" "$T/var/lib/scanoria/uploads" \
+mkdir -p "$T"/var/lib/scanoria/requests/{tmp,incoming,work,done,failed} "$T/var/lib/scanoria/console" "$T/var/lib/scanoria/pins" "$T/var/lib/scanoria/uploads" \
 	"$T/run/scanoria" "$T/etc/scanoria" "$T/opt/scanoria/current" "$T/usr/share/scanoria/schemas" "$STUBS" "$REL"
 export SCANORIA_TEST_ROOT="$T" SCANORIA_TEST_BIN="$STUBS"
 echo 0.6.0 > "$T/opt/scanoria/current/VERSION"
@@ -119,7 +119,7 @@ hx() {
 REG="$T/var/lib/scanoria/modules/installed.json"
 STATE="$T/var/lib/scanoria/modules/state.json"
 VSTATE="$T/var/lib/scanoria/vigilance/state.json"
-PINS="$T/var/lib/scanoria/console/pins.json"
+PINS="$T/var/lib/scanoria/pins/pins.json"
 gl() { jq -r ".modules[] | select(.id == \"gitleaks\") | $1" "$STATE"; }
 
 podman rmi --ignore "$OLD_IMAGE" "$NEW_IMAGE" > /dev/null 2>&1 || true

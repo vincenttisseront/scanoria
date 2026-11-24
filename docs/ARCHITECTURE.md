@@ -763,7 +763,7 @@ SHA-256 est gardée). `POST /api/projects/:id/scans {ref, profile?}` → `202
   version que l'installée que si elle est retenue et que l'empreinte concorde ;
   sinon le module est `missing`, classe `infra` (G12), et le verdict non
   concluant (G13). `modules.remove_image` ne retire jamais une image retenue.
-- **Versions figées** : la console publie `/var/lib/scanoria/console/pins.json`
+- **Versions figées** : la console publie `/var/lib/scanoria/pins/pins.json`
   (`{version: 1, pins: [{module, version, image_digest}]}`), lu sans confiance
   par le helper (fichier régulier, propriétaire `scanoria`, ≤ 1 Mio, JSON
   strict). À la mise à jour d'un module, l'ancienne version figée est retenue.

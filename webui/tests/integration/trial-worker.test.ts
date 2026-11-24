@@ -244,7 +244,7 @@ describe.skipIf(!DATABASE_URL)('vigilance : essai, version figée, canaris, appl
       const pin = await pinModule(db.pool, { projectId: project, moduleId: 'gitleaks', reason: 'audit de la release 2.4', actor: actor(), installed, index })
       expect(pin).toMatchObject({ module_id: 'gitleaks', version: '8.30.0', image_digest: D_OLD, pinned_by: admin })
       expect((await loadPins(db.pool, project)).get('gitleaks')!.reason).toBe('audit de la release 2.4')
-      const file = join(root, 'console', 'pins.json')
+      const file = join(root, 'pins', 'pins.json')
       const body = await publishPinsFile(db.pool, file)
       expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ version: 1, pins: [{ module: 'gitleaks', version: '8.30.0', image_digest: D_OLD }] })
       expect(await publishPinsFile(db.pool, file, body)).toBe(body)

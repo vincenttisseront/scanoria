@@ -41,7 +41,7 @@ T="$TMP/root"
 STUBS="$TMP/stubs"
 CALLS="$TMP/calls.log"
 mkdir -p "$T"/var/lib/scanoria/requests/{tmp,incoming,work,done,failed} "$T/var/lib/scanoria/modules" \
-	"$T/var/lib/scanoria/console" "$T/run/scanoria" "$T/etc/scanoria" "$T/opt/scanoria/current" "$STUBS"
+	"$T/var/lib/scanoria/console" "$T/var/lib/scanoria/pins" "$T/run/scanoria" "$T/etc/scanoria" "$T/opt/scanoria/current" "$STUBS"
 chmod 0700 "$T/var/lib/scanoria/requests/incoming" "$T/var/lib/scanoria/requests/work"
 echo 0.6.0 > "$T/opt/scanoria/current/VERSION"
 : > "$CALLS"
@@ -202,7 +202,7 @@ expect "alternate : enregistrement altéré ignoré" "$(jq -r .tampered <<< "$R"
 expect "alternate : lien symbolique ignoré" "$(jq -r .symlink <<< "$R")" false
 
 # --- 5. pins.json écrit par la console, lu sans confiance -------------------------------------
-PINS="$T/var/lib/scanoria/console/pins.json"
+PINS="$T/var/lib/scanoria/pins/pins.json"
 pins_count() { py "p = vigilance.read_pins(); print('illisible' if p is None else len(p))"; }
 echo "{\"version\": 1, \"pins\": [{\"module\": \"gitleaks\", \"version\": \"8.30.0\", \"image_digest\": \"$D1\"}, {\"module\": \"../x\", \"version\": \"1\", \"image_digest\": \"$D1\"}, {\"module\": \"gitleaks\", \"version\": \"8.30.0\", \"image_digest\": \"sha256:court\"}]}" > "$PINS"
 expect "pins.json : entrées invalides écartées" "$(pins_count)" 1
