@@ -6,6 +6,7 @@
 import { defineEventHandler } from 'h3'
 import { getConfig } from '../utils/config'
 import { getRunningVersion } from '../utils/appliance'
+import { PROJECT_OPS, projectSchemas } from '../projects/openapi'
 
 type Role = 'public' | 'viewer' | 'operator' | 'admin'
 
@@ -59,6 +60,7 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/catalog/modules/{id}/uninstall': { post: { summary: 'Request uninstall-module (409 E_DEPENDENTS when another module needs it)', role: 'admin', body: 'ModuleUninstall', status: 202 } },
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
+  ...PROJECT_OPS,
 }
 
 const HELPER_BODIES = [
@@ -185,6 +187,7 @@ export default defineEventHandler(async () => {
           type: 'object', additionalProperties: false, required: ['password'],
           properties: { password: { type: 'string', minLength: 12, maxLength: 1024 }, must_change_password: { type: 'boolean' } },
         },
+        ...projectSchemas(),
       },
     },
   }
