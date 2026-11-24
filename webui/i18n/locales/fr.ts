@@ -1081,6 +1081,8 @@ export default {
     gaps: {
       category: 'Catégorie {category} non couverte : {reason}.',
       module: 'Module {module} non utilisé : {reason}.',
+      notApplicable: 'Module {module} non lancé : aucun fichier du dépôt ne le concerne (décidé automatiquement, jamais compté comme absent).',
+      sbomFallback: 'Module {module} : SBOM de l’analyse absent ou invalide, le dépôt a été analysé directement.',
     },
     gapKind: {
       'skipped-files': 'Fichiers ignorés',
@@ -1088,6 +1090,8 @@ export default {
       'lockfile-missing': 'Fichier de verrouillage absent',
       'output-truncated': 'Sortie tronquée',
       'package-dates-unknown': 'Dates de publication inconnues (quarantaine non vérifiée)',
+      'not-applicable': 'Non applicable',
+      'sbom-fallback': 'SBOM absent, dépôt analysé',
     },
     gapReason: {
       'no-module': 'aucun module installé et actif',
@@ -1130,7 +1134,10 @@ export default {
       'invalid-output': 'Sortie invalide',
       'missing': 'Manquant',
       'skipped': 'Ignoré',
+      'not-applicable': 'Non applicable',
     },
+    reused: 'Résultat réutilisé',
+    reusedFrom: 'Réutilisé depuis l’analyse n° {number}',
     verdicts: {
       passed: 'Accepté',
       failed: 'Refusé',
