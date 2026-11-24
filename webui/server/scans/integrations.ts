@@ -23,6 +23,7 @@ import { evaluateGate } from '../gates/evaluate'
 import type { enqueueScan } from './enqueue'
 import { decryptSecret } from '../utils/secrets'
 import { runProjectSchedules } from '../projects/schedule'
+import { ingestSbomFile } from '../sbom/ingest'
 
 export interface IngestOutcome { count: number, newCount: number, errors: unknown[] }
 
@@ -47,6 +48,8 @@ export interface Integrations {
   enqueueAiTask: (db: Queryable, req: AiTaskRequest) => Promise<string | null>
   /** A : planification ; reçoit enqueueScan (contrat 4) et ne lève jamais. */
   runProjectSchedules: (db: pg.Pool, now: Date, enqueue: typeof enqueueScan) => Promise<unknown>
+  /** 0.5, contrat 14 : sortie CycloneDX d'un module (SBOM de Syft, lien Dependency-Track) ; lève si elle est invalide. */
+  ingestSbomOutput?: (db: pg.Pool, args: { scanId: string, projectId: string, moduleId: string, resultDir: string, path: string }) => Promise<unknown>
 }
 
 /** Bouchon du contrat 6 : verdict non concluant, sans raison inventée. */
@@ -78,4 +81,5 @@ export const defaultIntegrations: Integrations = {
     console.error('[schedule]', (err as Error)?.message)
     return undefined
   }),
+  ingestSbomOutput: (db, args) => ingestSbomFile(db, args),
 }

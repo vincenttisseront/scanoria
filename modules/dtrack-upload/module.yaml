@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module dtrack-upload : envoie le SBOM de l'analyse (Syft, contrat 14 de la
+# 0.5) au service Dependency-Track installé, sur un projet Dependency-Track
+# par projet Scanoria (scanoria-<uuid court>) et une version égale à la
+# référence analysée ; il rapporte l'inventaire tel que Dependency-Track l'a
+# rangé (CycloneDX, avec l'identifiant du projet pour le lien de la console).
+# Réseau : uniquement le réseau interne du service dependency-track (contrat
+# 12 de la 0.4) ; clé d'API par secret Podman. Facultatif : sans
+# Dependency-Track actif ou sans SBOM, le module est « skipped », sans effet
+# sur le verdict. Outil de l'appliance /usr/lib/scanoria/scan-tools/dtrack
+# (bibliothèque standard de Python) dans l'image officielle python
+# 3.13.18-alpine3.24 (docker.io/library/python, index OCI multi-architecture),
+# relevée en amont le 2026-11-24 ; licence de Python : PSF-2.0 (LICENSE du tag
+# v3.13.18 de python/cpython).
+id: dtrack-upload
+name: Dependency-Track (envoi des SBOM)
+description:
+  fr: Envoie le SBOM de chaque analyse à Dependency-Track, qui en suit les composants dans le temps.
+  en: Sends each scan's SBOM to Dependency-Track, which tracks its components over time.
+type: scanner
+categories: [sbom]
+license:
+  spdx: PSF-2.0
+  url: https://github.com/python/cpython/blob/v3.13.18/LICENSE
+  restrictions: none
+  verified_at: "2026-11-24"
+  notes: Image officielle de Python ; l'outil d'envoi est celui de l'appliance (AGPL-3.0-or-later).
+upstream:
+  homepage: https://docs.dependencytrack.org/usage/cicd/
+  source: https://github.com/DependencyTrack/dependency-track
+image: docker.io/library/python@sha256:9ef1a599f863231c3d91e941389bfdc4a2d6070557243d54df1a4e57015b960e
+version: "1.0.0"
+resources: { min_ram_mb: 256, min_cpu: 1, disk_mb: 100 }
+hostname: null
+requires: { modules: [dependency-track], feeds: [], appliance: ">=0.5.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive, sbom]
+  command: ["python3", "-I", "/scanoria/dtrack_upload.py", "/sbom/sbom.cdx.json", "/out/dtrack.cdx.json"]
+  tool: dtrack
+  network: service:dependency-track
+  service_optional: true
+  requires_sbom: true
+  timeout_s: 900
+  exit_codes_ok: [0]
+outputs:
+  cyclonedx: { path: /out/dtrack.cdx.json, version: "1.6" }
+testbed:
+  path: testbed/
+  expect:
+    # Composant du SBOM du banc d'essai, relu dans Dependency-Track après traitement.
+    - { rule: minimist, category: sbom, min: 1 }
+health: { command: ["python3", "--version"] }
+upgrade: { policy: on-demand }

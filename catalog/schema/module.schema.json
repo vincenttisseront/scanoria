@@ -575,6 +575,27 @@
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]{0,40}$",
           "description": "Outil de l'appliance monté en lecture seule sur /scanoria : /usr/lib/scanoria/scan-tools/<tool> (convertisseur, orchestration). Livré et signé avec l'appliance, jamais avec le catalogue."
+        },
+        "sbom_command": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "description": "argv lancé à la place de command quand l'analyse dispose déjà d'un SBOM CycloneDX (contrat 14 de la 0.5, produit par un module précédent de la même analyse, ou SBOM rangé pour une re-corrélation) : il est monté en lecture seule sur /sbom/sbom.cdx.json. Le module doit déclarer l'entrée « sbom »."
+        },
+        "requires_sbom": {
+          "type": "boolean",
+          "default": false,
+          "description": "Le module ne lit que le SBOM de l'analyse (/sbom/sbom.cdx.json) : sans SBOM, il est « skipped » avec sa raison, sans effet sur le verdict. Il tourne après les modules qui produisent le SBOM."
+        },
+        "service_optional": {
+          "type": "boolean",
+          "default": false,
+          "description": "Avec scan.network: service:<id> : si le service est désactivé ou indisponible, le module est « skipped » (complément facultatif, comme l'envoi des SBOM à Dependency-Track) au lieu d'être manquant (G13)."
         }
       }
     },
@@ -779,6 +800,16 @@
               }
             ]
           }
+        },
+        "egress": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
+          },
+          "description": "Hôtes Internet joints par le service lui-même (miroirs de vulnérabilités de Dependency-Track…), déclarés pour l'affichage et la documentation ; le réseau propre du module sort par la passerelle de Podman, sans filtrage par nom (CLAUDE.md § 3.2). Absent : aucun accès sortant attendu."
         }
       }
     },
@@ -843,6 +874,49 @@
             "weekly",
             "manual"
           ]
+        },
+        "hydrate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "image",
+            "command"
+          ],
+          "description": "Préparation de la base téléchargée par l'outil qui la lit (grype-db : index reconstruits par « grype db import »), dans un conteneur jetable confiné, sans réseau ; la base est montée sur /db (seul répertoire écrivable). L'image est épinglée par empreinte, comme celle d'un module.",
+          "properties": {
+            "image": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)+(:[0-9]{1,5})?(/[a-z0-9]+([._-]{1,2}[a-z0-9]+)*)+@sha256:[0-9a-f]{64}$",
+              "maxLength": 300
+            },
+            "command": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "env": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "memory_mb": {
+              "type": "integer",
+              "minimum": 128,
+              "maximum": 16384
+            },
+            "timeout_s": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 7200
+            }
+          }
         }
       },
       "allOf": [

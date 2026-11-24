@@ -1,0 +1,97 @@
+{
+ "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+ "bomFormat": "CycloneDX",
+ "specVersion": "1.6",
+ "serialNumber": "urn:uuid:5b7c2f0e-1a2b-4c3d-8e9f-0a1b2c3d4e5f",
+ "version": 1,
+ "metadata": {
+  "timestamp": "2026-11-24T12:00:00Z",
+  "tools": {
+   "components": [
+    {
+     "type": "application",
+     "author": "anchore",
+     "name": "syft",
+     "version": "1.57.2"
+    }
+   ]
+  },
+  "component": {
+   "bom-ref": "scanoria",
+   "type": "file",
+   "name": "scanoria"
+  }
+ },
+ "components": [
+  {
+   "bom-ref": "pkg:golang/github.com/google/uuid@v1.6.0",
+   "type": "library",
+   "name": "github.com/google/uuid",
+   "version": "v1.6.0",
+   "purl": "pkg:golang/github.com/google/uuid@v1.6.0",
+   "properties": [
+    {
+     "name": "syft:package:foundBy",
+     "value": "go-module-file-cataloger"
+    },
+    {
+     "name": "syft:package:language",
+     "value": "go"
+    },
+    {
+     "name": "syft:location:0:path",
+     "value": "/go.mod"
+    }
+   ]
+  },
+  {
+   "bom-ref": "pkg:npm/minimist@1.2.8",
+   "type": "library",
+   "name": "minimist",
+   "version": "1.2.8",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "purl": "pkg:npm/minimist@1.2.8",
+   "properties": [
+    {
+     "name": "syft:package:foundBy",
+     "value": "javascript-lock-cataloger"
+    },
+    {
+     "name": "syft:package:language",
+     "value": "javascript"
+    },
+    {
+     "name": "syft:location:0:path",
+     "value": "/package-lock.json"
+    }
+   ]
+  },
+  {
+   "bom-ref": "pkg:pypi/six@1.17.0",
+   "type": "library",
+   "name": "six",
+   "version": "1.17.0",
+   "purl": "pkg:pypi/six@1.17.0",
+   "properties": [
+    {
+     "name": "syft:package:foundBy",
+     "value": "python-package-cataloger"
+    },
+    {
+     "name": "syft:package:language",
+     "value": "python"
+    },
+    {
+     "name": "syft:location:0:path",
+     "value": "/requirements.txt"
+    }
+   ]
+  }
+ ]
+}

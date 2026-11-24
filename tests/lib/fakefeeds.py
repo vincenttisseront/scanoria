@@ -18,6 +18,7 @@ Le fichier DIR/mode règle les pannes : « down » (500 partout), sinon normal.
 import http.server
 import io
 import json
+import urllib.parse
 import os
 import ssl
 import sys
@@ -98,6 +99,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(404)
         if p.startswith("/storage/"):
             return self.file(os.path.join(d, "blob"))
+        if p.startswith("/grype/"):
+            # Base Grype v6 (0.5) : latest.json et archive, fichiers posés par b19-sbom.
+            parts = p.split("/")
+            if len(parts) == 3 and parts[2] and ".." not in parts:
+                return self.file(os.path.join(d, "grype", urllib.parse.unquote(parts[2])))
+            return self.send(404)
         self.send(404)
 
 

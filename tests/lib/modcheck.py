@@ -7,7 +7,8 @@ Sous-commandes :
                              code 1 et une ligne « id: erreur » par refus
   repo RACINE                valide tous les modules/<id>/module.yaml du dépôt
                              et leurs liens (requires, conflicts, testbed)
-  expect MANIFESTE SARIF     vérifie testbed.expect sur une sortie SARIF
+  expect MANIFESTE SORTIE    vérifie testbed.expect sur une sortie SARIF, ou
+                             CycloneDX (nom des composants, contrat 14 de la 0.5)
   sarif SCHEMA SARIF         valide une sortie contre le schéma SARIF 2.1.0 officiel
   podman MANIFESTE SRC OUT FEEDS
                              écrit (séparés par NUL) les arguments de « podman
@@ -77,18 +78,26 @@ def scan_errors(manifest):
     for name in scan.get("env", {}) or {}:
         if not ENV_NAME.match(name):
             errs.append(f"scan.env: nom de variable invalide : {name!r}")
-    if any(".." in arg.split("/") for arg in scan["command"]):
-        errs.append("scan.command: chemin avec « .. »")
+    for key in ("command", "sbom_command"):
+        if any(".." in arg.split("/") for arg in scan.get(key) or []):
+            errs.append(f"scan.{key}: chemin avec « .. »")
     props = (manifest.get("options") or {}).get("properties") or {}
-    for key in ("command", "history_command"):
+    for key in ("command", "history_command", "sbom_command"):
         for arg in scan.get(key) or []:
             for name in re.findall(r"\{opt\.([^}]*)\}", arg):
                 if name not in props:
                     errs.append(f"scan.{key}: option inconnue dans {{opt.{name}}}")
     for kind, out in (manifest.get("outputs") or {}).items():
-        for key in ("command", "history_command"):
-            if key in scan and out["path"] not in scan[key]:
+        for key in ("command", "history_command", "sbom_command"):
+            # « --output format=/out/fichier » (Syft) compte comme le chemin lui-même.
+            if key in scan and not any(a == out["path"] or a.endswith("=" + out["path"]) for a in scan[key]):
                 errs.append(f"outputs.{kind}: {out['path']} absent de scan.{key}")
+    if "sbom_command" in scan and "sbom" not in scan.get("inputs", []):
+        errs.append("scan.sbom_command exige l'entrée « sbom »")
+    if scan.get("requires_sbom") and "sbom" not in scan.get("inputs", []):
+        errs.append("scan.requires_sbom exige l'entrée « sbom »")
+    if scan.get("service_optional") and not str(scan.get("network", "")).startswith("service:"):
+        errs.append("scan.service_optional exige scan.network: service:<id>")
     if "history_command" in scan and scan.get("history") != "full":
         errs.append("scan.history_command exige scan.history: full")
     feeds = manifest.get("requires", {}).get("feeds", [])
@@ -194,12 +203,22 @@ def sarif_results(sarif):
     return out
 
 
+def cyclonedx_names(doc):
+    """Noms des composants d'un SBOM CycloneDX (comme testbed.cyclonedx_components)."""
+    if not isinstance(doc.get("specVersion"), str) or not isinstance(doc.get("components", []), list):
+        raise ValueError("CycloneDX : specVersion et components attendus")
+    return [c.get("name") for c in doc.get("components", []) if isinstance(c, dict)]
+
+
 def expect_report(manifest, sarif):
     """[(attente, nombre, réussite)] pour testbed.expect."""
-    results = sarif_results(sarif)
+    if isinstance(sarif, dict) and sarif.get("bomFormat") == "CycloneDX":
+        keys = cyclonedx_names(sarif)
+    else:
+        keys = [r.get("ruleId") for r in sarif_results(sarif)]
     report = []
     for exp in manifest["testbed"]["expect"]:
-        n = sum(1 for r in results if r.get("ruleId") == exp["rule"])
+        n = sum(1 for k in keys if k == exp["rule"])
         report.append((exp, n, n >= exp["min"]))
     return report
 

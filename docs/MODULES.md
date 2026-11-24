@@ -35,6 +35,11 @@ qui est risqué ou irréversible (licence restrictive, désinstallation).
 | `trivy-db` | feed | sca, container | format 2 | Apache-2.0 (données : conditions des sources) | — |
 | `osv-db` | feed | sca | format 1 | CC-BY-4.0 | — |
 | `git-fetch` | scanner (système) | system | 2.54.1 | GPL-2.0-only (Git) | — |
+| `syft` | scanner | sbom | 1.57.2 | Apache-2.0 | — |
+| `grype` | scanner | sca, sbom | 0.122.1 | Apache-2.0 | `grype-db` |
+| `grype-db` | feed | sca | schéma 6 | Apache-2.0 (données : conditions des sources) | — |
+| `dependency-track` | service | sbom, sca, licenses | 4.14.7 | Apache-2.0 | — |
+| `dtrack-upload` | scanner | sbom | 1.0.0 | PSF-2.0 (image Python ; script de l'appliance AGPL) | module `dependency-track` |
 
 `git-fetch` est un **module système** (catégorie `system`) : il n'analyse rien,
 n'entre dans aucun profil, et `scanoria-runner` l'utilise pour cloner les dépôts
@@ -270,6 +275,44 @@ Le service root prend tout en charge ; le manifeste ne déclare que le besoin.
   les 15 minutes). Le CPU est `null` au premier relevé.
 - **Désinstallation** sans conservation des données : base, rôle, secrets,
   volumes, réglages noyau et sauvegardes sont supprimés.
+
+### 4.4 SBOM : Syft, Grype, Dependency-Track (0.5, contrat 14)
+
+- **Enchaînement dans une analyse** (`sbom.py`). Les producteurs de SBOM
+  (sortie `cyclonedx`, sans `scan.sbom_command`) passent en premier ; le
+  premier SBOM obtenu est copié dans `sbom/sbom.cdx.json` de l'espace de
+  travail et monté en lecture seule sur `/sbom` pour les consommateurs.
+  Grype lance alors `scan.sbom_command` (`grype sbom:/sbom/sbom.cdx.json`),
+  sinon il analyse le dépôt lui-même. Un module `requires_sbom` sans SBOM
+  est sauté (`E_SBOM_MISSING`), un module `service_optional` sans son
+  service aussi (`E_SERVICE_MISSING`). L'ordre de la tâche est gardé dans
+  le résultat.
+- **Syft** produit du CycloneDX 1.6, sans réseau. La console range le SBOM
+  dans `sbom_components` (au plus 50 000 composants, purl normalisé, licences,
+  dépendance directe ou transitive, chemins) ; un SBOM invalide rend le
+  module `invalid-output`, jamais une ingestion partielle. Les composants
+  sans purl utilisable sont comptés dans la couverture (G15,
+  `coverage.sbom.ignored_no_purl` / `ignored_invalid_purl`). L'export
+  CycloneDX de l'onglet SBOM est régénéré depuis cette table (les sorties du
+  runner sont purgées après 24 h).
+- **grype-db** : le helper lit `latest.json` d'Anchore, télécharge l'archive
+  (empreinte vérifiée), puis la prépare par `grype db import` dans un
+  conteneur confiné sans réseau ; rien de téléchargé n'est exécuté et la
+  mise à jour automatique de Grype est coupée (`GRYPE_DB_AUTO_UPDATE=false`).
+- **Dependency-Track** (`dtrack.<appliance>`) : PostgreSQL, santé sur
+  `/api/version`, sauvegarde de la base. Mise en service par le helper : mot
+  de passe `admin` remplacé (gardé en `secrets/admin-password`, 0600),
+  équipe « Scanoria (analyses) » limitée à `BOM_UPLOAD`,
+  `PROJECT_CREATION_UPLOAD` et `VIEW_PORTFOLIO`, clé d'API en
+  `secrets/scan-token`. Le service a besoin d'Internet pour ses miroirs de
+  vulnérabilités (`service.egress`, déclaratif) ; le miroir hors ligne vient
+  avec la 0.6.
+- **dtrack-upload** (`network: service:dependency-track`, contrat 12) envoie
+  le SBOM par `PUT /api/v1/bom` : un projet Dependency-Track par projet
+  Scanoria (`scanoria-<12 hex>`), version = référence analysée. Il relit
+  l'inventaire et le rend en CycloneDX avec la propriété
+  `scanoria:dtrack:project` : la console relie l'analyse au projet et affiche
+  le lien. Sans Dependency-Track, il est sauté (`E_SERVICE_MISSING`).
 
 ## 5. Banc d'essai (F12)
 

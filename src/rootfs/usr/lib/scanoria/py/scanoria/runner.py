@@ -34,7 +34,7 @@ import time
 
 import contextlib
 
-from . import catalogverify, common, feeds, fetch, modules, schema, svcnet, testbed
+from . import catalogverify, common, feeds, fetch, modules, sbom, schema, svcnet, testbed
 from .common import Fail
 
 
@@ -413,6 +413,10 @@ def plan(reg, job):
                     continue
                 svc = dict(svcnet.resolve(reg, m), key=key)
         except svcnet.Unavailable as u:
+            if scan.get("service_optional") is True and u.code == svcnet.E_SERVICE_MISSING:
+                # Complément facultatif (envoi des SBOM à Dependency-Track, 0.5) : sans effet sur le verdict.
+                out.append((_module_entry(mid, ver, "skipped", _err(u.code, "input", u.message), m), None))
+                continue
             # Service absent, inactif ou sans jeton : module « missing », verdict non concluant (G13).
             out.append((_module_entry(mid, ver, "missing", _err(u.code, "input", u.message), m), None))
             continue
@@ -429,8 +433,13 @@ def plan(reg, job):
         except Fail as f:
             out.append((_module_entry(mid, ver, "error", _err("E_OPTIONS_INVALID", "input", f.message), m), None))
             continue
+        try:
+            sbom_cmd = sbom.command_of(m, options)
+        except Fail as f:
+            out.append((_module_entry(mid, ver, "error", _err("E_OPTIONS_INVALID", "input", f.message), m), None))
+            continue
         spec = {"manifest": m, "options": options, "command": command, "history": history,
-                "service": svc, "mounts": mounts}
+                "service": svc, "mounts": mounts, "sbom_command": sbom_cmd}
         out.append((_module_entry(mid, ver, "ok", None, m), spec))
     return out
 
@@ -565,6 +574,14 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
     timeout = scan.get("timeout_s") if isinstance(scan.get("timeout_s"), int) else testbed.DEFAULT_TIMEOUT
     timeout = max(10, min(timeout, 86400))
     mounts = [(os.path.join(ws, "src"), "/src", "ro"), (out, "/out", "rw")]
+    # Contrat 14 (0.5) : SBOM produit plus tôt dans l'analyse, lu par Grype et dtrack-upload.
+    sbom_dir = sbom.available(ws)
+    if sbom.consumes(m):
+        if sbom_dir is None and sbom.required(m):
+            return finish("skipped", _err(sbom.E_SBOM_MISSING, "input", "module %s needs the SBOM of the analysis, "
+                                          "which no module produced" % mid))
+        if sbom_dir is not None:
+            mounts.append((sbom_dir, sbom.MOUNT, "ro"))
     if spec["history"] and os.path.isdir(os.path.join(ws, "git")):
         mounts.append((os.path.join(ws, "git"), "/git", "ro"))
     mounts += spec.get("mounts") or []
@@ -583,11 +600,16 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
             stack.close()
             return finish("error", _err(f.code, "infra", f.message))
         secrets = list(secrets or []) + [svc["token"]]
+        if sbom.consumes(m):
+            # Version du projet dans le service (Dependency-Track) : la référence analysée.
+            args += ["--env", "SCANORIA_REF=" + sbom.ref_label(job["source"])]
     try:
         args += ["--timeout", str(timeout)]
         for k in sorted(scan.get("env") or {}):
             args += ["--env", "%s=%s" % (k, scan["env"][k])]
         cmd = spec["command"]
+        if sbom_dir is not None and spec.get("sbom_command"):
+            cmd = spec["sbom_command"]
         args += ["--entrypoint", json.dumps([cmd[0]]), m["image"]] + list(cmd[1:])
         sampler = Sampler(name)
         sampler.start()
@@ -632,6 +654,9 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
     except Fail as f:
         return finish("invalid-output", _err("E_INVALID_OUTPUT", "tool", f.message), rc)
     entry["outputs"] = outputs
+    if "cyclonedx" in outputs and not sbom.consumes(m):
+        # Premier SBOM de l'analyse : offert aux modules suivants qui lisent l'entrée « sbom ».
+        sbom.offer(ws, os.path.join(rdir, outputs["cyclonedx"]))
     return finish("ok", None, rc)
 
 
@@ -682,7 +707,7 @@ def execute(job):
             _copy_fetch_log(ws, rdir)
             return result
         source.update(files=files, bytes=size, skipped=skipped)
-        for ent, spec in runnable:
+        for ent, spec in sbom.ordered(runnable):
             try:
                 run_module(job, ent, spec, ws, rdir, reg, secrets)
             except Exception as e:  # noqa: BLE001 — une erreur d'un module n'arrête pas les autres

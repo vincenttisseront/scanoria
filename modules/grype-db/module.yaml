@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Base de vulnérabilités de Grype (module feed, schéma v6). Téléchargée par le
+# helper à l'installation puis chaque jour (feeds.py, format grype-db) : la
+# liste publiée par Anchore (latest.json) donne l'archive et son empreinte
+# SHA-256, vérifiée avant tout usage ; « grype db import » (image épinglée du
+# module grype, conteneur jetable sans réseau) reconstruit ensuite les index
+# de la base et écrit import.json. Disposition : /feeds/grype-db/6/.
+# Lots hors ligne signés en 0.6 (CLAUDE.md § 9). Licence relevée le
+# 2026-11-24 sur le dépôt amont.
+id: grype-db
+name: Grype DB
+description:
+  fr: Base de vulnérabilités hors ligne de Grype (schéma v6).
+  en: Grype offline vulnerability database (schema v6).
+type: feed
+categories: [sca]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/anchore/grype-db/blob/main/LICENSE
+  restrictions: none
+  verified_at: "2026-11-24"
+  notes: Code sous Apache-2.0 ; les avis agrégés gardent les conditions de leurs sources (NVD, GHSA, distributions).
+upstream:
+  homepage: https://github.com/anchore/grype-db
+  source: https://github.com/anchore/grype-db
+version: "6"
+resources: { min_ram_mb: 2048, min_cpu: 1, disk_mb: 6000 }
+hostname: null
+requires: { modules: [], feeds: [], appliance: ">=0.5.0" }
+conflicts: []
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+feed:
+  format: grype-db
+  mount: /feeds/grype-db
+  max_age_days: 7
+  source: { kind: https, ref: "https://grype.anchore.io/databases/v6/latest.json" }
+  schedule: daily
+  hydrate:
+    image: ghcr.io/anchore/grype@sha256:661583704a253c0448ed63998b5ea2cd9d5a76ee71eedc4aed439b8ce3e93a1c
+    command: ["/grype", "db", "import", "/db/archive.tar.zst"]
+    env:
+      GRYPE_DB_CACHE_DIR: /db/cache
+      GRYPE_DB_AUTO_UPDATE: "false"
+      GRYPE_DB_VALIDATE_AGE: "false"
+      GRYPE_CHECK_FOR_APP_UPDATE: "false"
+    memory_mb: 2048
+    timeout_s: 1800

@@ -18,7 +18,7 @@ import { logExcerpt, MAX_AI_EXCERPT } from '../health/log'
 import { FAILED_MODULE_STATUSES } from '../health/scans'
 import { gitRef, scanJobSchema, type JobCredential, type RunnerError, type ScanJob, type ScanResult } from './contract'
 import { copyModuleLog, jobPending, listIncomingJobs, readResult, readRunnerState, resultDir, withdrawJob, writeJob } from './files'
-import { pendingGate, type Integrations } from './integrations'
+import { defaultIntegrations, pendingGate, type Integrations } from './integrations'
 import {
   PLAN_VERSION, parsePlan, planHistory, planTimeout, readPlanCatalog, replayAvailability, resolveProfile,
   type PlannedModule, type ScanPlan,
@@ -475,6 +475,12 @@ export class ScanWorker {
           if (out.errors.some(e => (e as { code?: string })?.code !== 'truncated')) {
             status = 'invalid-output'
             errorClass = 'tool'
+          }
+          // Contrat 14 (0.5) : SBOM CycloneDX rangé dans sbom_components ; invalide ou trop grand = non concluant.
+          const ingestSbom = this.integrations.ingestSbomOutput ?? defaultIntegrations.ingestSbomOutput
+          if (status === 'ok' && outputs.cyclonedx && ingestSbom) {
+            await ingestSbom(this.pool, { scanId: scan.id, projectId: scan.project_id, moduleId: m.id,
+              resultDir: resultDir(this.cfg.scansDir, scan.job_id), path: outputs.cyclonedx })
           }
         }
         catch (e) {

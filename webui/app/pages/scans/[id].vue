@@ -365,6 +365,11 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
         </p>
       </UCard>
 
+      <SbomComponents
+        v-if="!active"
+        :scan-id="scan.id"
+      />
+
       <UCard>
         <template #header>
           <h2 class="font-semibold">

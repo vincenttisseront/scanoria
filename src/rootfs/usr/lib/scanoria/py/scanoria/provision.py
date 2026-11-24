@@ -283,13 +283,18 @@ def provision_sonarqube(m, info):
     return {"version": version, "token_renewed": renewed, "admin_known": True}
 
 
-PROVISIONERS = {"sonarqube": provision_sonarqube}
+def _provision_dtrack(m, info):
+    from . import dtrack
+    return dtrack.provision(m, info)
+
+
+PROVISIONERS = {"sonarqube": provision_sonarqube, "dependency-track": _provision_dtrack}
 
 # Secrets créés par la mise en service et liés au contenu de la base du
 # service (mot de passe admin, jeton) : sauvegardés et restaurés avec elle.
 # Le mot de passe de la base (db-password) n'y est pas : il suit le rôle
 # PostgreSQL, que pg_restore ne change pas.
-DATA_SECRETS = {"sonarqube": (ADMIN_FILE, SCAN_TOKEN_FILE)}
+DATA_SECRETS = {"sonarqube": (ADMIN_FILE, SCAN_TOKEN_FILE), "dependency-track": (ADMIN_FILE, SCAN_TOKEN_FILE)}
 
 
 def data_secrets(mid):
@@ -342,16 +347,23 @@ def act_reset_service_admin(c):
     """Nouveau mot de passe admin d'un service, affiché une seule fois par la console."""
     mid = c.params["id"]
     purge_oneshot()
-    if mid not in PROVISIONERS:
+    if mid not in RESETTERS:
         raise Fail("E_PRECONDITION", "module %s has no administrator account managed by the appliance" % mid)
     from . import modules
     reg = modules.load_registry()
     e = reg["modules"].get(mid)
     if not isinstance(e, dict) or e.get("status") != "healthy" or not e.get("enabled"):
         raise Fail("E_PRECONDITION", "module %s is not installed, healthy and enabled" % mid)
-    http = Http(e.get("host_port"))
     sdir = secrets_dir(mid)
-    sonar_wait_up(http, time.monotonic() + max(30, min(c.left(), 300)))
+    deadline = time.monotonic() + max(30, min(c.left(), 300))
+    pw = RESETTERS[mid](e.get("host_port"), sdir, deadline)
+    write_oneshot(c.req["id"], pw)
+    return {"id": mid, "login": ADMIN, "oneshot": True}
+
+
+def _reset_sonar(port, sdir, deadline):
+    http = Http(port)
+    sonar_wait_up(http, deadline)
     cur = read_secret(os.path.join(sdir, ADMIN_FILE), PASSWORD_RE)
     if not cur or not _valid(http, (ADMIN, cur)):
         raise Fail("E_SONAR_ADMIN", "the current SonarQube admin password is unknown to the appliance")
@@ -362,5 +374,13 @@ def act_reset_service_admin(c):
                     {"login": ADMIN, "previousPassword": cur, "password": pw}, auth=(ADMIN, cur)),
           "users/change_password")
     os.replace(pending, os.path.join(sdir, ADMIN_FILE))
-    write_oneshot(c.req["id"], pw)
-    return {"id": mid, "login": ADMIN, "oneshot": True}
+    return pw
+
+
+def _reset_dtrack(port, sdir, deadline):
+    from . import dtrack
+    return dtrack.reset_admin(dtrack.Http(port), sdir, deadline)
+
+
+# Réinitialisation du mot de passe admin, par module mis en service.
+RESETTERS = {"sonarqube": _reset_sonar, "dependency-track": _reset_dtrack}

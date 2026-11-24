@@ -1,0 +1,43 @@
+{
+ "bomFormat": "CycloneDX",
+ "specVersion": "1.6",
+ "serialNumber": "urn:uuid:0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0",
+ "version": 1,
+ "metadata": {
+  "timestamp": "2026-11-24T12:00:00Z",
+  "component": {
+   "bom-ref": "banc-essai",
+   "type": "application",
+   "name": "banc-essai-dtrack",
+   "version": "1.0.0"
+  }
+ },
+ "components": [
+  {
+   "bom-ref": "pkg:npm/minimist@1.2.8",
+   "type": "library",
+   "name": "minimist",
+   "version": "1.2.8",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "purl": "pkg:npm/minimist@1.2.8"
+  }
+ ],
+ "dependencies": [
+  {
+   "ref": "banc-essai",
+   "dependsOn": [
+    "pkg:npm/minimist@1.2.8"
+   ]
+  },
+  {
+   "ref": "pkg:npm/minimist@1.2.8",
+   "dependsOn": []
+  }
+ ]
+}

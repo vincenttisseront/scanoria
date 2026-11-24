@@ -411,10 +411,41 @@ jobs:
       - name: tests/b17-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b17-live.sh
 
+  sbom-live:
+    # SBOM de la 0.5 (chantier A) sur une appliance neuve : Syft, Grype et sa
+    # base grype-db téléchargée depuis Anchore, Dependency-Track réel, analyse
+    # complète d'une archive et ingestion par la console (tests/b19-live.sh).
+    name: sbom-live (Syft, Grype, Dependency-Track réels, b19-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+      - name: Dépendances (podman, PostgreSQL 16, jq, zstd, console)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark aardvark-dns postgresql-16 \
+            python3-yaml python3-jsonschema curl openssl zstd
+          sudo podman --version
+          free -m
+          cd webui && npm ci --ignore-scripts && npm run postinstall
+      # Machine jetable : helper et runner en root avec le vrai podman, Quadlet,
+      # PostgreSQL et les vraies sources (images épinglées, base Grype).
+      - name: tests/b19-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b19-live.sh
+
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
