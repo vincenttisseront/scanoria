@@ -449,10 +449,11 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
   describe('catalogue des modules', () => {
     const FIXTURES = fileURLToPath(new URL('../fixtures/', import.meta.url))
     let viewer: Client
-    const lastIncoming = async (type: string) => {
+    // Fichier de la demande renvoyée par l'API (plusieurs demandes peuvent partager la même seconde).
+    const incomingFor = async (res: { data: Record<string, unknown> }, type: string) => {
       const dir = join(root, 'requests', 'incoming')
-      const docs = await Promise.all((await readdir(dir)).sort().map(async n => JSON.parse(await readFile(join(dir, n), 'utf8')) as { type: string, params: Record<string, unknown> }))
-      return docs.filter(d => d.type === type).pop()
+      const docs = await Promise.all((await readdir(dir)).map(async n => JSON.parse(await readFile(join(dir, n), 'utf8')) as { id: string, type: string, params: Record<string, unknown> }))
+      return docs.find(d => d.id === res.data.request_id && d.type === type)
     }
 
     beforeAll(async () => {
@@ -515,7 +516,7 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
       expect(blocked.data.data).toMatchObject({ code: 'E_PLAN', blockers: [{ code: 'E_LICENSE_REQUIRED', other: 'codeql' }] })
       const ok = await call('/api/catalog/install', { method: 'POST', client: admin, json: { ...json, accept_licenses: ['codeql'] } })
       expect(ok.status, JSON.stringify(ok.data)).toBe(202)
-      expect((await lastIncoming('install-modules'))!.params).toEqual({
+      expect((await incomingFor(ok, 'install-modules'))!.params).toEqual({
         modules: [
           { id: 'osv-scanner', version: '2.2.0', options: {} },
           { id: 'codeql', version: '2.23.0', options: {} },
@@ -534,15 +535,18 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
     it('activation, mise à jour, désinstallation', async () => {
       expect(code(await call('/api/catalog/modules/osv-scanner/state', { method: 'POST', client: admin, json: { enabled: true } }))).toBe('E_NOT_INSTALLED')
       expect(code(await call('/api/catalog/modules/trivy/state', { method: 'POST', client: viewer, json: { enabled: true } }))).toBe('E_FORBIDDEN')
-      expect((await call('/api/catalog/modules/trivy/state', { method: 'POST', client: admin, json: { enabled: true } })).status).toBe(202)
-      expect((await lastIncoming('set-module-state'))!.params).toEqual({ id: 'trivy', enabled: true })
+      const enable = await call('/api/catalog/modules/trivy/state', { method: 'POST', client: admin, json: { enabled: true } })
+      expect(enable.status).toBe(202)
+      expect((await incomingFor(enable, 'set-module-state'))!.params).toEqual({ id: 'trivy', enabled: true })
 
-      expect((await call('/api/catalog/modules/gitleaks/update', { method: 'POST', client: admin, json: {} })).status).toBe(202)
-      expect((await lastIncoming('update-module'))!.params).toEqual({ id: 'gitleaks', version: '8.28.0' })
+      const updGitleaks = await call('/api/catalog/modules/gitleaks/update', { method: 'POST', client: admin, json: {} })
+      expect(updGitleaks.status).toBe(202)
+      expect((await incomingFor(updGitleaks, 'update-module'))!.params).toEqual({ id: 'gitleaks', version: '8.28.0' })
       expect(code(await call('/api/catalog/modules/trivy/update', { method: 'POST', client: admin, json: { version: '0.66.0' } }))).toBe('E_NO_UPDATE')
       expect(code(await call('/api/catalog/modules/trivy/update', { method: 'POST', client: admin, json: { version: '9.9.9' } }))).toBe('E_NOT_FOUND')
-      expect((await call('/api/catalog/modules/trivy/update', { method: 'POST', client: admin, json: {} })).status).toBe(202)
-      expect((await lastIncoming('update-module'))!.params).toEqual({ id: 'trivy', version: '0.67.2' })
+      const updTrivy = await call('/api/catalog/modules/trivy/update', { method: 'POST', client: admin, json: {} })
+      expect(updTrivy.status).toBe(202)
+      expect((await incomingFor(updTrivy, 'update-module'))!.params).toEqual({ id: 'trivy', version: '0.67.2' })
       // Version cible soumise aux mêmes contrôles qu'une installation : licence, dépendances.
       const idx = JSON.parse(await readFile(join(root, 'catalog-index.json'), 'utf8')) as { modules: Record<string, unknown>[] }
       const next = { ...idx.modules.find(m => m.id === 'gitleaks')!, version: '9.0.0', license: { spdx: 'X', restrictions: 'other' }, requires: { modules: [], feeds: ['osv-db'] } }
@@ -554,8 +558,9 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
       const blocked = await call('/api/catalog/modules/trivy-db/uninstall', { method: 'POST', client: admin, json: { keep_data: true } })
       expect(blocked.data.data).toMatchObject({ code: 'E_DEPENDENTS', dependents: ['trivy'] })
       expect(code(await call('/api/catalog/modules/gitleaks/uninstall', { method: 'POST', client: admin, json: {} }))).toBe('E_VALIDATION')
-      expect((await call('/api/catalog/modules/gitleaks/uninstall', { method: 'POST', client: admin, json: { keep_data: false } })).status).toBe(202)
-      expect((await lastIncoming('uninstall-module'))!.params).toEqual({ id: 'gitleaks', keep_data: false })
+      const uninstall = await call('/api/catalog/modules/gitleaks/uninstall', { method: 'POST', client: admin, json: { keep_data: false } })
+      expect(uninstall.status).toBe(202)
+      expect((await incomingFor(uninstall, 'uninstall-module'))!.params).toEqual({ id: 'gitleaks', keep_data: false })
       expect((await call('/api/catalog/modules/BAD/uninstall', { method: 'POST', client: admin, json: { keep_data: false } })).status).toBe(404)
     })
 
