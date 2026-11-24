@@ -58,8 +58,10 @@ prepare_feed() { # id
 			local image
 			image=$(yq "$ROOT/modules/trivy/module.yaml" | jq -r .image)
 			podman pull -q "$image" > /dev/null
-			chmod 0777 "$dir"
-			podman run --rm --user=65534:65534 --env=HOME=/tmp --tmpfs=/tmp -v "$dir:/cache:rw" \
+			# Préparation seulement (avec réseau, hors analyse) : root du conteneur
+			# = utilisateur du runner en podman rootless, pour que les fichiers
+			# téléchargés lui appartiennent (lecture par 65534 ensuite, :ro).
+			podman run --rm --user=0:0 --env=HOME=/tmp --tmpfs=/tmp -v "$dir:/cache:rw" \
 				--entrypoint=trivy "$image" --cache-dir /cache image --download-db-only --no-progress ;;
 		osv-db)
 			mkdir -p "$dir/osv-scalibr/npm"
