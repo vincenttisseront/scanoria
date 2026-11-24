@@ -37,6 +37,7 @@ watch(locale, async (value) => {
 const links = computed<NavigationMenuItem[]>(() => {
   const items: NavigationMenuItem[] = [
     { label: t('nav.dashboard'), icon: 'i-lucide-layout-dashboard', to: '/' },
+    { label: t('projects.nav'), icon: 'i-lucide-folder-git-2', to: '/projects' },
     { label: t('scans.nav'), icon: 'i-lucide-scan-search', to: '/scans' },
     { label: t('nav.findings'), icon: 'i-lucide-list-checks', to: '/findings' },
     { label: t('nav.catalog'), icon: 'i-lucide-layout-grid', to: '/catalog' },
