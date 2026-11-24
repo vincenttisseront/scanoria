@@ -169,7 +169,7 @@ export function requiredBy(installed: InstalledModule[], index: CatalogIndex | n
       out.set(dep, [...(out.get(dep) ?? []), inst.id])
     }
   }
-  for (const list of out.values()) list.sort()
+  for (const list of out.values()) list.sort((a, b) => a.localeCompare(b))
   return out
 }
 
