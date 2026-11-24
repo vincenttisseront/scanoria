@@ -39,6 +39,7 @@ const links = computed<NavigationMenuItem[]>(() => {
     { label: t('nav.dashboard'), icon: 'i-lucide-layout-dashboard', to: '/' },
     { label: t('projects.nav'), icon: 'i-lucide-folder-git-2', to: '/projects' },
     { label: t('scans.nav'), icon: 'i-lucide-scan-search', to: '/scans' },
+    { label: t('health.nav'), icon: 'i-lucide-activity', to: '/scans/health' },
     { label: t('nav.findings'), icon: 'i-lucide-list-checks', to: '/findings' },
     { label: t('gates.nav'), icon: 'i-lucide-gauge', to: '/gates' },
     { label: t('nav.catalog'), icon: 'i-lucide-layout-grid', to: '/catalog' },
