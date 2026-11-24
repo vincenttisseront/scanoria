@@ -7,7 +7,7 @@
 // enchaînement ingestion → finalisation → verdict → IA (contrats 5, 6, 7), API.
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -493,6 +493,172 @@ describe.skipIf(!DATABASE_URL)('file d’analyses (PostgreSQL réel, faux runner
       expect(row).toMatchObject({ status: 'done', verdict: 'inconclusive', job_id: null })
       expect(row.coverage.gaps.map((g: { category: string }) => g.category)).toEqual(['secrets', 'sca', 'lint', 'ci'])
       expect(await incoming()).toEqual([])
+    })
+  })
+
+  describe('relecture : robustesse et confinement', () => {
+    it('le runner recopie le jeton dans son erreur et dans un journal : masqué avant stockage', async () => {
+      const cred = await db.pool.query<{ id: string }>(`INSERT INTO credentials (kind, secret_enc, hint) VALUES ('token', '\\x01', '…abcd') RETURNING id`)
+      const p = await newProject({ credential_id: cred.rows[0]!.id })
+      const token = `scn_${randomUUID().replace(/-/g, '')}abcdefgh`
+      secret = { kind: 'token', value: token, username: 'ci' }
+      const { scanId } = await enqueueScan(db.pool, { projectId: p, ref: 'main', trigger: 'manual' })
+      const w = worker({ maxInfraRetries: 0 })
+      await w.dispatch()
+      const jobId = (await scanRow(scanId)).job_id
+      await runJob(jobId, { modules: { gitleaks: { status: 'error', error: { code: 'E_TOOL', class: 'tool', message: `fatal: unable to access 'https://ci:${token}@forge.exemple.test/a.git'` } } } })
+      await writeFile(join(cfg.scansDir, 'results', jobId, 'gitleaks', 'module.log'), `Authorization: Bearer ${token}\nurl=https://${encodeURIComponent(token)}@forge.exemple.test\n`)
+      await w.collect()
+      const row = await scanRow(scanId)
+      expect(row.status, JSON.stringify(row.error)).toBe('done')
+      const log = await readFile(join(cfg.scanLogsDir, scanId, 'gitleaks.log'), 'utf8')
+      expect(log).toContain('[masqué]')
+      expect(log).not.toContain(token)
+      expect(JSON.stringify(row)).not.toContain(token)
+
+      // Erreur infra relancée : le message stocké pour la relance est masqué aussi.
+      const s2 = await enqueueScan(db.pool, { projectId: p, ref: 'other', trigger: 'manual' })
+      const w2 = worker()
+      await w2.dispatch()
+      await runJob((await scanRow(s2.scanId)).job_id, { status: 'error', error: { code: 'E_OOM', class: 'infra', message: `clone https://${token}@forge.exemple.test failed` } })
+      await w2.collect()
+      const r2 = await scanRow(s2.scanId)
+      expect(r2.status).toBe('queued')
+      expect(JSON.stringify(r2)).not.toContain(token)
+    })
+
+    it('journal par un lien de répertoire vers l’extérieur : jamais copié ; result.json sous un lien : refusé', async () => {
+      const outside = await mkdtemp(join(tmpdir(), 'scanoria-outside-'))
+      await writeFile(join(outside, 'secret.key'), 'contenu hors de results')
+      const p = await newProject()
+      const { scanId } = await enqueueScan(db.pool, { projectId: p, ref: 'main', trigger: 'manual' })
+      const w = worker()
+      await w.dispatch()
+      const jobId = (await scanRow(scanId)).job_id
+      await runJob(jobId)
+      const dir = join(cfg.scansDir, 'results', jobId)
+      await symlink(outside, join(dir, 'escape'))
+      const res = JSON.parse(await readFile(join(dir, 'result.json'), 'utf8'))
+      res.modules[0].log = 'escape/secret.key'
+      await writeFile(join(dir, 'result.json'), JSON.stringify(res))
+      await w.collect()
+      const mods = await moduleRows(scanId)
+      expect(mods.find(m => m.module_id === res.modules[0].id).log_path).toBeNull()
+      expect(JSON.stringify(await readdir(join(cfg.scanLogsDir, scanId)))).not.toContain('secret')
+
+      // Répertoire de résultat entier remplacé par un lien.
+      const s2 = await enqueueScan(db.pool, { projectId: p, ref: 'other', trigger: 'manual' })
+      await w.dispatch()
+      const job2 = (await scanRow(s2.scanId)).job_id
+      await takeJob(job2)
+      await writeFile(join(outside, 'result.json'), '{}')
+      await symlink(outside, join(cfg.scansDir, 'results', job2))
+      await w.collect()
+      expect(await scanRow(s2.scanId)).toMatchObject({ status: 'queued', error: { code: 'E_RESULT_INVALID' } })
+      await rm(outside, { recursive: true, force: true })
+    })
+
+    it('état des modules ou catalogue illisible : analyse laissée en file, rien de figé', async () => {
+      const p = await newProject()
+      const { scanId } = await enqueueScan(db.pool, { projectId: p, ref: 'main', trigger: 'manual' })
+      await rm(paths.modulesStateFile)
+      expect(await worker().dispatchOne()).toBe('deferred')
+      let row = await scanRow(scanId)
+      expect(row).toMatchObject({ status: 'queued', plan: null, attempt: 1, error: { code: 'E_MODULES_STATE', class: 'infra' } })
+      expect(await moduleRows(scanId)).toEqual([])
+      await setInstalled([{ id: 'gitleaks', version: '8.30.1' }])
+      const catalog = await readFile(paths.catalogIndexFile, 'utf8')
+      await writeFile(paths.catalogIndexFile, '{')
+      await db.pool.query(`UPDATE scans SET error = NULL WHERE id = $1`, [scanId])
+      expect(await worker().dispatchOne()).toBe('deferred')
+      expect((await scanRow(scanId)).error).toMatchObject({ code: 'E_CATALOG' })
+      await writeFile(paths.catalogIndexFile, catalog)
+      await db.pool.query(`UPDATE scans SET error = NULL WHERE id = $1`, [scanId])
+      expect(await worker().dispatchOne()).toBe('dispatched')
+      row = await scanRow(scanId)
+      expect(row.plan.modules.map((m: { id: string }) => m.id)).toEqual(['gitleaks'])
+    })
+
+    it('reprise : analyse « ingesting » sans tâche conclue ; tâche orpheline retirée de incoming', async () => {
+      const p = await newProject()
+      const { scanId } = await enqueueScan(db.pool, { projectId: p, ref: 'main', trigger: 'manual' })
+      await db.pool.query(
+        `UPDATE scans SET status = 'ingesting', job_id = NULL, started_at = now() - interval '10 minutes',
+                error = '{"code":"E_SCAN_SOURCE","class":"input","message":"x"}' WHERE id = $1`, [scanId])
+      const w = worker()
+      expect(await w.recoverOrphans()).toBe(1)
+      expect(await scanRow(scanId)).toMatchObject({ status: 'error', verdict: 'inconclusive' })
+
+      const orphan = randomUUID()
+      const path = join(cfg.scansDir, 'jobs', 'incoming', `${orphan}.json`)
+      await writeFile(path, '{}')
+      expect(await w.sweepIncoming()).toBe(0)
+      const old = new Date(Date.now() - 5 * 60_000)
+      await utimes(path, old, old)
+      const s2 = await enqueueScan(db.pool, { projectId: p, ref: 'other', trigger: 'manual' })
+      await w.dispatch()
+      const kept = `${(await scanRow(s2.scanId)).job_id}.json`
+      await utimes(join(cfg.scansDir, 'jobs', 'incoming', kept), old, old)
+      expect(await w.sweepIncoming()).toBe(1)
+      expect(await incoming()).toEqual([kept])
+    })
+
+    it('G11 : commit ou empreinte d’image différents du plan → non concluant, rien d’ingéré', async () => {
+      const p = await newProject()
+      const { scanId } = await enqueueScan(db.pool, { projectId: p, ref: 'main', commit: 'a'.repeat(40), trigger: 'manual' })
+      const w = worker()
+      await w.dispatch()
+      await runJob((await scanRow(scanId)).job_id)
+      await w.collect()
+      expect(await scanRow(scanId)).toMatchObject({ status: 'error', verdict: 'inconclusive', commit_sha: 'a'.repeat(40), error: { code: 'E_COMMIT_MISMATCH' } })
+      expect(seen.ingest).toEqual([])
+
+      const s2 = await enqueueScan(db.pool, { projectId: p, ref: 'main', trigger: 'manual' })
+      await w.dispatch()
+      const job = (await scanRow(s2.scanId)).job_id
+      await runJob(job)
+      const file = join(cfg.scansDir, 'results', job, 'result.json')
+      const res = JSON.parse(await readFile(file, 'utf8'))
+      res.modules[0].image_digest = `sha256:${'e'.repeat(64)}`
+      await writeFile(file, JSON.stringify(res))
+      await w.collect()
+      const mods = await moduleRows(s2.scanId)
+      expect(mods.find(m => m.module_id === res.modules[0].id)).toMatchObject({ status: 'error', error_class: 'infra' })
+      expect((await scanRow(s2.scanId)).verdict).toBe('inconclusive')
+    })
+
+    it('annulation entre la relecture et l’ingestion : jamais ressuscitée', async () => {
+      const p = await newProject()
+      const { scanId } = await enqueueScan(db.pool, { projectId: p, ref: 'main', trigger: 'manual' })
+      const w = worker()
+      await w.dispatch()
+      await runJob((await scanRow(scanId)).job_id)
+      const original = integrations.decryptSecret
+      // Annule pendant le calcul du masquage, après stillCurrent.
+      const cred = await db.pool.query<{ id: string }>(`INSERT INTO credentials (kind, secret_enc, hint) VALUES ('token', '\\x01', '…abcd') RETURNING id`)
+      await db.pool.query('UPDATE projects SET credential_id = $2 WHERE id = $1', [p, cred.rows[0]!.id])
+      integrations.decryptSecret = async () => {
+        await cancelScan(db.pool, scanId)
+        throw new Error('x')
+      }
+      try {
+        await w.collect()
+      }
+      finally {
+        integrations.decryptSecret = original
+      }
+      expect(await scanRow(scanId)).toMatchObject({ status: 'cancelled', verdict: null })
+    })
+
+    it('fusion : jamais avec une analyse en file d’un autre quality gate', async () => {
+      const p = await newProject()
+      const a = await enqueueScan(db.pool, { projectId: p, ref: 'main', trigger: 'schedule' })
+      const g2 = await db.pool.query<{ id: string }>(
+        `INSERT INTO gates (slug, rules) SELECT 'g-' || substr(md5(random()::text), 1, 8), rules FROM gates WHERE id = $1 RETURNING id`, [gate])
+      await db.pool.query('UPDATE projects SET gate_id = $2 WHERE id = $1', [p, g2.rows[0]!.id])
+      const b = await enqueueScan(db.pool, { projectId: p, ref: 'main', trigger: 'manual' })
+      expect(b.merged).toBe(false)
+      expect(b.scanId).not.toBe(a.scanId)
     })
   })
 

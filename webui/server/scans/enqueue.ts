@@ -114,11 +114,11 @@ export async function enqueueScan(db: Db, input: EnqueueScanInput): Promise<Enqu
     if (input.trigger !== 'replay') {
       const dup = await client.query<{ id: string, number: number }>(
         `SELECT id, number FROM scans
-          WHERE project_id = $1 AND status = 'queued' AND profile_id = $2 AND trigger <> 'replay'
+          WHERE project_id = $1 AND status = 'queued' AND profile_id = $2 AND gate_id = $6 AND trigger <> 'replay'
             AND ($3::text IS NULL AND commit_sha IS NULL AND ref = $4 OR commit_sha = $3)
             AND upload_id IS NOT DISTINCT FROM $5
           ORDER BY queued_at LIMIT 1`,
-        [project.id, profileId, commit, ref, uploadId])
+        [project.id, profileId, commit, ref, uploadId, gateId])
       if (dup.rows[0]) {
         // La demande la plus urgente l'emporte ; l'ancienneté est conservée.
         await client.query('UPDATE scans SET priority = GREATEST(priority, $2) WHERE id = $1', [dup.rows[0].id, priority])

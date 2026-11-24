@@ -15,13 +15,14 @@ import { GateRules, VerdictDetails, type ErrorClass, type ScanModuleStatus } fro
 import { UUID_V4_RE } from '#shared/schemas'
 import { readModulesState } from '../utils/catalog'
 import { scanJobSchema, type JobCredential, type RunnerError, type ScanJob, type ScanResult } from './contract'
-import { copyModuleLog, jobPending, readResult, readRunnerState, resultDir, withdrawJob, writeJob } from './files'
+import { copyModuleLog, jobPending, listIncomingJobs, readResult, readRunnerState, resultDir, withdrawJob, writeJob } from './files'
 import { pendingGate, type Integrations } from './integrations'
 import {
   PLAN_VERSION, parsePlan, planHistory, planTimeout, readPlanCatalog, replayAvailability, resolveProfile,
   type PlannedModule, type ScanPlan,
 } from './plan'
 import { EFFECTIVE_PRIORITY_SQL, retryDelayS } from './priority'
+import { makeRedactor } from './redact'
 import type { WorkerConfig } from './config'
 
 export interface WorkerPaths {
@@ -60,6 +61,20 @@ class ScanFailure extends Error {
   }
 }
 
+/** État de l'appliance momentanément illisible : l'analyse reste en file, rien n'est figé (G12). */
+class Deferred extends Error {
+  constructor(readonly error: RunnerError) {
+    super(error.message)
+  }
+}
+
+/** Délai avant de reprendre une analyse laissée en « ingesting » sans tâche (arrêt du worker). */
+const ORPHAN_INGEST_S = 120
+/** Âge minimal d'une tâche de incoming/ sans analyse « dispatched » avant son retrait. */
+const ORPHAN_JOB_S = 60
+/** Nouvel essai quand l'état des modules ou le catalogue est illisible. */
+const DEFER_S = 30
+
 /** Tâche refusée par le runner avant lecture de scan_id : la correspondance se fait par l'id de tâche. */
 const UNREADABLE_SCAN_ID = '00000000-0000-4000-8000-000000000000'
 
@@ -81,7 +96,9 @@ export class ScanWorker {
   /** Une passe complète. */
   async tick(now = new Date()): Promise<void> {
     await this.withdrawCancelled()
+    await this.sweepIncoming(now)
     await this.collect(now)
+    await this.recoverOrphans()
     await this.dispatch(now)
   }
 
@@ -97,11 +114,12 @@ export class ScanWorker {
   }
 
   async dispatch(now = new Date()): Promise<number> {
+    const state = await readRunnerState(this.cfg.runnerStateFile, this.cfg.runnerStaleS, now)
     let free = await this.freeSlots(now)
     let dispatched = 0
     while (free > 0) {
-      const outcome = await this.dispatchOne()
-      if (outcome === 'empty') break
+      const outcome = await this.dispatchOne(state?.slots)
+      if (outcome === 'empty' || outcome === 'deferred') break
       if (outcome === 'dispatched') {
         dispatched++
         free--
@@ -113,14 +131,23 @@ export class ScanWorker {
   /**
    * Prend l'analyse en file de plus haute priorité effective (G17), verrouillée
    * (FOR UPDATE SKIP LOCKED : un second worker ne la prend jamais), puis
-   * dépose sa tâche. 'finished' : analyse conclue sans runner (plan vide, source invalide).
+   * dépose sa tâche. 'finished' : analyse conclue sans runner (plan vide,
+   * source invalide) ; 'deferred' : état de l'appliance illisible, réessai plus tard.
+   * Un verrou de transaction sérialise les dépôts entre workers : le quota par
+   * projet et les places du runner sont recomptés sous ce verrou.
    */
-  async dispatchOne(): Promise<'empty' | 'dispatched' | 'finished'> {
+  async dispatchOne(maxInFlight = Number.POSITIVE_INFINITY): Promise<'empty' | 'dispatched' | 'finished' | 'deferred'> {
     const client = await this.pool.connect()
     let finished: { scanId: string, error: RunnerError | null } | null = null
     let jobId: string | null = null
     try {
       await client.query('BEGIN')
+      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended('scanoria:dispatch', 0))`)
+      const inflight = await client.query<{ n: number }>(`SELECT count(*)::int AS n FROM scans WHERE status IN ('dispatched', 'running')`)
+      if ((inflight.rows[0]?.n ?? 0) >= maxInFlight) {
+        await client.query('COMMIT')
+        return 'empty'
+      }
       const r = await client.query<QueuedRow>(
         `SELECT s.id, s.project_id, s.trigger, s.ref, s.commit_sha, s.upload_id, s.attempt, s.plan, s.profile_id, s.gate_id
            FROM scans s
@@ -136,8 +163,21 @@ export class ScanWorker {
         await client.query('COMMIT')
         return 'empty'
       }
+      let planned
       try {
-        const { plan, missing } = await this.planFor(client, scan)
+        planned = await this.planFor(client, scan)
+      }
+      catch (e) {
+        if (!(e instanceof Deferred)) throw e
+        await client.query(
+          `UPDATE scans SET error = $2::jsonb || jsonb_build_object('retry_at', now() + make_interval(secs => $3)) WHERE id = $1`,
+          [scan.id, JSON.stringify(e.error), DEFER_S])
+        await client.query('COMMIT')
+        this.log(`scan ${scan.id}: ${e.error.code}, deferred ${DEFER_S}s`)
+        return 'deferred'
+      }
+      try {
+        const { plan, missing } = planned
         await client.query('DELETE FROM scan_modules WHERE scan_id = $1', [scan.id])
         for (const m of plan.modules) {
           const isMissing = missing.some(x => x.id === m.id)
@@ -167,7 +207,12 @@ export class ScanWorker {
       }
       catch (e) {
         if (!(e instanceof ScanFailure)) throw e
-        await client.query(`UPDATE scans SET status = 'ingesting', started_at = COALESCE(started_at, now()), job_id = NULL WHERE id = $1`, [scan.id])
+        await client.query(
+          `UPDATE scans SET status = 'ingesting', started_at = COALESCE(started_at, now()), job_id = NULL, error = $2 WHERE id = $1`,
+          [scan.id, JSON.stringify(e.error)])
+        await client.query(
+          `UPDATE scan_modules SET status = 'error', error_class = 'input', finished_at = now()
+            WHERE scan_id = $1 AND status IN ('pending', 'running')`, [scan.id])
         finished = { scanId: scan.id, error: e.error }
       }
       await client.query('COMMIT')
@@ -191,6 +236,7 @@ export class ScanWorker {
   /** Plan figé de l'analyse : repris tel quel (rejeu, relance), sinon résolu depuis le profil. */
   private async planFor(client: pg.PoolClient, scan: QueuedRow): Promise<{ plan: ScanPlan, missing: PlannedModule[] }> {
     const state = await readModulesState(this.paths.modulesStateFile)
+    if (!state.available) throw new Deferred(err('E_MODULES_STATE', 'infra', 'installed modules state is unavailable'))
     const existing = scan.plan ? parsePlan(scan.plan) : null
     if (scan.plan && !existing) throw new ScanFailure(err('E_SCAN_PLAN', 'input', 'stored plan is invalid'))
     if (existing) {
@@ -206,6 +252,7 @@ export class ScanWorker {
     const rules = GateRules.safeParse(gate.rows[0]!.rules)
     if (!rules.success) throw new ScanFailure(err('E_SCAN_GATE', 'input', 'quality gate rules are invalid'))
     const catalog = await readPlanCatalog(this.paths.catalogIndexFile)
+    if (catalog.size === 0 && state.modules.length > 0) throw new Deferred(err('E_CATALOG', 'infra', 'catalog index is unavailable'))
     const { modules, gaps } = resolveProfile({
       profile: prof.rows[0]!,
       sourceKind: project.source_kind,
@@ -290,22 +337,33 @@ export class ScanWorker {
         WHERE status IN ('dispatched', 'running', 'ingesting') AND job_id IS NOT NULL
         ORDER BY started_at NULLS FIRST`)
     for (const scan of r.rows) {
-      const read = await readResult(this.cfg.scansDir, scan.job_id)
-      if (read.kind !== 'absent') {
-        await this.withScanLock(scan.id, () => this.processResult(scan, read))
-        continue
+      // Une analyse en échec n'arrête pas le relevé des autres.
+      try {
+        await this.collectOne(scan, now)
       }
-      if (scan.status === 'dispatched' && !(await jobPending(this.cfg.scansDir, scan.job_id))) {
-        await this.pool.query(`UPDATE scans SET status = 'running' WHERE id = $1 AND status = 'dispatched' AND job_id = $2`, [scan.id, scan.job_id])
+      catch (e) {
+        this.log(`scan ${scan.id}: collect failed: ${(e as Error).message}`)
       }
-      const plan = parsePlan(scan.plan)
-      const deadline = (scan.started_at?.getTime() ?? now.getTime()) + ((plan?.timeout_s ?? 0) + this.cfg.resultMarginS) * 1000
-      if (now.getTime() > deadline) {
-        await this.withScanLock(scan.id, async () => {
-          await withdrawJob(this.cfg.scansDir, scan.job_id)
-          await this.failInfra(scan, err('E_RESULT_TIMEOUT', 'infra', 'no result from the runner before the plan deadline'))
-        })
-      }
+    }
+  }
+
+  private async collectOne(scan: ActiveRow, now: Date): Promise<void> {
+    const read = await readResult(this.cfg.scansDir, scan.job_id)
+    if (read.kind !== 'absent') {
+      await this.withScanLock(scan.id, () => this.processResult(scan, read))
+      return
+    }
+    if (scan.status === 'dispatched' && !(await jobPending(this.cfg.scansDir, scan.job_id))) {
+      await this.pool.query(`UPDATE scans SET status = 'running' WHERE id = $1 AND status = 'dispatched' AND job_id = $2`, [scan.id, scan.job_id])
+    }
+    const plan = parsePlan(scan.plan)
+    const deadline = (scan.started_at?.getTime() ?? now.getTime()) + ((plan?.timeout_s ?? 0) + this.cfg.resultMarginS) * 1000
+    if (now.getTime() > deadline) {
+      await this.withScanLock(scan.id, async () => {
+        if (!(await this.stillCurrent(scan))) return
+        await withdrawJob(this.cfg.scansDir, scan.job_id)
+        await this.failInfra(scan, err('E_RESULT_TIMEOUT', 'infra', 'no result from the runner before the plan deadline'))
+      })
     }
   }
 
@@ -341,18 +399,32 @@ export class ScanWorker {
       await this.failInfra(scan, err('E_RESULT_INVALID', 'infra', `runner result rejected (${read.kind === 'invalid' ? read.reason : 'identifiers'})`))
       return
     }
-    const result = read.result
+    // Rien de ce que renvoie le runner n'est stocké ni affiché avant masquage du secret de la source.
+    const redact = await this.redactorFor(scan.project_id)
+    const result = redactResult(read.result, redact)
     const infra = result.error?.class === 'infra' ? result.error : result.modules.find(m => m.error?.class === 'infra')?.error
     if (infra && scan.status !== 'ingesting' && scan.attempt <= this.cfg.maxInfraRetries) {
       await this.retry(scan, infra)
       return
     }
-    await this.pool.query(
+    const plan = parsePlan(scan.plan)
+    const wanted = plan?.source.commit ?? null
+    const moved = await this.pool.query(
       `UPDATE scans SET status = 'ingesting',
               commit_sha = COALESCE(commit_sha, $2),
-              plan = CASE WHEN $2::text IS NULL THEN plan ELSE jsonb_set(plan, '{source,commit}', to_jsonb($2::text)) END
-        WHERE id = $1`, [scan.id, result.source.commit])
-    const complete = await this.recordModules(scan, result)
+              plan = CASE WHEN $2::text IS NULL OR $4::boolean THEN plan ELSE jsonb_set(plan, '{source,commit}', to_jsonb($2::text)) END
+        WHERE id = $1 AND job_id = $3 AND status IN ('dispatched', 'running', 'ingesting')`,
+      [scan.id, result.source.commit, scan.job_id, wanted !== null])
+    if (!moved.rowCount) return
+    // G11 : un rejeu ou une analyse épinglée doit porter sur le commit demandé, sinon rien n'est ingéré.
+    if (wanted && result.source.commit && result.source.commit !== wanted) {
+      await this.pool.query(
+        `UPDATE scan_modules SET status = 'error', error_class = 'input', finished_at = now()
+          WHERE scan_id = $1 AND status IN ('pending', 'running')`, [scan.id])
+      await this.conclude(scan.id, { status: 'error', error: err('E_COMMIT_MISMATCH', 'input', 'the runner analysed another commit than the planned one'), complete: false })
+      return
+    }
+    const complete = await this.recordModules(scan, result, plan, redact)
     await this.mergeSourceCoverage(scan.id, result)
     await this.conclude(scan.id, {
       status: result.status === 'ok' ? 'done' : 'error',
@@ -362,7 +434,7 @@ export class ScanWorker {
   }
 
   /** Met à jour scan_modules, copie les journaux (G20), ingère les sorties (contrat 5). */
-  private async recordModules(scan: ActiveRow, result: ScanResult): Promise<boolean> {
+  private async recordModules(scan: ActiveRow, result: ScanResult, plan: ScanPlan | null, redact: (t: string) => string): Promise<boolean> {
     const rows = await this.pool.query<{ module_id: string, status: ScanModuleStatus }>('SELECT module_id, status FROM scan_modules WHERE scan_id = $1', [scan.id])
     let complete = result.status === 'ok'
     for (const row of rows.rows) {
@@ -378,7 +450,14 @@ export class ScanWorker {
       let status: ScanModuleStatus = m.status
       let errorClass: ErrorClass | null = m.error?.class ?? null
       let count: number | null = null
-      if (m.status === 'ok') {
+      // G11 : l'image exécutée doit être celle du plan (empreinte), sinon le module n'est pas concluant.
+      const plannedDigest = plan?.modules.find(x => x.id === m.id)?.image_digest ?? null
+      if (m.status === 'ok' && plannedDigest && m.image_digest && m.image_digest !== plannedDigest) {
+        this.log(`scan ${scan.id} module ${m.id}: image digest differs from the plan`)
+        status = 'error'
+        errorClass = 'infra'
+      }
+      else if (m.status === 'ok') {
         try {
           const outputs = Object.fromEntries(Object.entries(m.outputs).filter((e): e is [string, string] => typeof e[1] === 'string'))
           const out = await this.integrations.ingestModuleOutputs(this.pool, { scanId: scan.id, moduleId: m.id, resultDir: resultDir(this.cfg.scansDir, scan.job_id), outputs })
@@ -400,7 +479,7 @@ export class ScanWorker {
       let logPath: string | null = null
       if (m.log) {
         try {
-          logPath = await copyModuleLog(this.cfg.scansDir, scan.job_id, m.log, this.cfg.scanLogsDir, scan.id, m.id)
+          logPath = await copyModuleLog(this.cfg.scansDir, scan.job_id, m.log, this.cfg.scanLogsDir, scan.id, m.id, redact)
         }
         catch (e) {
           this.log(`scan ${scan.id} module ${m.id}: log copy failed: ${(e as Error).message}`)
@@ -430,10 +509,13 @@ export class ScanWorker {
       await this.retry(scan, error)
       return
     }
+    const moved = await this.pool.query(
+      `UPDATE scans SET status = 'ingesting' WHERE id = $1 AND job_id = $2 AND status IN ('dispatched', 'running', 'ingesting')`,
+      [scan.id, scan.job_id])
+    if (!moved.rowCount) return
     await this.pool.query(
       `UPDATE scan_modules SET status = 'error', error_class = 'infra', finished_at = now()
         WHERE scan_id = $1 AND status IN ('pending', 'running')`, [scan.id])
-    await this.pool.query(`UPDATE scans SET status = 'ingesting' WHERE id = $1`, [scan.id])
     await this.conclude(scan.id, { status: 'error', error, complete: false })
   }
 
@@ -450,6 +532,57 @@ export class ScanWorker {
                 started_at = NULL, finished_at = NULL WHERE scan_id = $1 AND status <> 'missing'`, [scan.id])
       this.log(`scan ${scan.id}: ${error.code}, retry ${scan.attempt + 1} in ${delay}s`)
     }
+  }
+
+  /** Masquage du secret de la source du projet (déchiffré ici, jamais journalisé). */
+  private async redactorFor(projectId: string): Promise<(text: string) => string> {
+    const r = await this.pool.query<{ credential_id: string | null }>('SELECT credential_id FROM projects WHERE id = $1', [projectId])
+    const id = r.rows[0]?.credential_id
+    if (!id) return makeRedactor([])
+    try {
+      const secret = await this.integrations.decryptSecret(this.pool, id)
+      return makeRedactor([secret.value])
+    }
+    catch {
+      return makeRedactor([])
+    }
+  }
+
+  /**
+   * Analyses laissées en « ingesting » sans tâche (worker arrêté entre la
+   * transition et la conclusion) : conclues à la reprise, sinon elles
+   * occuperaient le quota du projet pour toujours.
+   */
+  async recoverOrphans(): Promise<number> {
+    const r = await this.pool.query<{ id: string, error: RunnerError | null }>(
+      `SELECT id, error FROM scans
+        WHERE status = 'ingesting' AND job_id IS NULL AND started_at < now() - make_interval(secs => $1)`, [ORPHAN_INGEST_S])
+    for (const row of r.rows) {
+      await this.withScanLock(row.id, () => this.conclude(row.id, { status: row.error ? 'error' : 'done', error: row.error, complete: false }))
+    }
+    return r.rows.length
+  }
+
+  /**
+   * Tâches de incoming/ qu'aucune analyse « dispatched » ne réclame (arrêt
+   * entre le dépôt et la validation, analyse annulée pendant l'arrêt du
+   * worker) : retirées, car elles portent le secret de la source.
+   */
+  async sweepIncoming(now = new Date()): Promise<number> {
+    const jobs = (await listIncomingJobs(this.cfg.scansDir)).filter(j => j.mtimeMs < now.getTime() - ORPHAN_JOB_S * 1000)
+    if (!jobs.length) return 0
+    const r = await this.pool.query<{ job_id: string }>(
+      `SELECT job_id::text FROM scans WHERE job_id = ANY($1::uuid[]) AND status = 'dispatched'`, [jobs.map(j => j.id)])
+    const wanted = new Set(r.rows.map(x => x.job_id))
+    let n = 0
+    for (const j of jobs) {
+      if (wanted.has(j.id)) continue
+      if (await withdrawJob(this.cfg.scansDir, j.id)) {
+        this.log(`orphan job ${j.id} withdrawn`)
+        n++
+      }
+    }
+    return n
   }
 
   /**
@@ -492,7 +625,7 @@ export class ScanWorker {
   /**
    * Tâches d'analyses annulées pas encore prises par le runner : retirées de
    * incoming/ (la console, sans droit d'écriture sur la file, ne fait que
-   * marquer l'analyse annulée).
+   * marquer l'analyse annulée). Au-delà d'une heure, sweepIncoming s'en charge.
    */
   async withdrawCancelled(): Promise<number> {
     const r = await this.pool.query<{ job_id: string }>(
@@ -539,4 +672,10 @@ export async function cancelScan(db: Pick<pg.Pool, 'query'>, scanId: string): Pr
   if (!r.rowCount) return false
   await db.query(`UPDATE scan_modules SET status = 'skipped' WHERE scan_id = $1 AND status IN ('pending', 'running')`, [scanId])
   return true
+}
+
+/** Copie du résultat dont les messages d'erreur sont masqués. */
+function redactResult(result: ScanResult, redact: (t: string) => string): ScanResult {
+  const fix = <E extends { message: string } | null | undefined>(e: E): E => (e ? { ...e, message: redact(e.message).slice(0, 2000) } : e)
+  return { ...result, error: fix(result.error), modules: result.modules.map(m => ({ ...m, error: fix(m.error) })) }
 }
