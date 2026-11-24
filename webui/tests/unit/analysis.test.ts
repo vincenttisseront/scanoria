@@ -33,9 +33,9 @@ describe('contrats des analyses', () => {
     expect(SQL.replace(/\s+/g, ' ').replace(/\( /g, '(')).toContain(`IN (${quoted(values)})`)
   })
 
-  it('sujets des tâches IA identiques à 006_modules_ia.sql', () => {
-    const sql006 = readFileSync(root('webui/server/db/migrations/006_modules_ia.sql'), 'utf8').replace(/\s+/g, ' ')
-    expect(sql006).toContain(`subject_type IN (${quoted(AI_SUBJECT_TYPES)})`)
+  it('sujets des tâches IA identiques à la dernière contrainte (010_ai_license.sql)', () => {
+    const sql010 = readFileSync(root('webui/server/db/migrations/010_ai_license.sql'), 'utf8').replace(/\s+/g, ' ')
+    expect(sql010).toContain(`subject_type IN (${quoted(AI_SUBJECT_TYPES)})`)
   })
 
   it('catégories identiques au schéma des modules', () => {
