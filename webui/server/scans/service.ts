@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Vincent Tisseront
 //
 // Boucle de scanoria-worker : passes régulières de ScanWorker, planification
-// des projets (A), signe de vie pour scanoria-selftest (worker.alive) et
-// arrêt propre sur SIGTERM : la passe en cours se termine, rien n'est perdu
+// des projets (A), relevés des modules permanents (F14), signe de vie pour
+// scanoria-selftest (worker.alive) et arrêt propre sur SIGTERM : la passe en cours se termine, rien n'est perdu
 // (l'état est en base et dans la file ; une analyse déposée reprend au
 // redémarrage).
 
@@ -15,6 +15,7 @@ import type { WorkerConfig } from './config'
 import { enqueueScan } from './enqueue'
 import type { Integrations } from './integrations'
 import { ScanWorker, type WorkerPaths } from './worker'
+import { UsageTask } from '../usage/samples'
 
 export interface ServiceOptions {
   pool: pg.Pool
@@ -23,6 +24,8 @@ export interface ServiceOptions {
   integrations: Integrations
   version?: string
   log?: (msg: string) => void
+  /** État publié par le service root : relevés des modules permanents (F14, contrat 11). */
+  stateFile?: string
 }
 
 export class WorkerService {
@@ -34,10 +37,12 @@ export class WorkerService {
   private lastPurge = 0
   private wake: (() => void) | null = null
   private readonly log: (msg: string) => void
+  private readonly usage: UsageTask | null
 
   constructor(private readonly opts: ServiceOptions) {
     this.log = opts.log ?? (msg => console.log(`[worker] ${msg}`))
     this.worker = new ScanWorker(opts.pool, opts.cfg, opts.paths, opts.integrations, this.log)
+    this.usage = opts.stateFile ? new UsageTask(opts.pool, { stateFile: opts.stateFile, log: this.log }) : null
   }
 
   /** Une itération : relevé, dépôt, planification (au plus une fois par période), signe de vie. */
@@ -61,6 +66,7 @@ export class WorkerService {
       this.lastPurge = now.getTime()
       await this.worker.purgeOrphanLogs().catch(() => 0)
     }
+    await this.usage?.iterate(now)
     await this.heartbeat(now).catch(e => this.log(`heartbeat failed: ${(e as Error).message}`))
   }
 

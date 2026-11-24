@@ -15,7 +15,7 @@
 
 import type pg from 'pg'
 import type { Queryable } from '../utils/db'
-import type { VerdictDetails } from '#shared/analysis'
+import type { AiSubjectType, VerdictDetails } from '#shared/analysis'
 import { GateRules } from '#shared/analysis'
 import { enqueueAiTask } from '../ai/enqueue'
 import { finalizeScanFindings, ingestModuleOutputs } from '../findings/ingest'
@@ -29,12 +29,14 @@ export interface IngestOutcome { count: number, newCount: number, errors: unknow
 /** Contrat 7 (webui/server/ai/enqueue.ts). */
 export interface AiTaskRequest {
   kind: string
-  subjectType: 'finding' | 'scan' | 'testbed'
+  subjectType: AiSubjectType
   subjectId: string
   projectId: string | null
   locale?: 'fr' | 'en'
   priority?: number
   requestedBy?: number | null
+  /** Contexte joint (ai_tasks.context, 0.4) : extrait masqué et borné d'un journal pour I15. */
+  context?: Record<string, unknown>
 }
 
 export interface Integrations {

@@ -70,6 +70,7 @@ async function main(): Promise<void> {
       integrations: defaultIntegrations,
       version: version(consoleCfg.versionFile),
       log,
+      stateFile: consoleCfg.stateFile,
     })
     log(`started (scans ${cfg.scansDir}, ${cfg.perProjectLimit} per project)`)
     if (!stopping) await service.start()
