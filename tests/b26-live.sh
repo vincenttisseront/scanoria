@@ -32,7 +32,6 @@ NEW_IMAGE="ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HELPER="$ROOT/src/rootfs/usr/sbin/scanoria-helper"
 RUNNER="$ROOT/src/rootfs/usr/sbin/scanoria-runner"
-PYLIB="$ROOT/src/rootfs/usr/lib/scanoria/py"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -85,8 +84,10 @@ mkdir -p "$TMP/tb/testbed"
 FAKE="AKIA$(head -c 64 /dev/urandom | base32 | tr -dc 'A-Z2-7' | head -c 16)"
 printf 'aws_access_key_id = %s\n' "$FAKE" > "$TMP/tb/testbed/config.ini"
 printf '[extend]\nuseDefault = true\n' > "$TMP/tb/testbed/.gitleaks.toml"
-tar -C "$TMP/tb" --format=ustar --owner=0 --group=0 -cf - testbed | zstd -q -o "$REL/testbed-gitleaks.tar.zst"
-TB_SHA=$(sha256sum "$REL/testbed-gitleaks.tar.zst" | cut -d' ' -f1)
+tar -C "$TMP/tb" --format=ustar --owner=0 --group=0 -cf - testbed | zstd -q -o "$REL/testbed-gitleaks-8.30.0.tar.zst"
+# Nom imposé par catalogverify : testbed-<id>-<version>.tar.zst, un par version.
+cp "$REL/testbed-gitleaks-8.30.0.tar.zst" "$REL/testbed-gitleaks-8.30.1.tar.zst"
+TB_SHA=$(sha256sum "$REL/testbed-gitleaks-8.30.0.tar.zst" | cut -d' ' -f1)
 
 entry() { # version image
 	jq -cn --arg v "$1" --arg img "$2" --arg sha "$TB_SHA" '
@@ -102,7 +103,7 @@ entry() { # version image
 		 outputs: {sarif: {path: "/out/result.sarif", version: "2.1.0"}},
 		 health: {command: ["gitleaks", "version"]}, upgrade: {policy: "on-demand"},
 		 testbed: {path: "testbed/", expect: [{rule: "aws-access-token", category: "secrets", min: 1}]},
-		 testbed_archive: "testbed-gitleaks.tar.zst", testbed_sha256: $sha}'
+		 testbed_archive: ("testbed-gitleaks-" + $v + ".tar.zst"), testbed_sha256: $sha}'
 }
 jq -n --argjson a "$(entry 8.30.0 "$OLD_IMAGE")" --argjson b "$(entry 8.30.1 "$NEW_IMAGE")" \
 	'{schema: 1, version: 1, generated_at: "2026-11-24T00:00:00Z", modules: [$a, $b], packs: []}' > "$REL/catalog-index.json"
