@@ -25,7 +25,7 @@ auto-hébergé** : une PR externe y exécuterait du code.
 | Travail | Contenu |
 |---|---|
 | `lint` | `check-repo.sh` vérifie que `VERSION`, `webui/VERSION` et `package.json` concordent, que le CHANGELOG a sa section, que `update-pubkey.pem` correspond à l'empreinte épinglée, qu'aucune clé privée n'est suivie et que les actions sont épinglées par SHA. Puis shellcheck sur tous les scripts shell (`lint-shell.sh`), actionlint, et `test-release-chain.sh` (signature et vérification avec des clés jetables). |
-| `gitleaks` | Tout l'historique de toutes les branches (`fetch-depth: 0`, `--log-opts=--all`), avec les règles par défaut et **sans exception** pour un fichier versionné (`.gitleaks.toml`). |
+| `gitleaks` | Tout l'historique du commit testé (`fetch-depth: 0`, `--log-opts=HEAD`) ; chaque branche est analysée par sa propre CI, et `main` en entier à chaque push, avec les règles par défaut et **sans exception** pour un fichier versionné (`.gitleaks.toml`). |
 | `osv-scanner` | Vulnérabilités connues des dépendances verrouillées (`webui/package-lock.json`…). Les exceptions sont datées dans `osv-scanner.toml`. |
 | `dependency-review` | PR seulement : refuse une dépendance ajoutée qui porte une vulnérabilité de gravité modérée ou plus. |
 | `console` | Dans `webui/` : `npm ci`, `npm run lint`, `npm run typecheck`, `npm run test` avec couverture lcov, `npm run build`, puis `npm run test:e2e`. Le tout contre un service `postgres:16` épinglé par empreinte, en locale `en_US.UTF-8`, avec `DATABASE_URL`. |
