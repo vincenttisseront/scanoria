@@ -151,6 +151,8 @@ export default {
     E_DTRACK_API: 'Un appel à l’API de Dependency-Track a échoué pendant sa mise en service.',
     E_SBOM_MISSING: 'Aucun SBOM n’a été produit dans cette analyse (module Syft absent ou en échec) : outil ignoré.',
     E_EXPORT_FAILED: 'La base a été mise à jour, mais son export pour la console (EPSS, KEV) n’a pas pu être écrit : vérifier l’espace disque de l’appliance. La console garde les valeurs précédentes.',
+    E_PREFETCH_FAILED: 'Une ou plusieurs images de modules n’ont pas pu être récupérées : vérifier l’accès au registre, ou importer un lot hors ligne.',
+    E_PREFETCH_UNKNOWN_IMAGE: 'Version figée inconnue de l’index signé du catalogue, ou empreinte différente : image non récupérée.',
     E_SERVICE_MISSING: 'Le service dont dépend cet outil n’est pas installé, sain et actif.',
     E_SERVICE_TOKEN: 'Le jeton d’analyse du service est absent ou illisible : réactivez le service.',
     E_MODULE_INVALID: 'Ce module ne peut pas être lancé par cette version de l’appliance : mettez-la à jour.',
