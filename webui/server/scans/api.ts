@@ -76,9 +76,14 @@ export async function getScan(db: Queryable, id: string) {
   const scan = r.rows[0]
   if (!scan) return null
   const modules = await db.query(
-    `SELECT module_id, module_version, image_digest, feeds, status, error_class, attempts, results_count,
-            duration_ms, log_path IS NOT NULL AS has_log, started_at, finished_at
-       FROM scan_modules WHERE scan_id = $1 ORDER BY module_id`, [id])
+    `SELECT sm.module_id, sm.module_version, sm.image_digest, sm.feeds, sm.status, sm.error_class, sm.attempts, sm.results_count,
+            sm.duration_ms, sm.log_path IS NOT NULL AS has_log, sm.started_at, sm.finished_at,
+            -- 0.6 (V4) : sortie reprise d'une analyse antérieure.
+            sm.reused_from IS NOT NULL AS reused, src.id AS reused_from_scan, src.number AS reused_from_number
+       FROM scan_modules sm
+       LEFT JOIN result_cache rc ON rc.cache_key = sm.reused_from
+       LEFT JOIN scans src ON src.id = rc.source_scan
+      WHERE sm.scan_id = $1 ORDER BY sm.module_id`, [id])
   let position: number | null = null
   if (scan.status === 'queued') {
     const q = await db.query<{ n: number }>(

@@ -71,6 +71,10 @@ Conventions :
 SCANORIA_OUT=$PWD/out .github/scripts/run-batteries.sh 'b3[0-9]-*.sh'
 ```
 
+### Mesure des délais (0.6)
+
+`tests/b28-orchestration.sh` (sans root) couvre l'applicabilité (V6), le cache de résultats (V4), l'ordonnancement (V5) et le graphe SBOM (V3) du runner. `tests/bench/` mesure les délais réels sur 2 vCPU / 4 Go (workflow `bench.yml`, hors de `ci-ok`) : voir `tests/bench/README.md`.
+
 ## 3. Chaîne de publication
 
 `.github/scripts/test-release-chain.sh [RÉPERTOIRE_DU_LOT]` génère des clés

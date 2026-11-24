@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "measured_at": null,
+  "note": "Référence de la batterie de mesure (tests/bench). Mise à jour seulement par une PR de l'intégrateur, à partir du fichier mesures.json d'un passage de bench.yml sur main.",
+  "repos": {}
+}
