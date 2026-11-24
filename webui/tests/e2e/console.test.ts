@@ -6,7 +6,7 @@
 // réels. Prérequis : `npm run build`.
 
 import { type ChildProcess, spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -18,6 +18,8 @@ import { hashPassword } from '../../server/utils/password'
 
 const SERVER = fileURLToPath(new URL('../../.output/server/index.mjs', import.meta.url))
 const ADMIN_PASSWORD = 'e2e-admin-password'
+// Version construite dans le serveur : celle de webui/VERSION.
+const VERSION = readFileSync(fileURLToPath(new URL('../../VERSION', import.meta.url)), 'utf8').trim()
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -130,7 +132,7 @@ describe.skipIf(!DATABASE_URL || !existsSync(SERVER))('console de bout en bout',
   it('répond sur /api/health sans authentification, sans autre information', async () => {
     const res = await call('/api/health')
     expect(res.status).toBe(200)
-    expect(res.data).toEqual({ status: 'ok', version: '0.1.0', db: 'ok' })
+    expect(res.data).toEqual({ status: 'ok', version: VERSION, db: 'ok' })
   })
 
   it('sert l’application et la page À propos avec le lien vers le tag installé', async () => {
@@ -138,7 +140,7 @@ describe.skipIf(!DATABASE_URL || !existsSync(SERVER))('console de bout en bout',
     expect(page.status).toBe(200)
     expect(page.headers.get('x-frame-options')).toBe('DENY')
     const about = await call('/api/about')
-    expect(about.data).toMatchObject({ license: 'AGPL-3.0-or-later', source_url: 'https://github.com/exemple/scanoria/tree/v0.1.0' })
+    expect(about.data).toMatchObject({ license: 'AGPL-3.0-or-later', source_url: `https://github.com/exemple/scanoria/tree/v${VERSION}` })
     const openapi = await call('/api/openapi.json')
     expect(openapi.data.openapi).toBe('3.1.0')
     expect(Object.keys(openapi.data.paths as object)).toContain('/api/system/updates/apply')
