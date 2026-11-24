@@ -51,6 +51,18 @@ def psql(sql, variables=None, timeout=300):
     return r
 
 
+def _give_to_postgres(path):
+    """Fichiers de pg_hba lisibles par PostgreSQL seul (postgres:postgres 0640)."""
+    if os.geteuid() != 0:
+        return
+    import pwd
+    try:
+        pw = pwd.getpwnam("postgres")
+    except KeyError:
+        raise Fail("E_PRECONDITION", "PostgreSQL account missing")
+    os.chown(path, pw.pw_uid, pw.pw_gid)
+
+
 def _ensure_hba_include():
     try:
         with open(HBA_FILE, encoding="utf-8") as f:
@@ -65,10 +77,7 @@ def _ensure_hba_include():
     text += INCLUDE_LINE + "\n"
     os.makedirs(PG_ETC, mode=0o755, exist_ok=True)
     common.atomic_write(HBA_FILE, text, 0o640, group_scanoria=False)
-    if not common.TEST_ROOT:
-        import pwd
-        pw = pwd.getpwnam("postgres")
-        os.chown(HBA_FILE, pw.pw_uid, pw.pw_gid)
+    _give_to_postgres(HBA_FILE)
     return True
 
 
@@ -96,10 +105,7 @@ def write_hba(entries):
         lines.append("host %s %s %s scram-sha-256" % (name, name, net))
     os.makedirs(PG_ETC, mode=0o755, exist_ok=True)
     common.atomic_write(HBA_INCLUDE, "\n".join(lines) + "\n", 0o640, group_scanoria=False)
-    if not common.TEST_ROOT:
-        import pwd
-        pw = pwd.getpwnam("postgres")
-        os.chown(HBA_INCLUDE, pw.pw_uid, pw.pw_gid)
+    _give_to_postgres(HBA_INCLUDE)
 
 
 def apply_access(reg):
@@ -130,20 +136,20 @@ def ensure_database(m):
     r = common.run("runuser", ["-u", "postgres", "--", "/usr/bin/psql", "-X", "-A", "-t", "-d", "postgres",
                                "-c", "SELECT 1 FROM pg_database WHERE datname = '%s'" % name], timeout=120)
     existed = r.text.strip() == "1"
-    psql("SELECT format('CREATE ROLE %%I LOGIN', :'name') WHERE NOT EXISTS "
+    psql("SELECT format('CREATE ROLE %I LOGIN', :'name') WHERE NOT EXISTS "
          "(SELECT FROM pg_roles WHERE rolname = :'name')\\gexec\n"
-         "SELECT format('ALTER ROLE %%I LOGIN PASSWORD %%L', :'name', :'pw')\\gexec\n"
-         "SELECT format('CREATE DATABASE %%I OWNER %%I', :'name', :'name') WHERE NOT EXISTS "
+         "SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', :'name', :'pw')\\gexec\n"
+         "SELECT format('CREATE DATABASE %I OWNER %I', :'name', :'name') WHERE NOT EXISTS "
          "(SELECT FROM pg_database WHERE datname = :'name')\\gexec\n"
-         "SELECT format('REVOKE ALL ON DATABASE %%I FROM PUBLIC', :'name')\\gexec\n",
+         "SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'name')\\gexec\n",
          {"name": name, "pw": pw})
     return not existed
 
 
 def drop_database(mid):
     name = db_name(mid)
-    psql("SELECT format('DROP DATABASE IF EXISTS %%I WITH (FORCE)', :'name')\\gexec\n"
-         "SELECT format('DROP ROLE IF EXISTS %%I', :'name')\\gexec\n", {"name": name})
+    psql("SELECT format('DROP DATABASE IF EXISTS %I WITH (FORCE)', :'name')\\gexec\n"
+         "SELECT format('DROP ROLE IF EXISTS %I', :'name')\\gexec\n", {"name": name})
 
 
 def dump(mid, dest, timeout=1800):
@@ -158,9 +164,9 @@ def dump(mid, dest, timeout=1800):
 def restore(mid, src, timeout=1800):
     """Remplace le contenu de la base par une sauvegarde pg_dump -Fc."""
     name = db_name(mid)
-    psql("SELECT format('DROP DATABASE IF EXISTS %%I WITH (FORCE)', :'name')\\gexec\n"
-         "SELECT format('CREATE DATABASE %%I OWNER %%I', :'name', :'name')\\gexec\n"
-         "SELECT format('REVOKE ALL ON DATABASE %%I FROM PUBLIC', :'name')\\gexec\n", {"name": name})
+    psql("SELECT format('DROP DATABASE IF EXISTS %I WITH (FORCE)', :'name')\\gexec\n"
+         "SELECT format('CREATE DATABASE %I OWNER %I', :'name', :'name')\\gexec\n"
+         "SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'name')\\gexec\n", {"name": name})
     from . import backup
     rc = backup.run_from_file("runuser", ["-u", "postgres", "--", "/usr/bin/pg_restore", "--no-owner",
                                           "--role", name, "-d", name], src, timeout=timeout)

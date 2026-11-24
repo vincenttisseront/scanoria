@@ -235,19 +235,20 @@ def alloc_subnet(reg, mid):
 def requirements(m):
     """(réglages noyau, limites d'unité) validés contre la liste blanche."""
     req = (m.get("needs") or {}).get("sysctl") or {}
+    code = "E_SERVICE_RESOURCES" if m.get("type") == "service" else "E_RESOURCES"
     if not isinstance(req, dict):
-        raise Fail("E_RESOURCES", "%s: invalid sysctl requirement" % m["id"])
+        raise Fail(code, "%s: invalid sysctl requirement" % m["id"])
     kernel, ulimits = {}, {}
     for k, v in req.items():
         allowed = KERNEL_ALLOWED.get(k) or ULIMIT_ALLOWED.get(k)
         if allowed is None:
-            raise Fail("E_RESOURCES", "%s: kernel setting %s is not allowed" % (m["id"], k))
+            raise Fail(code, "%s: kernel setting %s is not allowed" % (m["id"], k))
         lo, hi = allowed
         if not isinstance(v, int) or isinstance(v, bool) or not lo <= v <= hi:
-            raise Fail("E_RESOURCES", "%s: kernel setting %s out of range" % (m["id"], k))
+            raise Fail(code, "%s: kernel setting %s out of range" % (m["id"], k))
         (kernel if k in KERNEL_ALLOWED else ulimits)[k] = v
     if ulimits and m.get("type") not in ("service", "runner"):
-        raise Fail("E_RESOURCES", "%s: unit limits are only for permanent modules" % m["id"])
+        raise Fail(code, "%s: unit limits are only for permanent modules" % m["id"])
     return kernel, ulimits
 
 

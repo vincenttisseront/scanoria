@@ -485,6 +485,18 @@ def is_running(mid):
     return systemctl("is-active", "--quiet", quadlet.unit_name(mid), check=False) == 0
 
 
+def check_permanent(m):
+    """Déclarations d'un module permanent revalidées avant le premier changement :
+    secrets, volumes, sauvegarde, limites, gabarits d'environnement (aucun secret)."""
+    services.secrets_of(m)
+    quadlet.volumes(m)
+    backup.backup_volumes(m)
+    services.requirements(m)
+    tpl = (m.get("service") or {}).get("env")
+    if tpl:
+        quadlet.render_env(tpl, env_values(m, {"host_port": HOST_PORTS[0], "subnet": 0}, resolve_options(m, {})))
+
+
 def prepare_permanent(reg, m, entry):
     """Réseau, secrets, base et accès PostgreSQL d'un module permanent."""
     mid = m["id"]
@@ -541,9 +553,7 @@ def plan_install(reg, mods, wanted, accepted):
                 raise Fail("E_DEPENDENCY", "%s requires %s, which is disabled" % (m["id"], d))
         if is_permanent(m):
             # Déclarations du manifeste revalidées avant le premier changement.
-            services.secrets_of(m)
-            quadlet.volumes(m)
-            backup.backup_volumes(m)
+            check_permanent(m)
     for m in installed:
         for c in conflicts_of(m):
             if c in plan:
@@ -917,8 +927,7 @@ def act_update_module(c):
     check_resources([x["manifest"] for x in reg["modules"].values()], [new], freed=[old])
     is_svc = is_permanent(old)
     if is_svc:
-        services.secrets_of(new)
-        backup.backup_volumes(new)
+        check_permanent(new)
 
     op = Op(reg, "update", mid, c.req["id"])
     snap = quadlet.snapshot(mid) if is_svc else {}

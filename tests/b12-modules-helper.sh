@@ -132,10 +132,11 @@ for c in sysctl runuser; do
 	cat > "$STUBS/$c" <<-EOF
 		#!/bin/bash
 		jq -cn --arg c "$c" '[\$c] + \$ARGS.positional' --args -- "\$@" >> "$CALLS"
-		cat > /dev/null
+		cat >> "$TMP/stdin-$c.log"
 		exit 0
 	EOF
 done
+: > "$TMP/stdin-runuser.log"
 printf '#!/bin/bash\nexit 0\n' > "$STUBS/scanoria-state"
 chmod 0755 "$STUBS"/*
 
@@ -254,7 +255,7 @@ TRIVY=$(module trivy 0.60.0 scanner '.requires.feeds = ["trivy-db"]')
 TDB=$(module trivy-db 1 feed '.image = null | .health = null')
 SVC=$(module svc 1.0.0 service '.hostname = "svc" | .needs.postgres = true | .needs.sysctl = {"vm.max_map_count": 524288}
 	| .service = {port: 9000, health_path: "/health", units: [], volumes: [{name: "data", path: "/data"}],
-	              env: {DB_URL: "{db_url_jdbc}", DB_PASSWORD: "{db_password}"}} | .resources.min_ram_mb = 1024')
+	              env: {DB_URL: "{db_url_jdbc}"}, secrets: [{name: "db-password", env: "DB_PASSWORD"}]} | .resources.min_ram_mb = 1024')
 SVC2=$(module svc 1.1.0 service '.image = "'"$(img svc-next)"'" | .hostname = "svc" | .needs.postgres = true
 	| .service = {port: 9000, health_path: "/health", units: [], volumes: [{name: "data", path: "/data"}]}')
 BIG=$(module big 1.0.0 scanner '.resources.min_ram_mb = 900000')
@@ -484,10 +485,12 @@ expect "Quadlet : publié sur 127.0.0.1 seulement" "$(grep -c -E '^PublishPort=1
 expect "Quadlet : aucune capacité" "$(grep -c -x 'DropCapability=ALL' "$CONT")" 1
 expect "Quadlet : démarrage à l'amorçage" "$(grep -c -x 'WantedBy=multi-user.target' "$CONT")" 1
 expect "Quadlet : réseau et volume" "$(find "$UNITS" -maxdepth 1 \( -name scanoria-mod-svc.network -o -name scanoria-mod-svc_data.volume \) | wc -l)" 2
-expect "base PostgreSQL créée" "$(grep -F '"runuser"' "$CALLS" | grep -c -F psql)" 1
-expect "identifiants de base en 0600" "$(stat -c %a "$T/etc/scanoria/modules/svc/db.json")" 600
-expect "fichier d'environnement en 0600 sans gabarit restant" "$(stat -c %a "$T/etc/scanoria/modules/svc/env")/$(grep -c '{' "$T/etc/scanoria/modules/svc/env")" 600/0
-expect "sysctl posé" "$(cat "$T/etc/sysctl.d/60-scanoria-modules.conf" | grep -c -x 'vm.max_map_count = 524288')" 1
+expect "base PostgreSQL créée" "$(grep -c -F "CREATE DATABASE" "$TMP/stdin-runuser.log")" 1
+SECRET="$T/var/lib/scanoria/modules/svc/secrets/db-password"
+expect "mot de passe de la base en secret 0600" "$(stat -c %a "$SECRET")" 600
+expect "fichier d'environnement en 0600 sans gabarit restant ni mot de passe" "$(stat -c %a "$T/etc/scanoria/modules/svc/env")/$(grep -c '{' "$T/etc/scanoria/modules/svc/env")/$(grep -c -F "$(cat "$SECRET")" "$T/etc/scanoria/modules/svc/env")" 600/0/0
+expect "mot de passe passé par un secret Podman" "$(grep -c -x 'Secret=scanoria-mod-svc-db-password,type=env,target=DB_PASSWORD' "$CONT")" 1
+expect "sysctl posé" "$(cat "$T/etc/sysctl.d/60-scanoria-svc.conf" | grep -c -x 'vm.max_map_count = 524288')" 1
 expect "systemd rechargé puis service démarré" "$(called '"systemctl","start","scanoria-mod-svc.service"')" 1
 expect "state.json conforme après un service" "$(state_valid)" ok
 hx set-module-state '{"id": "svc", "enabled": false}'
@@ -514,28 +517,29 @@ expect "update en échec : erreur notée" "$(jq -r '.modules[] | select(.id=="sv
 rm "$FIX/health-fail-image"
 hx update-module '{"id": "svc", "version": "1.1.0"}'
 expect "update svc" "$(code)/$(mstate svc)" OK/healthy/true/1.1.0
-expect "update : sysctl retiré (plus exigé)" "$([[ -e "$T/etc/sysctl.d/60-scanoria-modules.conf" ]] && echo présent || echo retiré)" retiré
+expect "update : sysctl retiré (plus exigé)" "$([[ -e "$T/etc/sysctl.d/60-scanoria-svc.conf" ]] && echo présent || echo retiré)" retiré
 hx update-module '{"id": "svc", "version": "1.0.0"}'
 expect "update vers une version plus ancienne refusée" "$(code)" E_VERSION
 hx update-module '{"id": "gitleaks", "version": "8.1.0"}'
 expect "update d'un scanner (banc d'essai rejoué)" "$(code)/$(mstate gitleaks)" OK/healthy/true/8.1.0
 hx uninstall-module '{"id": "svc", "keep_data": true}'
 expect "uninstall svc en gardant les données" "$(code)/$(mstate svc)" OK/absent
-expect "données gardées : identifiants conservés" "$([[ -f "$T/etc/scanoria/modules/svc/db.json" ]] && echo oui)" oui
+expect "données gardées : mot de passe conservé" "$([[ -f "$SECRET" ]] && echo oui)" oui
+PW_BEFORE=$(cat "$SECRET")
 expect "unités retirées" "$(find "$UNITS" -maxdepth 1 -name 'scanoria-mod-svc*' | wc -l)" 0
 hx install-modules "$(inst svc 1.1.0)"
-expect "réinstallation : base gardée reprise" "$(code)/$(jq -r .password "$T/etc/scanoria/modules/svc/db.json" | wc -c)" OK/49
+expect "réinstallation : base gardée reprise (même mot de passe)" "$(code)/$([[ "$(cat "$SECRET")" == "$PW_BEFORE" ]] && echo même)" OK/même
 touch "$FIX/systemctl-fail-start"
 hx uninstall-module '{"id": "svc", "keep_data": false}'
 expect "uninstall svc en supprimant les données" "$(code)/$(mstate svc)" OK/absent
-expect "données supprimées : base détruite" "$(grep -F '"runuser"' "$CALLS" | grep -c -F 'psql')" 3
+expect "données supprimées : base et rôle détruits" "$(grep -c -F 'DROP ROLE' "$TMP/stdin-runuser.log")" 1
 expect "données supprimées : volume détruit" "$(called '"volume","rm","--force","scanoria-mod-svc_data"')" 1
-expect "données supprimées : identifiants effacés" "$([[ -e "$T/etc/scanoria/modules/svc" ]] && echo présent || echo effacé)" effacé
+expect "données supprimées : secrets effacés" "$([[ -e "$T/etc/scanoria/modules/svc" || -e "$T/var/lib/scanoria/modules/svc" ]] && echo présent || echo effacé)" effacé
 hx install-modules "$(inst svc 1.0.0)"
 expect "install service en échec de démarrage → retour arrière" "$(code)/$(mstate svc)" E_INTERNAL/absent
 expect "retour arrière : unités retirées" "$(find "$UNITS" -maxdepth 1 -name 'scanoria-mod-svc*' | wc -l)" 0
-expect "retour arrière : base créée puis détruite" "$([[ -e "$T/etc/scanoria/modules/svc" ]] && echo présent || echo effacé)" effacé
-expect "retour arrière : sysctl retiré" "$([[ -e "$T/etc/sysctl.d/60-scanoria-modules.conf" ]] && echo présent || echo retiré)" retiré
+expect "retour arrière : base créée puis détruite" "$([[ -e "$T/etc/scanoria/modules/svc" || -e "$T/var/lib/scanoria/modules/svc" ]] && echo présent || echo effacé)/$(grep -c -F 'DROP ROLE' "$TMP/stdin-runuser.log")" effacé/2
+expect "retour arrière : sysctl retiré" "$([[ -e "$T/etc/sysctl.d/60-scanoria-svc.conf" ]] && echo présent || echo retiré)" retiré
 rm "$FIX/systemctl-fail-start"
 
 # === 6. File de demandes (chemin console) ===================================
