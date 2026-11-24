@@ -22,6 +22,18 @@ export interface InstalledModule {
   testbed?: { passed: boolean | null, at?: string | null, details?: unknown } | null
   route?: { hostname: string, url: string } | null
   last_error?: string | { code?: string, message?: string } | null
+  /** Modules permanents (0.4) : sauvegardes complètes, la plus récente en premier. */
+  backups?: ModuleBackup[]
+}
+
+export interface ModuleBackup {
+  id: string
+  created_at: string
+  module_version: string
+  reason: 'manual' | 'update' | 'scheduled'
+  size_bytes: number
+  database: boolean
+  volumes: string[]
 }
 
 export interface PlanIssue { code: string, module?: string, other?: string, options?: { key: string, code: string }[] }

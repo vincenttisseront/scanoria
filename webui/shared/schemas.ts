@@ -278,3 +278,6 @@ export const moduleUpdateBodySchema = z.strictObject({
   accept_licenses: z.array(moduleIdSchema).max(32).default([]),
 })
 export const moduleUninstallBodySchema = z.strictObject({ keep_data: z.boolean() })
+/** Sauvegarde et restauration d'un module permanent (0.4, chantier A). */
+export const moduleBackupBodySchema = z.strictObject({})
+export const moduleRestoreBodySchema = z.strictObject({ backup: z.string().regex(BACKUP_ID_RE) })

@@ -490,7 +490,7 @@ SECRET="$T/var/lib/scanoria/modules/svc/secrets/db-password"
 expect "mot de passe de la base en secret 0600" "$(stat -c %a "$SECRET")" 600
 expect "fichier d'environnement en 0600 sans gabarit restant ni mot de passe" "$(stat -c %a "$T/etc/scanoria/modules/svc/env")/$(grep -c '{' "$T/etc/scanoria/modules/svc/env")/$(grep -c -F "$(cat "$SECRET")" "$T/etc/scanoria/modules/svc/env")" 600/0/0
 expect "mot de passe passé par un secret Podman" "$(grep -c -x 'Secret=scanoria-mod-svc-db-password,type=env,target=DB_PASSWORD' "$CONT")" 1
-expect "sysctl posé" "$(cat "$T/etc/sysctl.d/60-scanoria-svc.conf" | grep -c -x 'vm.max_map_count = 524288')" 1
+expect "sysctl posé" "$(grep -c -x 'vm.max_map_count = 524288' "$T/etc/sysctl.d/60-scanoria-svc.conf")" 1
 expect "systemd rechargé puis service démarré" "$(called '"systemctl","start","scanoria-mod-svc.service"')" 1
 expect "state.json conforme après un service" "$(state_valid)" ok
 hx set-module-state '{"id": "svc", "enabled": false}'

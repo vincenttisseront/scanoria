@@ -868,7 +868,7 @@ def act_restore_module(c):
                    {"backup_version": man["module_version"], "installed_version": m["version"]})
     op = Op(reg, "restore", mid, c.req["id"])
     try:
-        op.step("stop", 10)
+        op.step("suspend", 10)
         stop_service(mid)
         op.step("restore", 30)
         backup.restore_data(m, d, man, timeout=max(60, c.left()))
