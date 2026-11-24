@@ -30,6 +30,10 @@ export const findingQuerySchema = z.strictObject({
   secret: bool.optional(),
   malicious: bool.optional(),
   q: z.string().trim().min(1).max(200).optional(),
+  // 0.5 : EPSS minimal et KEV (H3), regroupement des résultats recoupés (F16).
+  epss_min: z.coerce.number().min(0).max(1).optional(),
+  kev: bool.optional(),
+  grouped: bool.optional(),
 })
 
 const day = z.string().refine(isValidDay)

@@ -103,6 +103,12 @@ const { data: about, status } = await useFetch<About>('/api/about')
       <p class="mt-4 text-xs text-muted">
         {{ t('about.modulesNote') }}
       </p>
+      <p
+        class="mt-2 text-xs text-muted"
+        data-testid="about-data-notices"
+      >
+        {{ t('about.dataNotices') }}
+      </p>
     </UCard>
   </PageShell>
 </template>
