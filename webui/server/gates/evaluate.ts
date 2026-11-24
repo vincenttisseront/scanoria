@@ -208,6 +208,15 @@ const MODULE_REASON: Record<string, { code: Reason['code'], actions: Action[] }>
   'running': { code: 'module-error', actions: ['rerun', 'request-exception'] },
 }
 
+/**
+ * 0.6 (V6, contrat 23, chantier D) : un module « not-applicable » (aucun
+ * fichier ne le concerne) a bien été décidé par le runner. Il n'est jamais
+ * compté comme absent ni en échec (G13) ; la couverture le note (G15).
+ */
+export function applicableModules<M extends { status: string }>(modules: M[]): M[] {
+  return modules.filter(m => m.status !== 'not-applicable')
+}
+
 function blocks(threshold: Severity | null, s: Severity): boolean {
   return threshold !== null && SEVERITY_RANK[s] >= SEVERITY_RANK[threshold]
 }
@@ -320,7 +329,7 @@ export function computeVerdict(input: GateInput): VerdictDetails {
   }
   const seen = new Set(input.modules.map(m => m.module_id))
   const absent = (input.planModules ?? []).filter(id => !seen.has(id)).map(id => ({ module_id: id, status: 'missing' }))
-  for (const m of [...input.modules, ...absent].sort((a, b) => a.module_id.localeCompare(b.module_id))) {
+  for (const m of [...applicableModules(input.modules), ...absent].sort((a, b) => a.module_id.localeCompare(b.module_id))) {
     const r = MODULE_REASON[m.status]
     if (!r) continue
     if (input.companionModules?.includes(m.module_id)) {

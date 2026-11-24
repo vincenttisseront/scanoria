@@ -214,9 +214,23 @@
           },
           "options": {
             "type": "object"
+          },
+          "after": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+            },
+            "description": "0.6 (V3, V5) : modules de la tâche qui doivent être terminés avant celui-ci (graphe du plan)."
           }
         }
       }
+    },
+    "cache": {
+      "type": "boolean",
+      "description": "0.6 (V4, contrat 21) : le runner peut réutiliser une sortie rangée dans le cache de résultats de la console. Absent ou false (analyse d'essai F13) : jamais."
     }
   }
 }

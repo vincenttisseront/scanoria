@@ -14,6 +14,7 @@ import type pg from 'pg'
 import type { WorkerConfig } from './config'
 import { enqueueScan } from './enqueue'
 import { runRecorrelation } from './recorrelate'
+import { purgeCache } from './orchestration'
 import type { Integrations } from './integrations'
 import { ScanWorker, type WorkerPaths } from './worker'
 import { UsageTask } from '../usage/samples'
@@ -36,6 +37,7 @@ export class WorkerService {
   private timer: NodeJS.Timeout | undefined
   private lastSchedule = 0
   private lastPurge = 0
+  private lastCachePurge = 0
   private wake: (() => void) | null = null
   private readonly log: (msg: string) => void
   private readonly usage: UsageTask | null
@@ -65,6 +67,11 @@ export class WorkerService {
       // 0.5 (B, contrat 16) : bases plus récentes → re-corrélations en file.
       await runRecorrelation(this.opts.pool, this.opts.paths, now, this.log)
         .catch((e: unknown) => this.log(`recorrelation failed: ${(e as Error).message}`))
+    }
+    // 0.6 (V4) : éviction du cache de résultats, chaque heure.
+    if (now.getTime() - this.lastCachePurge >= 3600_000) {
+      this.lastCachePurge = now.getTime()
+      await purgeCache(this.opts.pool, this.opts.paths).catch((e: unknown) => this.log(`result cache purge failed: ${(e as Error).message}`))
     }
     if (now.getTime() - this.lastPurge >= 24 * 3600_000) {
       this.lastPurge = now.getTime()

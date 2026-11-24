@@ -18,6 +18,9 @@ export type CoverageGap
     | { kind: 'lockfile-missing', manifest: string, manager: string | null }
     | { kind: 'output-truncated', module: string }
     | { kind: 'output-error', module: string, code: string }
+    // 0.6 (chantier D) : module sans fichier concerné (V6, contrat 23) ; SBOM attendu, dépôt lu (V3).
+    | { kind: 'not-applicable', code: 'not-applicable', module: string, reason: 'no-matching-files' }
+    | { kind: 'sbom-fallback', module: string }
 
 export function scansDir(): string {
   return process.env.SCANORIA_SCANS_DIR || '/var/lib/scanoria/scans'
