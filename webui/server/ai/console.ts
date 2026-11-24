@@ -51,18 +51,22 @@ export const ModelsBody = z.strictObject({
 /** Identifiant de sujet conforme à la tâche (uuid, ou clé outil:version:règle pour I17). */
 const subjectFits = (b: { kind: string, subject_id: string }) => (TASKS[b.kind]?.subjectPattern ?? UUID_RE).test(b.subject_id)
 const SUBJECT_ISSUE = { message: 'subject_id does not match the task', path: ['subject_id'] }
+/** I16 (0.6) : le diagnostic de l'appliance a ses propres routes, réservées aux administrateurs (/api/ai/appliance/…). */
+const ADMIN_ONLY_KINDS: readonly string[] = ['diagnose-appliance']
+const notAdminOnly = (b: { kind: string }) => !ADMIN_ONLY_KINDS.includes(b.kind)
+const ADMIN_ONLY_ISSUE = { message: 'use /api/ai/appliance/diagnosis', path: ['kind'] }
 
 export const ExplainBody = z.strictObject({
   kind: z.enum(COMPLETION_KINDS as [string, ...string[]]),
   subject_id: z.string().min(1).max(400),
   locale: z.enum(['fr', 'en']).optional(),
-}).refine(subjectFits, SUBJECT_ISSUE)
+}).refine(subjectFits, SUBJECT_ISSUE).refine(notAdminOnly, ADMIN_ONLY_ISSUE)
 
 export const OutputQuery = z.strictObject({
   kind: z.enum(COMPLETION_KINDS as [string, ...string[]]),
   subject_id: z.string().min(1).max(400),
   locale: z.enum(['fr', 'en']).optional(),
-}).refine(subjectFits, SUBJECT_ISSUE)
+}).refine(subjectFits, SUBJECT_ISSUE).refine(notAdminOnly, ADMIN_ONLY_ISSUE)
 
 interface TaskRow {
   id: string

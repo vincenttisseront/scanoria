@@ -13,6 +13,7 @@ const session = useSession()
 const fmt = useFormat()
 const { data, state, failed, loading, refresh } = useApplianceState()
 const selftest = useHelperRequest()
+const diag = useApplianceDiagnosis()
 const quick = ref(true)
 
 type BadgeColor = 'success' | 'warning' | 'error' | 'neutral' | 'info'
@@ -40,6 +41,7 @@ const tlsColor = computed<BadgeColor>(() => {
 async function runSelftest() {
   await selftest.run('/api/system/selftest', { quick: quick.value })
   await refresh()
+  await diag.refresh()
 }
 </script>
 
@@ -61,6 +63,17 @@ async function runSelftest() {
       :failed="failed"
     />
     <SbomExposureBanner />
+    <div
+      v-if="diag.alerts.value.length"
+      class="space-y-2"
+    >
+      <AiApplianceDiagnosis
+        v-for="s in diag.alerts.value"
+        :key="s"
+        :subject-id="s"
+        compact
+      />
+    </div>
 
     <div
       v-if="!data && loading"
@@ -267,6 +280,11 @@ async function runSelftest() {
             <RequestProgress
               :active="selftest.running.value"
               :label="selftest.label.value"
+            />
+            <AiApplianceDiagnosis
+              v-if="!selftest.running.value && diag.has('selftest:last')"
+              subject-id="selftest:last"
+              compact
             />
           </div>
         </UCard>

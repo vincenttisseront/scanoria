@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { MODULE_ID_RE } from '#shared/schemas'
 import { redactText } from './redact'
 import { boundContext, MAX_EXCERPT_CHARS, ReachContext } from './reach-context'
+import { boundApplianceContext, type ApplianceContext } from './appliance-context'
 
 /** Taille maximale de tous les extraits réunis (octets UTF-8). */
 export const MAX_CONTEXT_BYTES = 16_384
@@ -53,8 +54,9 @@ export function aiLogContext(entries: { module: string, log: string }[]): AiLogC
 }
 
 /** Tâches qui reçoivent un contexte joint ; assess-reachability n'existe pas sans lui (I11). */
-export const CONTEXT_KINDS = ['diagnose-scan', 'assess-reachability'] as const
-export const CONTEXT_REQUIRED = ['assess-reachability'] as const
+export const CONTEXT_KINDS = ['diagnose-scan', 'assess-reachability', 'diagnose-appliance'] as const
+/** I16 (0.6) : diagnose-appliance n'existe pas non plus sans le contexte joint par la console. */
+export const CONTEXT_REQUIRED = ['assess-reachability', 'diagnose-appliance'] as const
 
 /** I11 : emplacements de l'index revalidés, extraits remasqués, 16 Ko au plus. */
 export function sanitizeReachContext(context: unknown): ReachContext | null {
@@ -74,9 +76,10 @@ export function sanitizeReachContext(context: unknown): ReachContext | null {
 }
 
 /** Contexte accepté par enqueueAiTask : revalidé, remasqué, borné ; null sinon. */
-export function sanitizeContext(kind: string, context: unknown): AiLogContext | ReachContext | null {
+export function sanitizeContext(kind: string, context: unknown): AiLogContext | ReachContext | ApplianceContext | null {
   if (context === undefined || context === null) return null
   if (kind === 'assess-reachability') return sanitizeReachContext(context)
+  if (kind === 'diagnose-appliance') return boundApplianceContext(context)
   if (kind !== 'diagnose-scan') return null
   const parsed = AiLogContext.safeParse(context)
   if (!parsed.success) return null

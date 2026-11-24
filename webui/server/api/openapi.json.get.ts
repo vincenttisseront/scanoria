@@ -78,6 +78,11 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/ai/diagnosis/proposal': { get: { summary: 'Safe setting proposed for a failed scan (I15), recomputed from facts, never taken from the AI output', role: 'operator' } },
   '/api/ai/diagnosis/apply': { post: { summary: 'Apply the proposed module timeout (409 E_AI_STALE if it changed); audited', role: 'operator', body: 'AiDiagnosisApply' } },
   '/api/ai/similar': { get: { summary: 'Similar findings of the same project (I7, embeddings), with the state of the feature; a suggestion only, never part of the quality gate', role: 'viewer' } },
+  '/api/ai/appliance/subjects': { get: { summary: 'Appliance subjects an AI diagnosis can explain now (I16): alerts, last failed self-test, failed updates and modules; empty without connector', role: 'admin' } },
+  '/api/ai/appliance/diagnosis': {
+    get: { summary: 'Latest AI diagnosis of an appliance subject (I16), marked as AI with model and digest; enabled false without connector', role: 'admin' },
+    post: { summary: 'Request the AI diagnosis of an appliance subject (I16): masked, neutralised context of at most 16 KB; proposes one console action, never runs it', role: 'admin', body: 'AiApplianceDiagnosis', status: 202 },
+  },
   '/api/ai/license-key': { get: { summary: 'Key (licence|project licence) of the AI explanation of a component licence (I18); null for opted-out projects', role: 'viewer' } },
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
@@ -250,6 +255,13 @@ export default defineEventHandler(async () => {
         AiFeedback: {
           type: 'object', additionalProperties: false, required: ['task_id', 'vote'],
           properties: { task_id: { type: 'string', format: 'uuid' }, vote: { enum: [1, -1] }, correction: { type: ['string', 'null'], minLength: 1, maxLength: 4000 } },
+        },
+        AiApplianceDiagnosis: {
+          type: 'object', additionalProperties: false, required: ['subject_id'],
+          properties: {
+            subject_id: { type: 'string', maxLength: 200, description: 'alert:update-rollback | alert:tls-expiry | alert:service:<name> | alert:disk:<mount> | selftest:last | update:<n> | install:<module>' },
+            locale: { enum: ['fr', 'en'] },
+          },
         },
         AiDiagnosisApply: {
           type: 'object', additionalProperties: false, required: ['scan_id', 'module', 'proposed_s'],
