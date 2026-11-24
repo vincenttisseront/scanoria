@@ -22,7 +22,6 @@ import { DATABASE_URL, createTestDatabase, type TestDatabase } from '../helpers/
 import { loadConfig, setConfig } from '../../server/utils/config'
 import { closePool } from '../../server/utils/db'
 import { startConsole, stopConsole, waitReady } from '../../server/utils/runtime'
-import { SESSION_COOKIE } from '../../server/utils/sessions'
 import { createUser } from '../../server/utils/users'
 import { evaluateGate, ScanNotFoundError } from '../../server/gates/evaluate'
 import { badTokenLimiter, publicLimiter, tokenLimiter } from '../../server/middleware/api-token'
@@ -74,6 +73,10 @@ function apiRoutes(): { method: string, path: string, file: string }[] {
   return out.sort((a, b) => a.path.split(':').length - b.path.split(':').length)
 }
 
+// Réponses JSON lues en profondeur dans les assertions.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Json = Record<string, any>
+
 interface Client {
   cookie: string
   csrf: string
@@ -117,9 +120,9 @@ describe.skipIf(!DATABASE_URL)('quality gates et API de la CI (PostgreSQL réel)
     catch {
       // texte brut (SVG, script)
     }
-    return { status: res.status, headers: res.headers, text, data: data as Record<string, any> }
+    return { status: res.status, headers: res.headers, text, data: data as Json }
   }
-  const code = (res: { data: Record<string, any> }) => res.data?.data?.code
+  const code = (res: { data: Json }) => res.data?.data?.code
 
   async function login(username: string, role: 'viewer' | 'operator' | 'admin'): Promise<Client> {
     const password = `${username}-long-password`
@@ -185,8 +188,8 @@ describe.skipIf(!DATABASE_URL)('quality gates et API de la CI (PostgreSQL réel)
     const addr = server.address()
     base = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`
 
-    gateId = (await db.pool.query<{ id: string }>("SELECT id FROM gates WHERE slug = 'defaut'")).rows[0]!.id
-    profileId = (await db.pool.query<{ id: string }>("SELECT id FROM profiles WHERE slug = 'rapide'")).rows[0]!.id
+    gateId = (await db.pool.query<{ id: string }>('SELECT id FROM gates WHERE slug = \'defaut\'')).rows[0]!.id
+    profileId = (await db.pool.query<{ id: string }>('SELECT id FROM profiles WHERE slug = \'rapide\'')).rows[0]!.id
     projectA = await newProject('alpha')
     projectB = await newProject('beta')
     admin = await login('gadmin', 'admin')
@@ -240,7 +243,7 @@ describe.skipIf(!DATABASE_URL)('quality gates et API de la CI (PostgreSQL réel)
            ($1, 'rule', '{"rule_id": "R"}', 'révoquée', current_date + 30)`,
         [project],
       )
-      await db.pool.query("UPDATE exceptions SET revoked_at = now() WHERE reason = 'révoquée'")
+      await db.pool.query('UPDATE exceptions SET revoked_at = now() WHERE reason = \'révoquée\'')
       await db.pool.query(`UPDATE scans SET coverage = '{"gaps": [{"kind": "lockfile-missing"}]}' WHERE id = $1`, [scan])
 
       let v = await evaluateGate(db.pool, scan)
@@ -314,7 +317,7 @@ describe.skipIf(!DATABASE_URL)('quality gates et API de la CI (PostgreSQL réel)
       expect((await call(`/api/gates/${copied.data.id}`, { method: 'DELETE', client: admin })).status).toBe(404)
       await call(`/api/gates/${gateId}/assign`, { method: 'POST', client: admin, json: { project_id: projectA } })
 
-      const audit = await db.pool.query<{ action: string }>("SELECT action FROM audit_log WHERE action LIKE 'gate.%' ORDER BY id")
+      const audit = await db.pool.query<{ action: string }>('SELECT action FROM audit_log WHERE action LIKE \'gate.%\' ORDER BY id')
       expect(audit.rows.map(r => r.action)).toEqual(['gate.create', 'gate.update', 'gate.create', 'gate.assign', 'gate.delete', 'gate.assign'])
     })
   })
@@ -340,7 +343,7 @@ describe.skipIf(!DATABASE_URL)('quality gates et API de la CI (PostgreSQL réel)
       expect((await call(`/api/projects/${projectB}/tokens/${tok.id}`, { method: 'DELETE', client: operator })).status).toBe(404)
 
       const audit = await db.pool.query<{ action: string, details: Record<string, unknown> }>(
-        "SELECT action, details FROM audit_log WHERE action LIKE 'api-token.%' ORDER BY id",
+        'SELECT action, details FROM audit_log WHERE action LIKE \'api-token.%\' ORDER BY id',
       )
       expect(audit.rows.map(r => r.action)).toEqual(['api-token.create', 'api-token.revoke'])
       expect(JSON.stringify(audit.rows)).not.toContain(tok.value)
@@ -375,7 +378,7 @@ describe.skipIf(!DATABASE_URL)('quality gates et API de la CI (PostgreSQL réel)
       enqueued.fail = true
       expect(code(await call(`/api/projects/${projectA}/scans`, { method: 'POST', bearer: tok.value, json: { ref: 'main' } }))).toBe('E_SCAN_REFUSED')
 
-      const audit = await db.pool.query<{ actor_username: string }>("SELECT actor_username FROM audit_log WHERE action = 'scan.request' ORDER BY id")
+      const audit = await db.pool.query<{ actor_username: string }>('SELECT actor_username FROM audit_log WHERE action = \'scan.request\' ORDER BY id')
       expect(audit.rows.map(r => r.actor_username)).toEqual([`api-token:${tok.prefix}`, 'goperator'])
     })
 
