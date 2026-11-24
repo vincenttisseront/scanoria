@@ -81,7 +81,7 @@ describe('diagnostic IA de l\'appliance (I16)', () => {
     await settle()
     expect(w.text()).toContain('disque /var presque plein')
     expect(w.find('[data-testid="ai-appliance-action"]').exists()).toBe(false)
-    for (const [subject, title] of [['alert:disk:root', 'disque / presque plein'], ['alert:update-rollback', 'retour arrière échoué'], ['alert:tls-expiry', 'certificat bientôt expiré'], ['alert:service:scanoria-worker', 'service scanoria-worker'], ['selftest:last', 'dernier selftest']]) {
+    for (const [subject, title] of [['alert:disk:root', 'disque / presque plein'], ['alert:update-rollback', 'retour arrière échoué'], ['alert:tls-expiry', 'certificat bientôt expiré'], ['alert:service:scanoria-worker', 'service scanoria-worker'], ['selftest:last', 'dernier selftest']] as const) {
       const x = await mountIn(AiApplianceDiagnosis, { props: { subjectId: subject } })
       await settle()
       expect(x.text()).toContain(title)
