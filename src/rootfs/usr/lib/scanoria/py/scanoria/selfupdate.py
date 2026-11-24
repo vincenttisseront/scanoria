@@ -576,9 +576,14 @@ def extract(archive, version, dest_parent=None):
     finally:
         if proc.stdout:
             proc.stdout.close()
-        if proc.poll() is None:
+        # zstd peut encore être en train de se terminer : on l'attend avant de
+        # le tuer (un kill immédiat donnait « zstd failed » au hasard). Sur
+        # erreur, la fermeture du tube l'arrête de toute façon (SIGPIPE).
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
             proc.kill()
-        proc.wait()
+            proc.wait()
     if proc.returncode != 0:
         shutil.rmtree(tmp, ignore_errors=True)
         raise Fail("E_ARCHIVE", "zstd failed")
