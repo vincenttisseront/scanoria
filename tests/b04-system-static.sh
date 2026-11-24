@@ -155,6 +155,12 @@ expect "selftest complet : dns.resolve, time.sync, hardware.floor" \
 rc=0; "$RF/usr/sbin/scanoria-selftest" --bogus > /dev/null 2>&1 || rc=$?
 expect "selftest : option inconnue → code 2" "$rc" 2
 
+# Premier démarrage : aucune unité ordonnée après multi-user.target (cloud-final),
+# sinon cycle avec getty@tty1 et multi-user.target, et l'assistant ne part pas.
+fb="$ROOT/src/rootfs/usr/lib/systemd/system/scanoria-firstboot.service"
+refuse_cycle() { grep -E '^(After|Wants|Requires)=' "$fb" | grep -qE 'cloud-final|multi-user\.target|graphical\.target'; }
+if refuse_cycle; then ko "scanoria-firstboot.service : ordonnée après multi-user.target (cycle)"; else ok "scanoria-firstboot.service : sans cycle avec multi-user.target"; fi
+
 echo
 echo "b04 : $PASS réussi(s), $FAIL échec(s)"
 [[ $FAIL -eq 0 ]]

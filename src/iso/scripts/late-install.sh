@@ -26,6 +26,13 @@ die() {
 	log "ERREUR / ERROR: $*"
 	exit 1
 }
+# Une erreur imprévue (set -e) nomme sa ligne et sa commande dans le journal.
+trap 'log "ERREUR / ERROR: ligne $LINENO : $BASH_COMMAND"' ERR
+# Sortie recopiée sur le port série quand il existe : seul journal lisible
+# d'une installation automatisée (tests de démarrage, hyperviseurs).
+if [[ -w /dev/ttyS0 ]] && stty -F /dev/ttyS0 > /dev/null 2>&1; then
+	exec > >(tee -a /dev/ttyS0 2> /dev/null) 2>&1
+fi
 in_target() {
 	curtin in-target --target="$T" -- "$@"
 }
@@ -67,6 +74,12 @@ in_target env DEBIAN_FRONTEND=noninteractive LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 	apt-get "${APT_OPTS[@]}" install -y --no-install-recommends "${PACKAGES[@]}"
 rm -f "$T/etc/apt/scanoria-local.list"
 rm -rf "${T:?}$POOL"
+
+# Locale de l'appliance (en_US.UTF-8) : la base scanoria est créée avec elle au
+# premier démarrage (createdb --locale), elle doit donc être générée.
+log "locale en_US.UTF-8"
+in_target locale-gen en_US.UTF-8
+in_target update-locale LANG=en_US.UTF-8
 
 # PostgreSQL : socket Unix seul (ARCHITECTURE § 4).
 PGCONF="$T/etc/postgresql/16/main/conf.d"

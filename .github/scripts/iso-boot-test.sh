@@ -15,6 +15,7 @@
 #       SCANORIA-SELFTEST-JSON <rapport scanoria-selftest --json en base64, une ligne>
 #       SCANORIA-SELFTEST-EXIT <code de sortie>
 #       SCANORIA-FIRSTBOOT-END ok|error
+#    (un marqueur peut suivre l'invite de connexion sur la même ligne)
 #    Délai : ISO_FIRSTBOOT_TIMEOUT (défaut 2400 s).
 # 3. Vérifications : code 0 (pass ou warn), rapport JSON lisible, aucune
 #    vérification « fail » ; /api/health de la console répond via nginx
@@ -27,7 +28,30 @@
 set -euo pipefail
 umask 077
 
-die() { echo "::error::iso-boot-test: $*" >&2; exit 1; }
+die() {
+	echo "::error::iso-boot-test: $*" >&2
+	dump_diagnostics
+	exit 1
+}
+# Les artefacts ne sont pas toujours lisibles par qui diagnostique : les fins
+# des journaux série et les dernières captures (PNG en base64, une ligne
+# chacune, marqueur SCANORIA-SCREENSHOT) vont aussi dans le journal du job.
+# Aucun secret à l'écran : les mots de passe ne passent que par fw_cfg.
+dump_diagnostics() {
+	local f
+	for f in "${work:-/nonexistent}"/logs/*-serial.log; do
+		[[ -s "$f" ]] || continue
+		echo "::group::$(basename "$f") (200 dernières lignes)"
+		tail -n 200 "$f" | tr -d '\r' | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g'
+		echo "::endgroup::"
+	done
+	echo "::group::captures d'écran (base64)"
+	find "${work:-/nonexistent}/logs" -maxdepth 1 -name '*.png' -printf '%T@ %p\n' 2> /dev/null \
+		| sort -n | tail -n 3 | while read -r _ f; do
+		echo "SCANORIA-SCREENSHOT $(basename "$f") $(base64 -w0 "$f")"
+	done
+	echo "::endgroup::"
+}
 log() { echo "iso-boot-test: $*"; }
 
 [[ $# -eq 2 ]] || die "usage : iso-boot-test.sh ISO RÉPERTOIRE_DE_TRAVAIL"
@@ -83,9 +107,14 @@ qemu_base=(qemu-system-x86_64 -name scanoria-test -machine q35,accel=kvm -cpu ho
 	-monitor "unix:$mon,server,nowait"
 	-daemonize -pidfile "$pidfile")
 
-wait_vm_exit() { # délai étiquette
+wait_vm_exit() { # délai étiquette [journal série à surveiller]
 	local deadline=$((SECONDS + $1)) n=0
 	while vm_running; do
+		# L'installateur en erreur attend une touche : inutile d'attendre le délai.
+		if [[ -n "${3:-}" ]] && grep -qE 'An error occurred|install_fail' "$3" 2> /dev/null; then
+			screenshot "$2-error"
+			return 2
+		fi
 		if [[ $SECONDS -ge $deadline ]]; then
 			screenshot "$2-timeout"
 			return 1
@@ -104,7 +133,10 @@ log "installation (autoinstall) de $(basename "$iso")"
 "${qemu_base[@]}" -cdrom "$iso" -boot order=d \
 	-serial "file:$work/logs/install-serial.log"
 start=$SECONDS
-wait_vm_exit "${ISO_INSTALL_TIMEOUT:-3600}" install || die "installation non terminée dans le délai"
+rc=0
+wait_vm_exit "${ISO_INSTALL_TIMEOUT:-3600}" install "$work/logs/install-serial.log" || rc=$?
+[[ $rc -ne 2 ]] || die "l'installateur signale une erreur"
+[[ $rc -eq 0 ]] || die "installation non terminée dans le délai"
 log "installation terminée en $(((SECONDS - start) / 60)) min (machine éteinte)"
 
 # --- 2. Premier démarrage sans intervention -----------------------------------
@@ -124,7 +156,7 @@ log "premier démarrage sans intervention"
 	-fw_cfg "name=opt/scanoria/unattended.json,file=$answers" \
 	-serial "file:$serial"
 deadline=$((SECONDS + ${ISO_FIRSTBOOT_TIMEOUT:-2400}))
-until grep -q '^SCANORIA-FIRSTBOOT-END ' "$serial" 2> /dev/null; do
+until grep -q 'SCANORIA-FIRSTBOOT-END ' "$serial" 2> /dev/null; do
 	if ! vm_running; then
 		die "la machine s'est arrêtée avant la fin du premier démarrage"
 	fi
@@ -139,9 +171,9 @@ screenshot firstboot-end
 
 # --- 3. Vérifications ---------------------------------------------------------
 fail=0
-end=$(sed -n 's/^SCANORIA-FIRSTBOOT-END \([a-z]*\).*$/\1/p' "$serial" | tail -n 1)
-rc=$(sed -n 's/^SCANORIA-SELFTEST-EXIT \([0-9]*\).*$/\1/p' "$serial" | tail -n 1)
-sed -n 's/^SCANORIA-SELFTEST-JSON \([A-Za-z0-9+/=]*\).*$/\1/p' "$serial" | tail -n 1 \
+end=$(sed -n 's/^.*SCANORIA-FIRSTBOOT-END \([a-z]*\).*$/\1/p' "$serial" | tail -n 1)
+rc=$(sed -n 's/^.*SCANORIA-SELFTEST-EXIT \([0-9]*\).*$/\1/p' "$serial" | tail -n 1)
+sed -n 's/^.*SCANORIA-SELFTEST-JSON \([A-Za-z0-9+/=]*\).*$/\1/p' "$serial" | tail -n 1 \
 	| base64 -d > "$work/logs/selftest.json" 2> /dev/null || true
 log "premier démarrage : ${end:-?} ; scanoria-selftest : code ${rc:-?}"
 [[ "$end" == ok ]] || { echo "::error::premier démarrage en erreur"; fail=1; }
@@ -173,5 +205,9 @@ fi
 
 monitor system_powerdown
 wait_vm_exit 180 powerdown || true
-[[ "$fail" -eq 0 ]] || exit 1
+if [[ "$fail" -ne 0 ]]; then
+	grep -E 'SCANORIA-FIRSTBOOT-(FAILED-STEP|LOG) ' "$serial" || true
+	dump_diagnostics
+	exit 1
+fi
 log "OK : ISO installée, premier démarrage et scanoria-selftest réussis"

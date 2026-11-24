@@ -438,10 +438,32 @@ RELEASE_EXEC_MODE = 0o750
 RELEASE_FILE_MODE = 0o640
 
 
+def _release_gid():
+    """Groupe scanoria, ou None avant la création du compte : à la première
+    installation (install-local), post_deploy crée le compte après l'extraction
+    et _group_release corrige alors le groupe de l'arborescence."""
+    try:
+        return common.scanoria_ids()[1]
+    except KeyError:
+        return None
+
+
 def _own_release(fd, mode):
     os.fchmod(fd, mode)
     if not common.TEST_ROOT:
-        os.fchown(fd, 0, common.scanoria_ids()[1])
+        gid = _release_gid()
+        os.fchown(fd, 0, 0 if gid is None else gid)
+
+
+def _group_release(path):
+    """Passe une version extraite en root:scanoria (sans suivre de lien)."""
+    if common.TEST_ROOT:
+        return
+    gid = common.scanoria_ids()[1]
+    os.lchown(path, 0, gid)
+    for dirpath, dirnames, filenames in os.walk(path):
+        for n in dirnames + filenames:
+            os.lchown(os.path.join(dirpath, n), 0, gid)
 
 
 def _contained(base_real, rel):
@@ -974,10 +996,11 @@ def cmd_install_local(d):
     if os.path.exists(common.OPT + "/node/bin/node") or common.TEST_ROOT:
         check_version(rel, None)
     os.makedirs(common.OPT, mode=0o755, exist_ok=True)
-    extract(archive, rel["release"])
-    deploy_rootfs(os.path.join(RELEASES, rel["release"]))
+    final = extract(archive, rel["release"])
+    deploy_rootfs(final)
     set_link("current", rel["release"])
     post_deploy()
+    _group_release(final)
     return {"installed": rel["release"]}
 
 

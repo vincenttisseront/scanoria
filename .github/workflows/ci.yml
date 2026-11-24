@@ -275,6 +275,14 @@ jobs:
           args: >-
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=600
+      # Diagnostic : conditions du quality gate et issues ouvertes, lues par
+      # l'API de SonarQube Cloud, dans le journal et le résumé du travail.
+      - name: Détail du quality gate
+        if: always() && env.SONAR_TOKEN != ''
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.ref_name }}
+        run: .github/scripts/sonar-report.sh
 
   modules-testbed-live:
     # Chaque scanner du catalogue sur son banc d'essai, en vrai conteneur Podman
