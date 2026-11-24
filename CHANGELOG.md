@@ -41,10 +41,10 @@ Correctif : la console et le worker joignent de nouveau les forges.
   affichées, et un échec est signalé par une notification. L'historique
   reste dans le journal d'audit.
 
-### Ajouté (avance de la 0.5, actif avec le connecteur IA)
-- **Résultats semblables** regroupés par embeddings dans un même projet. Le
+### Ajouté (avance de la 0.5)
+- IA, avec le connecteur Ollama : **résultats semblables** regroupés par embeddings dans un même projet. Le
   tri commun reste confirmé par une personne (I7).
-- **Atteignabilité assistée** des vulnérabilités de dépendances : avis
+- IA : **atteignabilité assistée** des vulnérabilités de dépendances : avis
   appuyé sur un index des imports et des appels relevé sans rien exécuter
   par le nouveau module d'appoint `reach-index`. L'avis ne lève jamais un
   blocage (I11).
@@ -62,10 +62,9 @@ Correctif : la console et le worker joignent de nouveau les forges.
 - **Recoupement entre outils** (F16) : un même problème vu par plusieurs
   outils forme un groupe « confirmé par N outils », compté une seule fois par
   le quality gate et trié en une fois (une ligne d'audit par résultat).
-- Schéma de la 0.5 en base (SBOM, licences, EPSS et KEV, recoupement) et
-  nouvelles règles du quality gate. Les règles restent sans effet tant
-  qu'aucun module ne les alimente. Un plan figé avant cette version les
-  garde désactivées quand il est rejoué.
+- Nouvelles règles du quality gate (licences, KEV, EPSS, quarantaine),
+  actives par défaut. Un plan figé avant cette version les garde
+  désactivées quand il est rejoué.
 - Catalogue n° 9.
 
 ### Après la mise à jour
