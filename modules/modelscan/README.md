@@ -46,8 +46,9 @@ Le module ne sert qu'aux dépôts qui contiennent des modèles. Il n'est pas
 dans la sélection conseillée ; la détection F1 le propose dès qu'un fichier
 de modèle est trouvé (`.pkl`, `.pickle`, `.joblib`, `.pt`, `.pth`, `.ckpt`,
 `.bin` sous un dossier de modèle, `.npy`, `.h5`, `.keras`, `saved_model.pb`).
-`scan.applies_to` (contrat 23) lui sera ajouté avec le schéma du chantier D ;
-d'ici là il tourne sur tout dépôt du profil et ne trouve rien sans modèle.
+`scan.applies_to` (contrat 23) reprend ces motifs : sans aucun fichier de
+modèle, le module n'est pas lancé (« not-applicable », noté dans la
+couverture G15, jamais compté comme absent G13).
 
 ## Tests
 

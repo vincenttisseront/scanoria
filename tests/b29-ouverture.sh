@@ -64,6 +64,14 @@ expect "type scanner, catégorie sast" "$(jq -r '.type + "/" + (.categories | jo
 expect "réseau none" "$(jq -r .scan.network "$TMP/m.json")" none
 expect "outil de l'appliance monté" "$(jq -r .scan.tool "$TMP/m.json")" modelscan
 expect "licence vérifiée" "$(jq -r '.license.spdx + "/" + .license.restrictions' "$TMP/m.json")" Apache-2.0/none
+# Contrat 23 (V6) : lancé seulement s'il y a des fichiers de modèles.
+applies() { python3 -I -c 'import json, sys
+sys.path.insert(0, sys.argv[1])
+from scanoria.applicability import applies
+print(applies(json.load(open(sys.argv[2])), {}, sys.argv[3:]) or "runs")' "$ROOT/src/rootfs/usr/lib/scanoria/py" "$TMP/m.json" "$@"; }
+expect "applies_to : modèles du banc d'essai" "$(cd "$MOD/testbed" && applies $(find . -type f | sed 's|^\./||'))" runs
+expect "applies_to : extension en majuscules, poids sous weights/" "$(applies a/B.PT)/$(applies weights/x/w.bin)" runs/runs
+expect "applies_to : dépôt sans modèle non lancé" "$(applies src/app.py bin/tool.bin README.md)" no-matching-files
 grep -E '^export const RECOMMENDED_IDS' "$ROOT/webui/server/utils/catalog.ts" | grep -q "'modelscan'" \
 	&& ko "modelscan dans la sélection conseillée" || ok "hors sélection conseillée"
 

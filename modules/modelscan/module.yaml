@@ -52,6 +52,16 @@ scan:
   env:
     TF_CPP_MIN_LOG_LEVEL: "2"
     PYTHONDONTWRITEBYTECODE: "1"
+  # 0.6 (V6, contrat 23) : fichiers de modèles seulement, comme la détection F1
+  # (projects/detect.ts, isModelFile) ; sans aucun, le module n'est pas lancé.
+  applies_to:
+    paths:
+      - "*.{pkl,pickle,joblib,dill,pt,pth,ckpt,npy,h5,keras}"
+      - "*.{PKL,PICKLE,JOBLIB,DILL,PT,PTH,CKPT,NPY,H5,KERAS}"
+      - "saved_model.pb"
+      - "keras_metadata.pb"
+      - "pytorch_model*.bin"
+      - "**/{model,models,Model,Models,weights,Weights,checkpoint,checkpoints}/**/*.{bin,dat,data}"
   timeout_s: 900
   network: none
   exit_codes_ok: [0]
