@@ -10,7 +10,7 @@
 import { execFile } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { readdirSync } from 'node:fs'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
@@ -26,6 +26,7 @@ import { createUser } from '../../server/utils/users'
 import { evaluateGate, ScanNotFoundError } from '../../server/gates/evaluate'
 import { badTokenLimiter, publicLimiter, tokenLimiter } from '../../server/middleware/api-token'
 import { VerdictDetails } from '#shared/analysis'
+import { clearConnectorCache } from '../../server/ai/enqueue'
 
 const enqueued = vi.hoisted(() => ({ calls: [] as Record<string, unknown>[], fail: '' as string }))
 vi.mock('../../server/scans/enqueue', async () => {
@@ -457,6 +458,16 @@ describe.skipIf(!DATABASE_URL)('quality gates et API de la CI (PostgreSQL réel)
                 ('explain-verdict', $1, 'scan', $2, 'fr', 'done', 'm', 'sha256:x', '{"summary": "Deux secrets."}', now())`,
         [projectA, scan],
       )
+      // Sans connecteur IA : aucun texte IA, la réponse est celle d'une appliance sans IA.
+      const aiDir = await mkdtemp(join(tmpdir(), 'scanoria-gates-ai-'))
+      process.env.NUXT_AI_ENDPOINT_FILE = join(aiDir, 'ai.json')
+      clearConnectorCache()
+      expect((await call(`/api/scans/${scan}/verdict`, { client: viewer })).data.ai_summary).toBeUndefined()
+      await writeFile(process.env.NUXT_AI_ENDPOINT_FILE, JSON.stringify({
+        version: 1, enabled: true, url: 'https://ollama.exemple.test:11434', scheme: 'https', host: 'ollama.exemple.test',
+        port: 11434, addresses: ['192.0.2.10'], insecure: false, token: false, ca: false, literal: false, pinned_at: '2026-11-24T09:00:00Z',
+      }))
+      clearConnectorCache()
       const fr = await call(`/api/scans/${scan}/verdict`, { client: viewer })
       expect(fr.data).toMatchObject({ verdict: 'failed', status: 'done', ai_summary: { summary: 'Deux secrets.', model: 'm' } })
       expect(VerdictDetails.safeParse(fr.data.details).success).toBe(true)
@@ -464,6 +475,9 @@ describe.skipIf(!DATABASE_URL)('quality gates et API de la CI (PostgreSQL réel)
       const other = await newScan(projectA, { status: 'done', verdict: 'passed', details: details('passed') })
       expect((await call(`/api/scans/${other}/verdict`, { client: viewer })).data.ai_summary).toBeUndefined()
       expect((await call(`/api/scans/${randomUUID()}/verdict`, { client: viewer })).status).toBe(404)
+      delete process.env.NUXT_AI_ENDPOINT_FILE
+      clearConnectorCache()
+      await rm(aiDir, { recursive: true, force: true })
     })
 
     it('badge : 404 tant qu’il n’est pas activé, puis dernier verdict de la branche par défaut', async () => {

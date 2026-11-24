@@ -367,6 +367,13 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
           v-else
           class="max-h-96 overflow-auto rounded bg-elevated p-3 text-xs"
         >{{ verdictJson }}</pre>
+        <!-- Verdict expliqué (I9) : rien sans connecteur IA. -->
+        <AiExplanation
+          v-if="scan.verdict"
+          class="mt-3"
+          kind="explain-verdict"
+          :subject-id="scan.id"
+        />
       </UCard>
     </template>
 

@@ -48,6 +48,7 @@ const links = computed<NavigationMenuItem[]>(() => {
   ]
   if (session.can('admin')) items.push({ label: t('nav.users'), icon: 'i-lucide-users', to: '/system/users' })
   if (session.can('operator')) items.push({ label: t('nav.audit'), icon: 'i-lucide-scroll-text', to: '/system/audit' })
+  if (session.can('operator')) items.push({ label: t('ai.nav'), icon: 'i-lucide-sparkles', to: '/system/ai' })
   items.push({ label: t('nav.about'), icon: 'i-lucide-info', to: '/system/about' })
   return items
 })

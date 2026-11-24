@@ -103,6 +103,8 @@ for f in LICENSE CHANGELOG.md OPEN-SOURCE.md webui/server/index.mjs webui/nitro.
 	webui/services/worker.mjs rootfs/usr/lib/systemd/system/scanoria-worker.service; do
 	check "lot : $f" test -s "$L/$f"
 done
+# Services Node hors Nitro (scripts/bundle-services.mjs) : scanoria-ai.
+check "lot : webui/services/ai.mjs" test -s "$L/webui/services/ai.mjs"
 check "lot : pg embarqué pour migrate.mjs (webui/server/node_modules/pg)" test -f "$L/webui/server/node_modules/pg/package.json"
 check "rootfs : préfixes autorisés (§ 3.3)" bash -c \
 	'cd "$1/rootfs" && ! find . -type f -printf "%P\n" | grep -vE "$2"' _ "$L" "$ALLOWED"

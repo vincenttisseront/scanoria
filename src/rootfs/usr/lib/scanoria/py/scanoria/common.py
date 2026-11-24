@@ -63,6 +63,7 @@ REQUEST_TYPES = (
     "check-update", "apply-update", "rollback-update", "set-update-policy", "run-selftest",
     "check-dns",
     "refresh-catalog", "install-modules", "uninstall-module", "set-module-state", "update-module",
+    "set-ai-endpoint",
 )
 REJECT_CODES = frozenset((
     "E_INVALID_NAME", "E_NOT_REGULAR_FILE", "E_BAD_OWNER", "E_TOO_LARGE", "E_INVALID_JSON",
@@ -74,6 +75,7 @@ ERROR_CODES = frozenset((
     "E_CERT_KEY_MISMATCH", "E_CERT_EXPIRED", "E_NO_PREVIOUS", "E_HEALTH_ROLLED_BACK",
     "E_ROLLBACK_FAILED", "E_TIMEOUT", "E_INTERNAL",
     "E_RESOURCES", "E_DEPENDENCY", "E_CONFLICT", "E_LICENSE", "E_TESTBED",
+    "E_AI_URL", "E_AI_UNRESOLVED", "E_AI_FORBIDDEN_ADDRESS", "E_AI_CA",
 ))
 ALL_CODES = frozenset(("OK",)) | REJECT_CODES | ERROR_CODES
 

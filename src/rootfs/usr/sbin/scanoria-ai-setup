@@ -1,0 +1,11 @@
+#!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# scanoria-ai-setup : préparation root du service scanoria-ai (CLAUDE.md § 3.5),
+# /usr/lib/scanoria/py/scanoria/aiendpoint.py.
+#   prestart  table nftables, rôle PostgreSQL et droits, fichiers du service
+#   check     résolution du serveur épinglé et serveur candidat (horaire)
+set -euo pipefail
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+exec /usr/bin/python3 -I -B "$here/../lib/scanoria/py/run.py" ai-setup "$@"

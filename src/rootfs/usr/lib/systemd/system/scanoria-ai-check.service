@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Contrôle horaire du connecteur IA (CLAUDE.md § 3.5) : un changement de
+# résolution du serveur épinglé est signalé à la console, jamais appliqué ;
+# sans connecteur, recherche du serveur candidat ollama.<domaine>.
+[Unit]
+Description=Scanoria AI connector check
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/scanoria-ai-setup check
+TimeoutStartSec=120

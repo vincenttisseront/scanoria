@@ -19,6 +19,9 @@ export const KEY_PEM_RE = /^-----BEGIN (EC |RSA )?PRIVATE KEY-----\r?\n/
 export const WINDOW_START_RE = /^([01][0-9]|2[0-3]):[0-5][0-9]$/
 export const REPO_RE = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
 /** Nom d'un fichier de demande ou de résultat (§ 5.3). */
+/** Adresse du serveur Ollama externe (set-ai-endpoint, CLAUDE.md § 3.5). */
+export const AI_URL_RE = /^https?:\/\/(\[[0-9a-f:.]{2,45}\]|[a-z0-9.-]{1,253})(:[0-9]{1,5})?\/?$/
+/** Nom d'un fichier de demande ou de résultat (§ 5.3). */
 export const REQUEST_FILE_RE = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/
 
 export const REQUEST_TYPES = [
@@ -37,6 +40,7 @@ export const REQUEST_TYPES = [
   'uninstall-module',
   'set-module-state',
   'update-module',
+  'set-ai-endpoint',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -49,6 +53,7 @@ export const RESULT_CODES = [
   'E_CERT_KEY_MISMATCH', 'E_CERT_EXPIRED', 'E_NO_PREVIOUS', 'E_HEALTH_ROLLED_BACK',
   'E_ROLLBACK_FAILED', 'E_TIMEOUT', 'E_INTERNAL',
   'E_RESOURCES', 'E_DEPENDENCY', 'E_CONFLICT', 'E_LICENSE', 'E_TESTBED',
+  'E_AI_URL', 'E_AI_UNRESOLVED', 'E_AI_FORBIDDEN_ADDRESS', 'E_AI_CA',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 
@@ -124,6 +129,16 @@ export const requestParamSchemas = {
   'uninstall-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE), keep_data: z.boolean() }),
   'set-module-state': z.strictObject({ id: z.string().regex(MODULE_ID_RE), enabled: z.boolean() }),
   'update-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE), version: z.string().regex(MODULE_VERSION_RE) }),
+  'set-ai-endpoint': z.union([
+    z.strictObject({
+      enabled: z.literal(true),
+      url: z.string().min(8).max(300).regex(AI_URL_RE),
+      allow_insecure: z.boolean().optional(),
+      token: z.boolean().optional(),
+      ca_pem: z.string().min(64).max(16384).regex(CERT_PEM_RE).optional(),
+    }),
+    z.strictObject({ enabled: z.literal(false) }),
+  ]),
 } satisfies Record<RequestType, z.ZodType>
 
 export type RequestParams<T extends RequestType> = z.infer<(typeof requestParamSchemas)[T]>

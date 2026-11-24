@@ -396,6 +396,25 @@ def check_hardware(rep):
             {"cpu": cpu, "memory_mb": mem, "disk_gb": round(disk_gb)})
 
 
+def check_ai(rep):
+    """ai.alive : seulement si le connecteur IA est actif (CLAUDE.md § 3.5)."""
+    from . import aiendpoint
+    conf = aiendpoint.load_conf()
+    if not conf.get("enabled"):
+        return
+    r = common.run("systemctl", ["is-active", "scanoria-ai.service"], timeout=30)
+    active = r.returncode == 0
+    status = _json(aiendpoint.STATUS_FILE) or {}
+    changed = bool((status.get("resolution") or {}).get("changed"))
+    if not active:
+        rep.add("ai.alive", "fail", "AI connector enabled but scanoria-ai is not running")
+    elif changed:
+        rep.add("ai.alive", "warn", "AI server name now resolves differently: confirm it again in the console",
+                {"pinned": conf.get("addresses", [])})
+    else:
+        rep.add("ai.alive", "pass", "scanoria-ai running", {"addresses": conf.get("addresses", [])})
+
+
 def run_checks(quick):
     rep = Report()
     started = common.now()
@@ -414,6 +433,7 @@ def run_checks(quick):
     check_queue(rep)
     check_disk(rep)
     check_routing(rep)
+    check_ai(rep)
     check_runner(rep)
     if not quick:
         check_dns(rep, name)

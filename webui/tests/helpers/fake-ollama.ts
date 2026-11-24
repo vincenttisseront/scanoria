@@ -1,0 +1,162 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Vincent Tisseront
+//
+// Faux serveur Ollama pour la CI (CLAUDE.md § 12) : réponses déterministes,
+// pannes, lenteurs, sorties invalides, empreinte de modèle qui change, et
+// enregistrement de chaque requête reçue (pour vérifier ce qui sort de
+// l'appliance). Écoute sur 127.0.0.1, port aléatoire.
+
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import type { AddressInfo } from 'node:net'
+
+export interface FakeModel {
+  name: string
+  digest: string
+  capabilities?: string[]
+  context?: number
+  parameterSize?: string
+  family?: string
+}
+
+export type FakeMode = 'ok' | 'down' | 'slow' | 'invalid-json' | 'invalid-schema' | 'echo-data'
+
+export interface RecordedRequest {
+  method: string
+  path: string
+  headers: Record<string, string | string[] | undefined>
+  body: string
+}
+
+export interface FakeOllama {
+  url: string
+  port: number
+  requests: RecordedRequest[]
+  models: FakeModel[]
+  mode: FakeMode
+  delayMs: number
+  chatCount: () => number
+  close: () => Promise<void>
+}
+
+/** Données JSON de l'invite, entre <data-…> et </data-…>. */
+export function extractData(content: string): Record<string, unknown> | null {
+  const m = /<(data-[0-9a-f]+)>\n([\s\S]*)\n<\/\1>/.exec(content)
+  if (!m) return null
+  try {
+    return JSON.parse(m[2]!) as Record<string, unknown>
+  }
+  catch {
+    return null
+  }
+}
+
+/** Réponse sage : reprend le titre, le message et les métadonnées, jamais l'extrait de code. */
+function wellBehaved(required: string[], data: Record<string, unknown>): Record<string, unknown> {
+  if (required.includes('detects')) {
+    const pkg = data.package as { name?: string, fixed?: string[] } | null
+    const fixed = pkg?.fixed?.length ? ` Upgrade ${pkg.name} to ${pkg.fixed[0]}.` : ''
+    return {
+      summary: `${String(data.title)} (${String(data.rule_id)}).`,
+      detects: `The rule ${String(data.rule_id)} detects: ${String(data.title)}.`,
+      risk: `${String(data.message ?? data.title)} Found in ${String(data.path)}.`,
+      impact: 'An attacker could abuse this weakness.',
+      fix: `Apply the recommended fix.${fixed} See https://cwe.mitre.org/data/definitions/20.html <b>now</b>`,
+      references: [
+        { label: 'Evil', url: 'https://evil.exemple.test/x' },
+        { label: 'OSV', url: 'https://osv.dev/list' },
+      ],
+    }
+  }
+  const reasons = (data.reasons as { code: string, module: string | null }[] | undefined) ?? []
+  const parts = reasons.map(r => `${r.code}${r.module ? ` (${r.module})` : ''}`)
+  return {
+    summary: `Verdict ${String(data.verdict)}: ${parts.join(', ') || 'no blocking reason'}. @admin #12`,
+    blocking: parts[0] ?? 'none',
+    actions: reasons.flatMap(r => (r as unknown as { actions: string[] }).actions ?? []).slice(0, 8),
+  }
+}
+
+export async function startFakeOllama(models: FakeModel[] = [
+  { name: 'qwen-test:14b', digest: 'a'.repeat(64), capabilities: ['completion', 'tools'], context: 32768, parameterSize: '14.8B', family: 'qwen2' },
+  { name: 'embed-test:latest', digest: 'b'.repeat(64), capabilities: ['embedding'], context: 8192, parameterSize: '137M', family: 'nomic-bert' },
+]): Promise<FakeOllama> {
+  const state = { mode: 'ok' as FakeMode, delayMs: 0, chats: 0 }
+  const requests: RecordedRequest[] = []
+  const fake = {} as FakeOllama
+
+  const send = (res: ServerResponse, status: number, body: unknown) => {
+    const text = typeof body === 'string' ? body : JSON.stringify(body)
+    res.writeHead(status, { 'content-type': 'application/json' })
+    res.end(text)
+  }
+
+  const handle = async (req: IncomingMessage, res: ServerResponse) => {
+    const chunks: Buffer[] = []
+    for await (const c of req) chunks.push(c as Buffer)
+    const body = Buffer.concat(chunks).toString('utf8')
+    requests.push({ method: req.method ?? '', path: req.url ?? '', headers: req.headers, body })
+    if (state.mode === 'down') return send(res, 503, { error: 'unavailable' })
+    if (state.mode === 'slow' || state.delayMs) await new Promise(r => setTimeout(r, state.delayMs || 2000))
+    if (req.url === '/api/version') return send(res, 200, { version: '0.12.3' })
+    if (req.url === '/api/tags') {
+      return send(res, 200, { models: fake.models.map(m => ({ name: m.name, model: m.name, digest: m.digest, size: 1 })) })
+    }
+    if (req.url === '/api/show') {
+      const name = (JSON.parse(body) as { model: string }).model
+      const m = fake.models.find(x => x.name === name)
+      if (!m) return send(res, 404, { error: 'not found' })
+      return send(res, 200, {
+        capabilities: m.capabilities ?? ['completion'],
+        details: { family: m.family ?? 'llama', parameter_size: m.parameterSize ?? '8.0B' },
+        model_info: { 'general.architecture': m.family ?? 'llama', [`${m.family ?? 'llama'}.context_length`]: m.context ?? 8192 },
+      })
+    }
+    if (req.url === '/api/chat') {
+      state.chats += 1
+      const parsed = JSON.parse(body) as { model: string, messages: { content: string }[], format: { required?: string[] } }
+      const data = extractData(parsed.messages.at(-1)?.content ?? '') ?? {}
+      let content: string
+      if (state.mode === 'invalid-json') content = 'Sure! Here is the answer: {'
+      else if (state.mode === 'invalid-schema') content = JSON.stringify({ text: 'free text' })
+      else if (state.mode === 'echo-data') {
+        // Modèle qui suit les consignes injectées : recopie toutes les données.
+        const injected = /CANARY-[0-9]+/.exec(JSON.stringify(data))?.[0] ?? ''
+        const out = wellBehaved(parsed.format.required ?? [], data)
+        content = JSON.stringify(Object.fromEntries(Object.entries(out).map(([k, v]) => [k, typeof v === 'string' ? `${injected} ${v}`.trim() : v])))
+      }
+      else content = JSON.stringify(wellBehaved(parsed.format.required ?? [], data))
+      return send(res, 200, { model: parsed.model, message: { role: 'assistant', content }, done: true })
+    }
+    return send(res, 404, { error: 'unknown path' })
+  }
+
+  const server: Server = createServer((req, res) => {
+    handle(req, res).catch(() => send(res, 500, { error: 'fake failure' }))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as AddressInfo).port
+  Object.assign(fake, {
+    url: `http://127.0.0.1:${port}`,
+    port,
+    requests,
+    models,
+    chatCount: () => state.chats,
+    close: () => new Promise<void>((resolve) => {
+      server.closeAllConnections()
+      server.close(() => resolve())
+    }),
+  })
+  Object.defineProperty(fake, 'mode', {
+    get: () => state.mode,
+    set: (v: FakeMode) => {
+      state.mode = v
+    },
+  })
+  Object.defineProperty(fake, 'delayMs', {
+    get: () => state.delayMs,
+    set: (v: number) => {
+      state.delayMs = v
+    },
+  })
+  return fake
+}

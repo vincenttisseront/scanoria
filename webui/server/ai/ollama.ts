@@ -1,0 +1,192 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Vincent Tisseront
+//
+// Client de l'API HTTP d'Ollama (/api/version, /api/tags, /api/show,
+// /api/chat), utilisé seulement par le service scanoria-ai (CLAUDE.md § 3.5).
+// La connexion part toujours vers une adresse épinglée par le helper : le nom
+// n'est jamais résolu ici (pas de rebond DNS), il ne sert qu'à l'en-tête Host
+// et au nom TLS. Le corps d'une requête de chat est construit champ par
+// champ : jamais d'outil (« tools »), jamais de flux.
+
+import http from 'node:http'
+import https from 'node:https'
+import { rootCertificates } from 'node:tls'
+import { isIP } from 'node:net'
+import type { LookupFunction } from 'node:net'
+
+export interface OllamaTarget {
+  scheme: 'https' | 'http'
+  host: string
+  port: number
+  addresses: string[]
+  token?: string | null
+  caPem?: string | null
+}
+
+export class OllamaError extends Error {
+  constructor(public readonly kind: 'timeout' | 'network' | 'http' | 'protocol', message: string, public readonly status?: number) {
+    super(message)
+    this.name = 'OllamaError'
+  }
+}
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatRequest {
+  model: string
+  messages: ChatMessage[]
+  format: Record<string, unknown>
+  numCtx: number
+  temperature?: number
+}
+
+export interface ChatResult {
+  content: string
+  bytesSent: number
+  durationMs: number
+}
+
+const MAX_RESPONSE = 4 * 1024 * 1024
+
+/** Recherche de nom figée sur les adresses épinglées (aucune requête DNS). */
+export function pinnedLookup(addresses: string[]): LookupFunction {
+  let next = 0
+  return ((_hostname: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
+    const list = addresses.map(a => ({ address: a, family: isIP(a) }))
+    if (options && typeof options === 'object' && options.all) {
+      callback(null, list)
+      return
+    }
+    const pick = list[next++ % list.length]!
+    callback(null, pick.address, pick.family)
+  }) as unknown as LookupFunction
+}
+
+export class OllamaClient {
+  constructor(private readonly target: OllamaTarget) {
+    if (target.addresses.length === 0) throw new Error('no pinned address')
+  }
+
+  private request(method: 'GET' | 'POST', path: string, body: unknown, timeoutMs: number): Promise<{ json: unknown, bytesSent: number }> {
+    const t = this.target
+    const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body), 'utf8')
+    const headers: Record<string, string> = { 'accept': 'application/json', 'user-agent': 'scanoria-ai' }
+    if (payload) {
+      headers['content-type'] = 'application/json'
+      headers['content-length'] = String(payload.length)
+    }
+    if (t.token) headers.authorization = `Bearer ${t.token}`
+    const options: https.RequestOptions = {
+      method,
+      host: t.host,
+      port: t.port,
+      path,
+      headers,
+      lookup: pinnedLookup(t.addresses),
+      agent: false,
+      timeout: timeoutMs,
+    }
+    if (t.scheme === 'https') {
+      options.servername = isIP(t.host) ? undefined : t.host
+      options.ca = t.caPem ? [...rootCertificates, t.caPem] : undefined
+      options.rejectUnauthorized = true
+      options.minVersion = 'TLSv1.2'
+    }
+    const mod = t.scheme === 'https' ? https : http
+    return new Promise((resolve, reject) => {
+      let settled = false
+      const fail = (err: OllamaError) => {
+        if (settled) return
+        settled = true
+        reject(err)
+      }
+      const req = mod.request(options, (res) => {
+        const chunks: Buffer[] = []
+        let size = 0
+        res.on('data', (c: Buffer) => {
+          size += c.length
+          if (size > MAX_RESPONSE) {
+            req.destroy()
+            fail(new OllamaError('protocol', 'response too large'))
+            return
+          }
+          chunks.push(c)
+        })
+        res.on('end', () => {
+          if (settled) return
+          const status = res.statusCode ?? 0
+          if (status < 200 || status >= 300) {
+            fail(new OllamaError('http', `HTTP ${status}`, status))
+            return
+          }
+          try {
+            const json: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            settled = true
+            resolve({ json, bytesSent: payload?.length ?? 0 })
+          }
+          catch {
+            fail(new OllamaError('protocol', 'invalid JSON response'))
+          }
+        })
+        res.on('error', () => fail(new OllamaError('network', 'response error')))
+      })
+      const timer = setTimeout(() => {
+        req.destroy()
+        fail(new OllamaError('timeout', `timed out after ${timeoutMs} ms`))
+      }, timeoutMs)
+      req.on('timeout', () => {
+        req.destroy()
+        fail(new OllamaError('timeout', `timed out after ${timeoutMs} ms`))
+      })
+      req.on('error', (err: Error) => fail(new OllamaError('network', err.message.slice(0, 200))))
+      req.on('close', () => clearTimeout(timer))
+      if (payload) req.write(payload)
+      req.end()
+    })
+  }
+
+  async version(timeoutMs = 5000): Promise<string> {
+    const { json } = await this.request('GET', '/api/version', undefined, timeoutMs)
+    const v = (json as { version?: unknown }).version
+    if (typeof v !== 'string' || !/^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/.test(v)) throw new OllamaError('protocol', 'invalid version')
+    return v
+  }
+
+  async tags(timeoutMs = 10_000): Promise<{ name: string, digest: string, size: number }[]> {
+    const { json } = await this.request('GET', '/api/tags', undefined, timeoutMs)
+    const models = (json as { models?: unknown }).models
+    if (!Array.isArray(models)) throw new OllamaError('protocol', 'invalid tags')
+    return models.slice(0, 200).flatMap((m: unknown) => {
+      const o = m as { name?: unknown, model?: unknown, digest?: unknown, size?: unknown }
+      const name = typeof o.name === 'string' ? o.name : typeof o.model === 'string' ? o.model : null
+      if (!name || name.length > 200 || typeof o.digest !== 'string' || !/^(sha256:)?[0-9a-f]{12,64}$/.test(o.digest)) return []
+      return [{ name, digest: o.digest.replace(/^sha256:/, ''), size: typeof o.size === 'number' ? o.size : 0 }]
+    })
+  }
+
+  async show(model: string, timeoutMs = 10_000): Promise<Record<string, unknown>> {
+    const { json } = await this.request('POST', '/api/show', { model }, timeoutMs)
+    if (!json || typeof json !== 'object') throw new OllamaError('protocol', 'invalid show')
+    return json as Record<string, unknown>
+  }
+
+  /** Une réponse JSON complète, contrainte par le schéma de la tâche. */
+  async chat(req: ChatRequest, timeoutMs: number): Promise<ChatResult> {
+    const body = {
+      model: req.model,
+      messages: req.messages.map(m => ({ role: m.role, content: m.content })),
+      format: req.format,
+      stream: false,
+      options: { num_ctx: req.numCtx, temperature: req.temperature ?? 0.1 },
+      keep_alive: '10m',
+    }
+    const started = Date.now()
+    const { json, bytesSent } = await this.request('POST', '/api/chat', body, timeoutMs)
+    const content = (json as { message?: { content?: unknown } }).message?.content
+    if (typeof content !== 'string') throw new OllamaError('protocol', 'missing message content')
+    return { content, bytesSent, durationMs: Date.now() - started }
+  }
+}

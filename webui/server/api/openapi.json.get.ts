@@ -58,6 +58,14 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/catalog/modules/{id}/state': { post: { summary: 'Request set-module-state (enable or disable)', role: 'admin', body: 'ModuleState', status: 202 } },
   '/api/catalog/modules/{id}/update': { post: { summary: 'Request update-module (latest version by default)', role: 'admin', body: 'ModuleUpdate', status: 202 } },
   '/api/catalog/modules/{id}/uninstall': { post: { summary: 'Request uninstall-module (409 E_DEPENDENTS when another module needs it)', role: 'admin', body: 'ModuleUninstall', status: 202 } },
+  '/api/ai/status': { get: { summary: 'AI connector (external Ollama): pinned address, models chosen per task and why, testbed, circuit breaker, latency', role: 'operator' } },
+  '/api/ai/calls': { get: { summary: 'AI call log (metadata only, never content)', role: 'operator' } },
+  '/api/ai/connector': { post: { summary: 'Request set-ai-endpoint: enable or change the Ollama connector (confirmed: true required)', role: 'admin', body: 'AiConnector', status: 202 } },
+  '/api/ai/disconnect': { post: { summary: 'Request set-ai-endpoint: remove the connector and close its firewall rule', role: 'admin', status: 202 } },
+  '/api/ai/probe': { post: { summary: 'Rediscover the models of the AI server', role: 'admin', status: 202 } },
+  '/api/ai/models': { put: { summary: 'Force a model per AI task, or back to automatic (null)', role: 'admin', body: 'AiModels' } },
+  '/api/ai/explain': { post: { summary: 'Interactive AI explanation of a finding (I2) or a verdict (I9)', role: 'viewer', body: 'AiExplain', status: 202 } },
+  '/api/ai/output': { get: { summary: 'Latest AI output for a finding or a scan, marked as AI with model and digest', role: 'viewer' } },
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
   '/api/gates': {
@@ -181,6 +189,24 @@ export default defineEventHandler(async () => {
         apiToken: { type: 'http', scheme: 'bearer', description: 'Project API token scn_… (CI routes only: queue a scan, read a verdict)' },
       },
       schemas: {
+        AiConnector: {
+          type: 'object', additionalProperties: false, required: ['url', 'confirmed'],
+          properties: {
+            url: { type: 'string', maxLength: 300, pattern: '^https?://' },
+            allow_insecure: { type: 'boolean' },
+            token: { type: ['string', 'null'], maxLength: 4096 },
+            ca_pem: { type: ['string', 'null'], maxLength: 16384 },
+            confirmed: { const: true },
+          },
+        },
+        AiModels: {
+          type: 'object', additionalProperties: false, required: ['models'],
+          properties: { models: { type: 'object', additionalProperties: { type: ['string', 'null'], maxLength: 200 } } },
+        },
+        AiExplain: {
+          type: 'object', additionalProperties: false, required: ['kind', 'subject_id'],
+          properties: { kind: { enum: ['explain-finding', 'explain-verdict'] }, subject_id: { type: 'string', format: 'uuid' }, locale: { enum: ['fr', 'en'] } },
+        },
         Error: {
           type: 'object',
           properties: {
