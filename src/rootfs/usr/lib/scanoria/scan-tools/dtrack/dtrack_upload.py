@@ -64,12 +64,12 @@ class Api:
         # Aucun mandataire : le conteneur n'a de toute façon qu'un réseau interne.
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
-    def call(self, method, path, params=None, body=None, fail=5):
+    def call(self, method, path, params=None, body=None, fail=5, accept="application/json"):
         url = "%s/%s" % (self.host, path)
         if params:
             url += "?" + urllib.parse.urlencode(params)
         data = json.dumps(body).encode("utf-8") if body is not None else None
-        headers = {"X-Api-Key": self.key, "Accept": "application/json"}
+        headers = {"X-Api-Key": self.key, "Accept": accept}
         if data is not None:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=data, method=method, headers=headers)
@@ -227,7 +227,9 @@ def main(argv):
         if not isinstance(uuid, str) or not UUID_RE.match(uuid):
             raise Failure(5, "project not found after the upload")
         doc = api.call("GET", "api/v1/bom/cyclonedx/project/" + uuid,
-                       {"format": "JSON", "variant": "inventory", "download": "false"})
+                       {"format": "JSON", "variant": "inventory", "download": "false"},
+                       # Seul type rendu par cet export (application/json : HTTP 406).
+                       accept="application/vnd.cyclonedx+json")
         out = inventory(doc, uuid, version)
         tmp = os.path.join(OUT_DIR, ".dtrack.tmp")
         with open(tmp, "w", encoding="utf-8") as f:

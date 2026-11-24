@@ -186,6 +186,8 @@ class H(BaseHTTPRequestHandler):
             proj = next((v for v in st["projects"].values() if v["uuid"] == pid), None)
             if proj is None or q.get("variant") != "inventory":
                 return self.reply(404)
+            if self.headers.get("Accept") != "application/vnd.cyclonedx+json":
+                return self.reply(406)  # comme le vrai service
             return self.reply(200, {"bomFormat": "CycloneDX", "specVersion": "1.5", "components": proj["components"]})
         return self.reply(404)
 
