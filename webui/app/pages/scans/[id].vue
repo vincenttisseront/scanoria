@@ -202,6 +202,11 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
             </dt>
             <dd>
               {{ label('triggers', scan.trigger) }}
+              <FindingsExternalBadge
+                v-if="scan.external_source"
+                origin="external"
+                :source="scan.external_source"
+              />
               <NuxtLink
                 v-if="scan.replay_of"
                 :to="`/scans/${scan.replay_of}`"

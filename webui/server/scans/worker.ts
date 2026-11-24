@@ -78,6 +78,8 @@ class Deferred extends Error {
 
 /** Délai avant de reprendre une analyse laissée en « ingesting » sans tâche (arrêt du worker). */
 const ORPHAN_INGEST_S = 120
+/** J6 : téléversement externe abandonné (console arrêtée pendant l'ingestion). */
+const ORPHAN_EXTERNAL_S = 3600
 /** Âge minimal d'une tâche de incoming/ sans analyse « dispatched » avant son retrait. */
 const ORPHAN_JOB_S = 60
 /** Nouvel essai quand l'état des modules ou le catalogue est illisible. */
@@ -590,13 +592,28 @@ export class ScanWorker {
    * occuperaient le quota du projet pour toujours.
    */
   async recoverOrphans(): Promise<number> {
+    // J6 (0.6) : une analyse externe est ingérée par la console dans la requête de
+    // téléversement, jamais par le worker ; seule une ingestion abandonnée depuis
+    // longtemps (console arrêtée) est close, en erreur, sans verdict.
     const r = await this.pool.query<{ id: string, error: RunnerError | null }>(
       `SELECT id, error FROM scans
-        WHERE status = 'ingesting' AND job_id IS NULL AND started_at < now() - make_interval(secs => $1)`, [ORPHAN_INGEST_S])
+        WHERE status = 'ingesting' AND job_id IS NULL AND trigger <> 'external'
+          AND started_at < now() - make_interval(secs => $1)`, [ORPHAN_INGEST_S])
     for (const row of r.rows) {
       await this.withScanLock(row.id, () => this.conclude(row.id, { status: row.error ? 'error' : 'done', error: row.error, complete: false }))
     }
-    return r.rows.length
+    const ext = await this.pool.query<{ id: string }>(
+      `UPDATE scans SET status = 'error', finished_at = now(),
+              error = '{"code":"E_EXTERNAL_INGEST","class":"infra","message":"external results ingestion abandoned"}'::jsonb
+        WHERE status = 'ingesting' AND job_id IS NULL AND trigger = 'external'
+          AND started_at < now() - make_interval(secs => $1)
+       RETURNING id`, [ORPHAN_EXTERNAL_S])
+    if (ext.rows.length) {
+      await this.pool.query(
+        `UPDATE scan_modules SET status = 'error', error_class = 'infra', finished_at = now()
+          WHERE scan_id = ANY($1::uuid[]) AND status = 'running'`, [ext.rows.map(x => x.id)])
+    }
+    return r.rows.length + ext.rows.length
   }
 
   /**

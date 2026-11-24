@@ -67,7 +67,7 @@ const SELECT = `
          p.created_by::text, ${ts('p.created_at')}, ${ts('p.archived_at')},
          (SELECT json_build_object('id', s.id, 'number', s.number, 'status', s.status, 'verdict', s.verdict,
                    'queued_at', to_char(s.queued_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
-            FROM scans s WHERE s.project_id = p.id ORDER BY s.queued_at DESC LIMIT 1) AS last_scan
+            FROM scans s WHERE s.project_id = p.id AND s.trigger <> 'external' ORDER BY s.queued_at DESC LIMIT 1) AS last_scan
     FROM projects p
     JOIN profiles pr ON pr.id = p.profile_id
     JOIN gates g ON g.id = p.gate_id

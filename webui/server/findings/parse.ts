@@ -38,7 +38,7 @@ export interface ParsedFinding {
 }
 
 export interface ParseIssue {
-  code: 'invalid-document' | 'path-outside' | 'truncated' | 'invalid-result'
+  code: 'invalid-document' | 'path-outside' | 'truncated' | 'invalid-result' | 'tool-error'
   detail?: string
 }
 
@@ -47,7 +47,15 @@ export interface ParseContext {
   moduleId: string
   /** Catégories déclarées par le module (manifeste). */
   moduleCategories: string[]
+  /**
+   * Document produit hors de l'appliance (J6) : tout texte est masqué de façon agressive,
+   * et une règle qui évoque un secret est traitée comme un secret (jamais sa valeur, § 6.3).
+   */
+  external?: boolean
 }
+
+/** Règle ou titre qui évoque un secret, pour un document externe sans étiquette « secrets ». */
+const SECRET_HINT_RE = /secret|passw(?:or)?d|passwd|token|api[-_ ]?key|credential|private[-_ ]?key|access[-_ ]?key/i
 
 export interface ParseOutput {
   findings: ParsedFinding[]
@@ -101,17 +109,18 @@ interface Draft {
 function finish(ctx: ParseContext, d: Draft): ParsedFinding {
   const vulnId = primaryVulnId(d.vulnIds) ?? (d.pkg ? d.ruleId : null)
   const cwe = extractCwe(d.cweSources)
-  const category = inferCategory({
+  const inferred = inferCategory({
     moduleCategories: ctx.moduleCategories,
     tags: d.tags,
     hasVuln: d.vulnIds.length > 0,
     hasPackage: !!d.pkg,
     cwe,
   })
+  const category = ctx.external && !d.pkg && SECRET_HINT_RE.test(`${d.ruleId} ${d.title}`) ? 'secrets' : inferred
   const secret = category === 'secrets'
   // Secrets : masquage agressif (toute chaîne aléatoire), jamais la valeur ;
-  // l'extrait d'un secret n'est jamais gardé, seulement sa forme.
-  const mask = (s: string) => redact(s, { aggressive: secret })
+  // l'extrait d'un secret n'est jamais gardé, seulement sa forme. Document externe : agressif partout.
+  const mask = (s: string) => redact(s, { aggressive: secret || !!ctx.external })
   const snippet = !d.snippet ? '' : secret ? maskToken('snippet', d.snippet.length) : mask(d.snippet)
   const title = mask(d.title || d.ruleId)
   const message = mask(d.message)
@@ -158,12 +167,16 @@ export function parseSarif(doc: unknown, ctx: ParseContext): ParseOutput {
   let invalid = 0
   let total = 0
   let declaredTruncated = false
+  let failedRuns = 0
   for (const run of doc.runs.slice(0, 32)) {
     if (!isObj(run)) continue
     // Troncature déclarée par l'outil lui-même (run.properties.scanoria.truncated,
     // convertisseur SonarQube) : elle ne peut qu'ajouter un trou de couverture.
     const runProps = isObj(run.properties) && isObj(run.properties.scanoria) ? run.properties.scanoria : {}
     if (runProps.truncated === true) declaredTruncated = true
+    // G13 : une exécution déclarée en échec (invocations[].executionSuccessful = false)
+    // n'est jamais lue comme « aucun résultat » ; elle devient une lacune de couverture.
+    if (arr(run.invocations).some(i => isObj(i) && i.executionSuccessful === false)) failedRuns++
     const tool = isObj(run.tool) ? run.tool : {}
     const driver = isObj(tool.driver) ? tool.driver : {}
     const rules: Obj[] = arr(driver.rules).filter(isObj)
@@ -247,6 +260,7 @@ export function parseSarif(doc: unknown, ctx: ParseContext): ParseOutput {
   else if (declaredTruncated) issues.push({ code: 'truncated', detail: 'declared' })
   if (outside) issues.push({ code: 'path-outside', detail: `${outside}` })
   if (invalid) issues.push({ code: 'invalid-result', detail: `${invalid}` })
+  if (failedRuns) issues.push({ code: 'tool-error', detail: `${failedRuns}` })
   return { findings: dedupe(drafts.map(d => finish(ctx, d))), issues }
 }
 

@@ -18,6 +18,7 @@ import diagnoseCases from '../../ai/testbed/diagnose-scan.json'
 import translateCases from '../../ai/testbed/translate-rule.json'
 import reachCases from '../../ai/testbed/assess-reachability.json'
 import licenseCases from '../../ai/testbed/explain-license.json'
+import applianceCases from '../../ai/testbed/diagnose-appliance.json'
 import embedPairs from '../../ai/testbed/embed-finding.json'
 import { EmbedSuite } from './tasks/similar'
 
@@ -38,7 +39,7 @@ export type TestbedSuite = z.infer<typeof TestbedSuite>
 export type TestbedCase = z.infer<typeof TestbedCase>
 
 export const SUITES: Record<string, TestbedSuite> = Object.fromEntries(
-  [findingCases, verdictCases, triageCases, summaryCases, secretCases, diagnoseCases, translateCases, reachCases, licenseCases].map((s) => {
+  [findingCases, verdictCases, triageCases, summaryCases, secretCases, diagnoseCases, translateCases, reachCases, licenseCases, applianceCases].map((s) => {
     const suite = TestbedSuite.parse(s)
     return [suite.kind, suite]
   }),

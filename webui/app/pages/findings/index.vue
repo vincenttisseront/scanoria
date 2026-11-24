@@ -54,6 +54,9 @@ interface FindingRow {
   kev?: boolean
   kev_added?: string | null
   group?: { confirmations: number, tools: string[], members: { id: string, tool: string, severity: string, status: string }[] } | null
+  // 0.6 (J6) : résultat externe et sa source.
+  origin?: 'module' | 'external'
+  external_source?: { tool: string, version: string | null, format: string, uploaded_via: string } | null
 }
 interface FindingDetail extends FindingRow {
   message: string | null
@@ -103,6 +106,7 @@ const filters = reactive({
   epss_min: ['0.01', '0.1', '0.5'].includes(str(q.epss_min)) ? str(q.epss_min) : 'all',
   kev: q.kev === 'true',
   grouped: q.grouped !== 'false',
+  origin: ['module', 'external'].includes(str(q.origin)) ? str(q.origin) : 'all',
 })
 const items = ref<FindingRow[]>([])
 const total = ref(0)
@@ -134,6 +138,7 @@ function query(): Record<string, unknown> {
   if (filters.epss_min !== 'all') out.epss_min = filters.epss_min
   if (filters.kev) out.kev = 'true'
   if (filters.grouped) out.grouped = 'true'
+  if (filters.origin !== 'all') out.origin = filters.origin
   return out
 }
 
@@ -197,7 +202,7 @@ watch(filters, () => {
 onBeforeUnmount(() => clearTimeout(debounce))
 
 function resetFilters() {
-  Object.assign(filters, { project_id: 'all', scan_id: '', tool: '', severity: 'all', category: 'all', status: 'open', q: '', is_new: false, secret: false, malicious: false, epss_min: 'all', kev: false, grouped: true })
+  Object.assign(filters, { project_id: 'all', scan_id: '', tool: '', severity: 'all', category: 'all', status: 'open', q: '', is_new: false, secret: false, malicious: false, epss_min: 'all', kev: false, grouped: true, origin: 'all' })
 }
 
 const totals = computed(() => summary.value.reduce((acc, p) => ({
@@ -223,6 +228,11 @@ const statusItems = computed(() => [
   ...FINDING_STATUSES.map(s => ({ label: t(`findings.status.${s}`), value: s })),
 ])
 
+const originItems = computed(() => [
+  { label: t('findings.filters.all'), value: 'all' },
+  { label: t('external.origin.module'), value: 'module' },
+  { label: t('external.origin.external'), value: 'external' },
+])
 const categoryLabel = (c: string) => (te(`findings.categories.${c}`) ? t(`findings.categories.${c}`) : c)
 const location = (r: { path: string | null, start_line: number | null, package: Pkg | null }) =>
   r.package ? `${r.package.name}@${r.package.version ?? '?'}` : r.path ? `${r.path}${r.start_line ? `:${r.start_line}` : ''}` : '—'
@@ -232,6 +242,7 @@ const UBadge = resolveComponent('UBadge')
 const SeverityBadge = resolveComponent('FindingsSeverityBadge')
 const IntelBadges = resolveComponent('FindingsIntelBadges')
 const CorrelationBadge = resolveComponent('FindingsCorrelationBadge')
+const ExternalBadge = resolveComponent('FindingsExternalBadge')
 const columns = computed<TableColumn<FindingRow>[]>(() => [
   { accessorKey: 'severity', header: t('findings.columns.severity'), cell: ({ row }) => h(SeverityBadge, { severity: row.original.severity }) },
   {
@@ -247,7 +258,14 @@ const columns = computed<TableColumn<FindingRow>[]>(() => [
   },
   { id: 'intel', header: t('intel.epss'), cell: ({ row }) => h(IntelBadges, { epss: row.original.epss, epssPercentile: row.original.epss_percentile, kev: row.original.kev, kevAdded: row.original.kev_added }) },
   { accessorKey: 'project_name', header: t('findings.columns.project') },
-  { accessorKey: 'tool', header: t('findings.columns.tool'), cell: ({ row }) => h('span', { class: 'font-mono text-xs' }, row.original.tool) },
+  {
+    accessorKey: 'tool',
+    header: t('findings.columns.tool'),
+    cell: ({ row }) => h('div', { class: 'flex flex-wrap items-center gap-1' }, [
+      h('span', { class: 'font-mono text-xs' }, row.original.tool),
+      h(ExternalBadge, { origin: row.original.origin, source: row.original.external_source }),
+    ]),
+  },
   { id: 'location', header: t('findings.columns.location'), cell: ({ row }) => h('span', { class: 'font-mono text-xs break-all' }, location(row.original)) },
   {
     accessorKey: 'status',
@@ -454,6 +472,14 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
           class="w-48"
         />
       </UFormField>
+      <UFormField :label="t('external.origin.label')">
+        <USelect
+          v-model="filters.origin"
+          :items="originItems"
+          class="w-40"
+          data-testid="filter-origin"
+        />
+      </UFormField>
       <UFormField :label="t('findings.filters.tool')">
         <UInput
           v-model="filters.tool"
@@ -600,6 +626,10 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
               </dt>
               <dd class="font-mono text-xs break-all">
                 {{ detail.tool }} · {{ detail.rule_id }}
+                <FindingsExternalBadge
+                  :origin="detail.origin"
+                  :source="detail.external_source"
+                />
               </dd>
             </div>
             <div>
