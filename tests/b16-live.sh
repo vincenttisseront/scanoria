@@ -183,7 +183,7 @@ pgq() { # réseau
 		psql -h 10.90.0.1 -U mod_web -d mod_web -X -A -t -c "SELECT current_user" 2>&1
 }
 expect "PostgreSQL joignable depuis le réseau du module" "$(pgq scanoria-mod-web)" mod_web
-expect "PostgreSQL refusé depuis un autre réseau (pg_hba)" "$(pgq podman | grep -q 'no pg_hba.conf entry' && echo refusé)" refusé
+expect "PostgreSQL refusé depuis un autre réseau (pg_hba)" "$(out=$(pgq podman || true); [[ "$out" == *"no pg_hba.conf entry"* ]] && echo refusé)" refusé
 
 # === Sauvegarde et restauration =============================================
 echo "marqueur b16" > "$VOLDIR/marqueur.html"
