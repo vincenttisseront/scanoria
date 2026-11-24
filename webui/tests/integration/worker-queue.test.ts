@@ -327,6 +327,8 @@ describe.skipIf(!DATABASE_URL)('file d’analyses (PostgreSQL réel, faux runner
       expect(mods.map(m => [m.module_id, m.status, m.results_count, m.duration_ms, m.image_digest])).toEqual([
         ['gitleaks', 'ok', 3, 5000, DIGEST], ['trivy', 'ok', 3, 5000, DIGEST],
       ])
+      // F14, G20 : mesures du runner enregistrées (cpu_ms en bigint, rendu en texte par pg).
+      expect(mods.map(m => [m.peak_memory_mb, Number(m.cpu_ms)])).toEqual([[100, 2000], [100, 2000]])
       expect(mods[0].log_path).toBe(`${scanId}/gitleaks.log`)
       const log = join(cfg.scanLogsDir, scanId, 'gitleaks.log')
       const lh = await open(log, 'r')

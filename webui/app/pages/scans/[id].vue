@@ -298,7 +298,7 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
                   class="text-muted"
                 >{{ t('scans.results', { count: moduleRow(m.id)!.results_count }) }}</span>
                 <UButton
-                  v-if="moduleRow(m.id)!.has_log"
+                  v-if="moduleRow(m.id)!.has_log && canAct"
                   :to="`/api/scans/${scan.id}/modules/${m.id}/log`"
                   external
                   download

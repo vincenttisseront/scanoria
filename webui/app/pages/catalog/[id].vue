@@ -463,6 +463,14 @@ const testbedDetails = computed(() => {
         </div>
       </UCard>
 
+      <UsageModulePanel
+        v-if="inst"
+        :module-id="id"
+        :names="names"
+        :can-uninstall="isAdmin && !anyRunning"
+        @uninstall="uninstallModal = true"
+      />
+
       <UCard v-if="m">
         <template #header>
           <h2 class="font-semibold">
