@@ -24,6 +24,16 @@ Correctif : la console et le worker joignent de nouveau les forges.
   maintenant affichée : DNS (`E_FORGE_DNS`), adresse refusée
   (`E_FORGE_BLOCKED`) ou certificat (`E_FORGE_TLS`).
 - Un test de signature du catalogue pouvait échouer à tort une fois sur 256.
+- OSV-Scanner échouait à son banc d'essai (code 137) quand l'appliance avait
+  gardé en cache un ancien catalogue, où la mémoire allouée était trop
+  faible. L'installation d'un module actualise désormais d'abord le
+  catalogue s'il a plus d'une heure. Sans réseau, l'index en place sert. Un
+  banc d'essai tué avant son délai signale maintenant un manque de mémoire,
+  avec la limite appliquée.
+- Le catalogue n'était plus publié depuis le n° 3 : l'attente de la CI ne
+  reconnaissait pas un contrôle terminé que GitHub disait encore en cours.
+- Supprimer une analyse qui avait servi de source à une re-corrélation
+  échouait. La re-corrélation est maintenant supprimée avec sa source.
 
 ### Ajouté (avance de la 0.5, actif avec le connecteur IA)
 - **Résultats semblables** regroupés par embeddings dans un même projet. Le
