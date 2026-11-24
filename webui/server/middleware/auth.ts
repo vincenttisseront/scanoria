@@ -46,6 +46,9 @@ export default defineEventHandler(async (event) => {
     if (origin && !sameOrigin(origin, getRequestHost(event, { xForwardedHost: false }))) throw apiError(403, 'E_ORIGIN')
   }
 
+  // Jeton d'API de la CI ou route publique, déjà traités par api-token.ts (0.3, chantier E).
+  if (event.context.apiToken || event.context.gatesPublic) return
+
   const token = getCookie(event, SESSION_COOKIE)
   if (token) {
     const pool = getPool()
