@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CATEGORIES, SYSTEM_CATEGORY, ERROR_CLASSES, EXCEPTION_KINDS, FINDING_STATUSES, FORGE_KINDS, GateRules, SCAN_MODULE_STATUSES,
   SCAN_PRIORITY, SCAN_STATUSES, SCAN_TRIGGERS, SCHEDULES, SECRET_STATES, SEVERITIES, VERDICTS, VerdictDetails,
-  ExceptionTargets,
+  ExceptionTargets, AI_SUBJECT_TYPES,
 } from '#shared/analysis'
 import { enqueueAiTask } from '../../server/ai/enqueue'
 
@@ -29,6 +29,11 @@ describe('contrats des analyses', () => {
     ['module status', SCAN_MODULE_STATUSES], ['error_class', ERROR_CLASSES],
   ] as const)('énumération %s identique dans 003_analyses.sql', (_name, values) => {
     expect(SQL.replace(/\s+/g, ' ').replace(/\( /g, '(')).toContain(`IN (${quoted(values)})`)
+  })
+
+  it('sujets des tâches IA identiques à 006_modules_ia.sql', () => {
+    const sql006 = readFileSync(root('webui/server/db/migrations/006_modules_ia.sql'), 'utf8').replace(/\s+/g, ' ')
+    expect(sql006).toContain(`subject_type IN (${quoted(AI_SUBJECT_TYPES)})`)
   })
 
   it('catégories identiques au schéma des modules', () => {
