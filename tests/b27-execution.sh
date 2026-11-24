@@ -182,7 +182,9 @@ R=$(fetchrun "$M" "$G/s" "$G/g" "$URL" main "" shallow)
 C4=$(git -C "$G/forge/depot" rev-parse HEAD)
 tree=$(git --git-dir="$M" rev-parse "$C4^{tree}")
 git --git-dir="$M" repack -q -d -a 2> /dev/null || true
-find "$M/objects/pack" -name '*.pack' -exec sh -c 'chmod u+w "$1"; printf "XXXX" | dd of="$1" bs=1 seek=200 conv=notrunc status=none' _ {} \;
+# Paquets tronqués après leur en-tête : l'index annonce les objets, aucun n'est lisible
+# (indépendant de la version de git et de zlib).
+find "$M/objects/pack" -name '*.pack' -exec sh -c 'chmod u+w "$1"; truncate -s 64 "$1"' _ {} \;
 find "$M/objects" -path "*/${tree:0:2}/${tree:2}" -delete 2> /dev/null || true
 R=$(fetchrun "$M" "$G/s" "$G/g" "$URL" main "$C4" shallow)
 expect "miroir corrompu : code 74" "$(jq -r .rc <<< "$R")" 74

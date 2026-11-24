@@ -307,14 +307,14 @@ elif [ -z "$known" ] || [ -n "$shallow" ]; then
 fi
 fetch() {
   d=$depth; [ "$d" = --unshallow ] && [ ! -f /mirror/shallow ] && d=
-  if ! git fetch -q --no-tags --no-recurse-submodules --no-auto-gc $d "$url" "$1" 2>/tmp/fetch.err; then
-    cat /tmp/fetch.err >&2
-    if grep -qiE 'bad object|corrupt|unable to read [0-9a-f]{40}|missing (blob|tree|commit)|did not send all necessary|bad pack|packfile|unpack-objects failed|index-pack failed' /tmp/fetch.err; then
-      echo scanoria=corrupt; exit 74
-    fi
-    return 1
-  fi
+  rc=0
+  git fetch -q --no-tags --no-recurse-submodules --no-auto-gc $d "$url" "$1" 2>/tmp/fetch.err || rc=$?
   cat /tmp/fetch.err >&2
+  # Miroir abîmé, même si git a contourné l'erreur en récupérant à nouveau : recréé (code 74).
+  if grep -qiE 'bad object|corrupt|unable to read [0-9a-f]{40}|missing (blob|tree|commit)|did not send all necessary|bad pack|packfile|unpack-objects failed|index-pack failed' /tmp/fetch.err; then
+    echo scanoria=corrupt; exit 74
+  fi
+  [ "$rc" -eq 0 ]
 }
 commit=
 if [ -n "$want" ] && have "$want" && [ "$depth" != --unshallow ]; then
