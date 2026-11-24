@@ -726,15 +726,116 @@ def prune(mid, previous=None):
         names = os.listdir(sd)
     except OSError:
         return
-    keep = {active}
+    keep = {active} | leased_versions(mid)
     if previous and VERSION_DIR_RE.match(previous):
         keep.add(previous)
     for n in names:
-        if n == "status.json" or n in keep:
+        if n in ("status.json", ".leases") or n in keep:
             continue
         path = os.path.join(sd, n)
         if os.path.isdir(path) and not os.path.islink(path):
             shutil.rmtree(path, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------
+# Versions montées par une analyse (V7, contrat 22 de la 0.6)
+# --------------------------------------------------------------------------
+# Chaque analyse épingle, à son début, la version active de chaque base dont
+# ses modules ont besoin : tous ses modules montent ce même répertoire en
+# lecture seule (/feeds/<id>), et une bascule ou un nettoyage pendant
+# l'analyse ne le retire pas (prune garde les versions louées). Le bail est
+# rendu en fin d'analyse ; au démarrage du runner, tous les baux sont rendus
+# (aucune analyse ne survit à un redémarrage). Un bail plus vieux que
+# LEASE_MAX_AGE_S est ignoré (filet si un bail n'a pas été rendu).
+
+LEASE_MAX_AGE_S = 3 * 86400
+JOB_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z")
+
+
+def _lease_dir(mid):
+    return os.path.join(store_dir(mid), ".leases")
+
+
+def leased_versions(mid, now=None):
+    """Noms des versions louées par une analyse en cours."""
+    import time
+    now = now or time.time()
+    out = set()
+    try:
+        names = os.listdir(_lease_dir(mid))
+    except OSError:
+        return out
+    for n in names:
+        path = os.path.join(_lease_dir(mid), n)
+        try:
+            st = os.lstat(path)
+            if not stat.S_ISREG(st.st_mode) or now - st.st_mtime > LEASE_MAX_AGE_S:
+                continue
+            with open(path, encoding="ascii") as f:
+                v = f.read(100).strip()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if VERSION_DIR_RE.match(v) or v.startswith("legacy-"):
+            out.add(v)
+    return out
+
+
+def _version_time(name):
+    """Instant d'activation déduit du nom de version (AAAAMMJJTHHMMSSZ-…), ou None."""
+    m = re.match(r"([0-9]{4})([0-9]{2})([0-9]{2})T([0-9]{2})([0-9]{2})([0-9]{2})Z-", name or "")
+    return "%s-%s-%sT%s:%s:%sZ" % m.groups() if m else None
+
+
+def lease(mid, job_id):
+    """Épingle la version active de la base mid pour l'analyse job_id.
+
+    Retourne {path, version, updated_at} (répertoire réel de la version, à monter
+    en lecture seule), ou None si la base est vide."""
+    if not JOB_RE.match(job_id or ""):
+        raise Fail("E_INVALID_PARAM", "invalid job id")
+    for _ in range(3):
+        if not has_data(mid):
+            return None
+        lp = link_path(mid)
+        real = os.path.realpath(lp)
+        name = os.path.basename(real)
+        if os.path.islink(lp) and os.path.dirname(real) != os.path.realpath(store_dir(mid)):
+            raise Fail("E_FEED_UNAVAILABLE", "database %s points outside its store" % mid)
+        if not os.path.islink(lp):
+            # Base antérieure à la bascule par lien (0.2 à 0.3.3) : montée telle quelle.
+            return {"path": lp, "version": None, "updated_at": (read_status(mid) or {}).get("updated_at")}
+        os.makedirs(_lease_dir(mid), mode=0o700, exist_ok=True)
+        common.atomic_write(os.path.join(_lease_dir(mid), job_id), (name + "\n").encode("ascii"), 0o600,
+                            group_scanoria=False)
+        # Bascule et nettoyage entre la lecture du lien et le bail : on recommence.
+        if os.path.isdir(real):
+            st = read_status(mid) or {}
+            active = os.path.basename(os.path.realpath(lp)) == name
+            updated = st.get("updated_at") if active else _version_time(name)
+            return {"path": real, "version": name, "updated_at": updated or _version_time(name)}
+        release(mid, job_id)
+    raise Fail("E_FEED_UNAVAILABLE", "database %s changed during the analysis start" % mid)
+
+
+def release(mid, job_id):
+    if not JOB_RE.match(job_id or ""):
+        return
+    try:
+        os.unlink(os.path.join(_lease_dir(mid), job_id))
+    except OSError:
+        pass
+
+
+def release_all():
+    """Au démarrage du runner : aucun bail ne survit."""
+    try:
+        names = os.listdir(STORE)
+    except OSError:
+        return
+    for n in names:
+        d = os.path.join(STORE, n, ".leases")
+        if os.path.isdir(d) and not os.path.islink(d):
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def read_status(mid):

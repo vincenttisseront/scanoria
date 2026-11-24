@@ -60,7 +60,8 @@
             "backup-module",
             "restore-module",
             "reset-service-admin",
-            "package-dates"
+            "package-dates",
+            "prefetch-images"
           ]
         }
       ]
@@ -132,7 +133,9 @@
         "E_DTRACK_UNAVAILABLE",
         "E_DTRACK_ADMIN",
         "E_DTRACK_API",
-        "E_EXPORT_FAILED"
+        "E_EXPORT_FAILED",
+        "E_PREFETCH_FAILED",
+        "E_PREFETCH_UNKNOWN_IMAGE"
       ]
     },
     "message": {

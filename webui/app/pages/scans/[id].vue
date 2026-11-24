@@ -85,6 +85,15 @@ const modalBody = computed(() => (pending.value ? t(`scans.actions.${pending.val
 const planModules = computed(() => scan.value?.plan?.modules ?? [])
 const gaps = computed(() => scan.value?.coverage?.gaps ?? scan.value?.plan?.gaps ?? [])
 const source = computed(() => scan.value?.coverage?.source ?? null)
+// 0.6 (chantier C) : exclusions communes (G15), travail en mémoire (V9), miroir Git (V2).
+const excluded = computed(() => scan.value?.coverage?.excluded ?? [])
+const execNotes = computed(() => {
+  const s = source.value
+  const notes: string[] = []
+  if (s?.mirror && ['hit', 'fetched', 'created', 'ephemeral'].includes(s.mirror)) notes.push(t(`scans.coverage.mirror.${s.mirror}`))
+  if (s?.workdir === 'tmpfs' || s?.workdir === 'disk') notes.push(t(`scans.coverage.workdir.${s.workdir}`))
+  return notes
+})
 const verdictJson = computed(() => JSON.stringify(scan.value?.verdict_details ?? {}, null, 2))
 const duration = (ms: number | null) => (ms === null ? '—' : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`)
 const moduleRow = (moduleId: string) => scan.value?.modules.find(m => m.module_id === moduleId)
@@ -346,6 +355,30 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
         >
           {{ t('scans.coverage.source', { files: source.files, skipped: source.skipped.length }) }}
         </p>
+        <p
+          v-if="execNotes.length"
+          class="mb-2 text-sm text-muted"
+          data-testid="exec-notes"
+        >
+          {{ execNotes.join(' ') }}
+        </p>
+        <div
+          v-if="excluded.length"
+          class="mb-2 text-sm"
+          data-testid="exec-excluded"
+        >
+          <p class="font-medium">
+            {{ t('scans.coverage.excludedTitle') }}
+          </p>
+          <ul class="list-disc pl-5 text-muted">
+            <li
+              v-for="e in excluded"
+              :key="e.pattern"
+            >
+              {{ t('scans.coverage.excluded', { pattern: e.pattern, count: e.count }) }}
+            </li>
+          </ul>
+        </div>
         <ul
           v-if="gaps.length"
           class="list-disc space-y-1 pl-5 text-sm"

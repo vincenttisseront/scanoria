@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Vérifie chaque jour que les images des modules installés sont présentes
+# (empreinte épinglée) et récupère celles qui manquent (V1) : une analyse ne
+# tire jamais d'image.
+[Unit]
+Description=Scanoria module images prefetch
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/scanoria-helper exec --origin timer --type prefetch-images --params {}
+UMask=0022
+PrivateTmp=yes
+ProtectHome=read-only

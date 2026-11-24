@@ -1077,6 +1077,18 @@ export default {
       title: 'Coverage',
       source: '{files} file(s) scanned, {skipped} skipped.',
       none: 'No coverage gap.',
+      excludedTitle: 'Common exclusions, not analysed',
+      excluded: '{pattern}: {count} file(s)',
+      workdir: {
+        tmpfs: 'Sources extracted in memory.',
+        disk: 'Sources extracted on disk.',
+      },
+      mirror: {
+        hit: 'Commit already in the local Git mirror: the forge was not contacted.',
+        fetched: 'Local Git mirror updated: only new objects were fetched.',
+        created: 'Local Git mirror created by a first clone.',
+        ephemeral: 'Disposable clone, without a local mirror.',
+      },
     },
     gaps: {
       category: 'Category {category} not covered: {reason}.',

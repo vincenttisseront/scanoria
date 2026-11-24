@@ -100,6 +100,13 @@ export const scanResultSchema = z.strictObject({
       path: z.string().max(1024),
       reason: z.enum(['size', 'symlink', 'special', 'limit']),
     })).max(1000),
+    // 0.6 (chantier C, contrat 22) : exclusions communes (G15), répertoire de travail (V9), miroir Git (V2).
+    excluded: z.array(z.strictObject({
+      pattern: z.string().min(1).max(100),
+      count: z.number().int().min(1),
+    })).max(100).optional(),
+    workdir: z.enum(['tmpfs', 'disk']).optional(),
+    mirror: z.enum(['hit', 'fetched', 'created', 'ephemeral']).optional(),
   }),
   modules: z.array(z.strictObject({
     id: moduleId,

@@ -1077,6 +1077,18 @@ export default {
       title: 'Couverture',
       source: '{files} fichier(s) analysé(s), {skipped} ignoré(s).',
       none: 'Aucun trou de couverture.',
+      excludedTitle: 'Exclusions communes, non analysées',
+      excluded: '{pattern} : {count} fichier(s)',
+      workdir: {
+        tmpfs: 'Sources extraites en mémoire.',
+        disk: 'Sources extraites sur disque.',
+      },
+      mirror: {
+        hit: 'Commit déjà présent dans le miroir Git local : la forge n’a pas été contactée.',
+        fetched: 'Miroir Git local mis à jour : seuls les nouveaux objets ont été récupérés.',
+        created: 'Miroir Git local créé par un premier clone.',
+        ephemeral: 'Clone jetable, sans miroir local.',
+      },
     },
     gaps: {
       category: 'Catégorie {category} non couverte : {reason}.',
