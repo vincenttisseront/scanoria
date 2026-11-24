@@ -2,7 +2,9 @@
 // Copyright (C) 2026 Vincent Tisseront
 //
 // PATCH /api/projects/:id (operator) : nom, branches suivies, planification,
-// profil, gate, « aucun envoi à l'IA », jeton ou clé SSH, nouvelle archive.
+// profil, « aucun envoi à l'IA », jeton ou clé SSH, nouvelle archive. Changer
+// le quality gate est réservé à l'admin (un opérateur ne peut pas assouplir le
+// gate de son projet).
 
 import { defineEventHandler, getRouterParam } from 'h3'
 import { getPool } from '../../../utils/db'
@@ -17,6 +19,7 @@ export default defineEventHandler(async (event) => {
   const pool = getPool()
   const project = await requireProject(pool, getRouterParam(event, 'id'))
   const body = await readValidated(event, projectUpdateSchema)
+  if (body.gate_id && body.gate_id !== project.gate_id) requireRole(event, 'admin')
   const actor = { type: 'user' as const, userId: auth.user.id, username: auth.user.username, ip: clientAddress(event) }
   return { project: publicProject(await patchFromBody(pool, project, body, actor)) }
 })

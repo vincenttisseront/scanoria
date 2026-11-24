@@ -115,3 +115,12 @@ export function toRepo(raw: unknown): ForgeRepo | null {
     html_url: str(r.html_url),
   }
 }
+
+/**
+ * URL de clonage HTTPS d'un dépôt, reconstruite depuis l'URL de la forge et
+ * jamais reprise de la réponse de l'API : le jeton de la forge ne part ainsi
+ * que vers la forge elle-même.
+ */
+export function cloneUrlFor(baseUrl: string, fullName: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/${checkFullName(fullName)}.git`
+}

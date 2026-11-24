@@ -78,13 +78,23 @@ async function claimPoll(db: Queryable, projectId: string, now: Date): Promise<b
   return (res.rowCount ?? 0) > 0
 }
 
-async function pollOnCommit(db: Queryable, p: ProjectRow, now: Date, enqueue: EnqueueScan): Promise<{ enqueued: number, polled: boolean }> {
+async function pollOnCommit(db: Queryable, p: ProjectRow, now: Date, enqueue: EnqueueScan): Promise<{ enqueued: number, polled: boolean, failed: number }> {
   const access = await projectClient(db, p)
-  if (!access) return { enqueued: 0, polled: false }
-  if (!(await claimPoll(db, p.id, now))) return { enqueued: 0, polled: true }
+  if (!access) return { enqueued: 0, polled: false, failed: 0 }
+  if (!(await claimPoll(db, p.id, now))) return { enqueued: 0, polled: true, failed: 0 }
   let enqueued = 0
+  let failed = 0
   for (const branch of branchesOf(p)) {
-    const commit = await access.client.latestCommit(access.fullName, branch)
+    // Une branche supprimée sur la forge ne bloque pas les autres.
+    let commit: string
+    try {
+      commit = await access.client.latestCommit(access.fullName, branch)
+    }
+    catch (err) {
+      if (!(err instanceof ForgeError) || err.code !== 'E_FORGE_NOT_FOUND') throw err
+      failed++
+      continue
+    }
     if (branch === p.default_branch && commit !== p.last_commit) {
       await db.query(`UPDATE projects SET last_commit = $2 WHERE id = $1`, [p.id, commit])
     }
@@ -92,7 +102,7 @@ async function pollOnCommit(db: Queryable, p: ProjectRow, now: Date, enqueue: En
     await enqueue(db, { projectId: p.id, ref: branch, commit, trigger: 'commit' })
     enqueued++
   }
-  return { enqueued, polled: true }
+  return { enqueued, polled: true, failed }
 }
 
 async function runDaily(db: Queryable, p: ProjectRow, now: Date, enqueue: EnqueueScan): Promise<number> {
@@ -147,6 +157,7 @@ export async function runProjectSchedules(db: Queryable, now: Date, enqueue: Enq
         const r = await pollOnCommit(db, p, now, enqueue)
         if (r.polled) {
           result.enqueued += r.enqueued
+          result.errors += r.failed
           continue
         }
       }

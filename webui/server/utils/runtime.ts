@@ -60,7 +60,7 @@ export async function ingestNow(): Promise<void> {
     ticks += 1
     if (ticks % 720 === 1) {
       await purgeSessions(pool)
-      await purgeOldUploads(cfg.uploadsDir)
+      await purgeOldUploads(cfg.uploadsDir, await referencedUploads(pool))
     }
   }
   catch (err) {
@@ -71,8 +71,20 @@ export async function ingestNow(): Promise<void> {
   }
 }
 
-/** Les téléversements de plus de 24 h sont supprimés (le helper les a copiés). */
-async function purgeOldUploads(uploadsDir: string): Promise<void> {
+/** Archives encore utilisées : celle d'un projet, ou d'une analyse pas encore terminée. */
+async function referencedUploads(pool: ReturnType<typeof getPool>): Promise<Set<string>> {
+  const { rows } = await pool.query<{ id: string }>(
+    `SELECT upload_id::text AS id FROM projects WHERE upload_id IS NOT NULL
+     UNION SELECT upload_id::text FROM scans WHERE upload_id IS NOT NULL AND status IN ('queued', 'dispatched', 'running', 'ingesting')`,
+  )
+  return new Set(rows.map(r => r.id))
+}
+
+/**
+ * Les téléversements de plus de 24 h sont supprimés (le helper les a copiés),
+ * sauf l'archive source d'un projet ou d'une analyse en cours.
+ */
+async function purgeOldUploads(uploadsDir: string, keep: Set<string>): Promise<void> {
   let names: string[]
   try {
     names = await readdir(uploadsDir)
@@ -82,7 +94,7 @@ async function purgeOldUploads(uploadsDir: string): Promise<void> {
   }
   const limit = Date.now() - 24 * 3600_000
   for (const name of names) {
-    if (!UUID_V4_RE.test(name)) continue
+    if (!UUID_V4_RE.test(name) || keep.has(name.toLowerCase())) continue
     const path = join(uploadsDir, name)
     try {
       const st = await stat(path)

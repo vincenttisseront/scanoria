@@ -49,6 +49,7 @@ onMounted(load)
 
 const project = computed(() => detail.value?.project ?? null)
 const canEdit = computed(() => session.can('operator') && !!project.value && !project.value.archived_at)
+const isAdmin = computed(() => canEdit.value && session.can('admin'))
 const scheduleItems = computed(() => (['on-commit', 'daily', 'none'] as const).map(s => ({ label: label('schedule', s), value: s })))
 const profileItems = computed(() => detail.value?.choices.profiles.map(p => ({ label: p.slug, value: p.id })) ?? [])
 const gateItems = computed(() => detail.value?.choices.gates.map(g => ({ label: g.slug, value: g.id })) ?? [])
@@ -70,7 +71,8 @@ async function save() {
     const res = await api<{ project: Project }>(`/api/projects/${id.value}`, {
       method: 'PATCH',
       body: {
-        name: form.name.trim(), schedule: form.schedule, profile_id: form.profile_id, gate_id: form.gate_id,
+        name: form.name.trim(), schedule: form.schedule, profile_id: form.profile_id,
+        ...(form.gate_id !== detail.value?.project.gate_id ? { gate_id: form.gate_id } : {}),
         ai_opt_out: form.ai_opt_out, ...(branches.length ? { tracked_branches: branches } : {}),
       },
     })
@@ -318,7 +320,7 @@ async function remove() {
               v-model="form.gate_id"
               :items="gateItems"
               class="w-full"
-              :disabled="!canEdit"
+              :disabled="!isAdmin"
             />
           </UFormField>
           <USwitch

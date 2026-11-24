@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { ForgeError, normalizeBaseUrl } from '../../server/forges/http'
-import { checkFullName, checkPath, isSafeRef } from '../../server/forges/types'
+import { checkFullName, checkPath, cloneUrlFor, isSafeRef } from '../../server/forges/types'
 import { githubApiBase } from '../../server/forges/github'
 import { GitUrlError, fullNameFromPath, parseGitUrl } from '../../server/projects/git-url'
 import { fingerprint, hostPattern, parseKnownHosts, scanHostKeys, setKeyscan } from '../../server/projects/ssh'
@@ -29,6 +29,7 @@ describe('URL de forge', () => {
     'https://user:pass@forge.exemple.test', 'https://jeton@forge.exemple.test', 'https://forge.exemple.test/?a=1',
     'https://forge.exemple.test/#x', 'https://localhost', 'https://a.localhost', 'https://127.0.0.1',
     'https://127.1.2.3:8443', 'https://[::1]', 'https://0.0.0.0', 'https://169.254.169.254', 'https://[fe80::1]',
+    'https://localhost./', 'https://a.localhost..', 'https://[::ffff:127.0.0.1]/', 'https://[::ffff:169.254.169.254]',
     'pas une url', `https://forge.exemple.test/${'a'.repeat(600)}`,
   ])('refuse %s', (url) => {
     expect(() => normalizeBaseUrl(url)).toThrow(ForgeError)
@@ -67,6 +68,12 @@ describe('URL Git libre', () => {
     expect(parseGitUrl('git@git.exemple.test:equipe/depot.git')).toMatchObject({ kind: 'ssh', host: 'git.exemple.test', port: 22, path: 'equipe/depot.git' })
     expect(fullNameFromPath('equipe/depot.git')).toBe('equipe/depot')
     expect(fullNameFromPath('depot')).toBeNull()
+    expect(parseGitUrl('https://github.com/exemple/scanoria.git')).toMatchObject({ host: 'github.com', path: 'exemple/scanoria.git' })
+  })
+
+  it('URL de clonage d’une forge : reconstruite depuis son adresse, jamais reprise de l’API', () => {
+    expect(cloneUrlFor('https://forge.exemple.test/git/', 'equipe/depot')).toBe('https://forge.exemple.test/git/equipe/depot.git')
+    expect(() => cloneUrlFor('https://forge.exemple.test', '../x')).toThrow(ForgeError)
   })
 
   it.each([
@@ -74,7 +81,8 @@ describe('URL Git libre', () => {
     'https://jeton@git.exemple.test/a/b', 'https://u:p@git.exemple.test/a/b', 'https://127.0.0.1/a/b', 'https://localhost/a/b',
     'ssh://git@127.0.0.1/a/b', 'git@localhost:a/b', '-oProxyCommand=id', 'git@git.exemple.test:-oProxyCommand=id',
     'ssh://-oProxyCommand=id@h/a', 'git@git.exemple.test::a', 'https://git.exemple.test/a/../b', 'https://git.exemple.test/a b',
-    'ssh://git@git.exemple.test:99999/a', 'git@-h:a/b',
+    'ssh://git@git.exemple.test:99999/a', 'git@-h:a/b', 'https://git.exemple.test/%E0%A4%A',
+    'https://github.com/exemple/scanoria/tree/v0.1.0', 'git@github.com:exemple/scanoria/x', 'https://github.com/exemple',
   ])('refuse %s', (url) => {
     expect(() => parseGitUrl(url)).toThrow(GitUrlError)
   })

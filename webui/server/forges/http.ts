@@ -37,7 +37,15 @@ const LOOPBACK_HOST_RE = /^(localhost|.+\.localhost|localhost\.localdomain|ip6-l
 
 /** Adresse littérale à refuser : bouclage, non spécifiée, lien local. */
 function forbiddenAddress(host: string): boolean {
-  const h = host.replace(/^\[|\]$/g, '').toLowerCase()
+  let h = host.replace(/^\[|\]$/g, '').replace(/\.+$/, '').toLowerCase()
+  // IPv4 mappée en IPv6 sous forme hexadécimale (::ffff:7f00:1, que produit
+  // la normalisation de l'URL) : ramenée à la forme pointée.
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(h)
+  if (mapped) {
+    const hi = parseInt(mapped[1]!, 16)
+    const lo = parseInt(mapped[2]!, 16)
+    h = `::ffff:${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`
+  }
   if (/^127\./.test(h) || /^0\./.test(h) || h === '0.0.0.0' || /^169\.254\./.test(h)) return true
   if (h === '::' || h === '::1' || /^fe[89ab][0-9a-f]:/.test(h) || /^::ffff:(127|0|169\.254)\./.test(h)) return true
   return false
@@ -57,7 +65,7 @@ export function normalizeBaseUrl(raw: string): string {
     throw new ForgeError('E_FORGE_URL')
   }
   if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash || raw.includes('@')) throw new ForgeError('E_FORGE_URL')
-  if (!u.hostname || LOOPBACK_HOST_RE.test(u.hostname) || forbiddenAddress(u.hostname)) throw new ForgeError('E_FORGE_URL')
+  if (!u.hostname || LOOPBACK_HOST_RE.test(u.hostname.replace(/\.+$/, '')) || forbiddenAddress(u.hostname)) throw new ForgeError('E_FORGE_URL')
   if (raw.length > 512) throw new ForgeError('E_FORGE_URL')
   const path = u.pathname.replace(/\/+$/, '')
   if (path.split('/').some(s => s === '..' || s === '.')) throw new ForgeError('E_FORGE_URL')

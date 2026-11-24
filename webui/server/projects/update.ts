@@ -88,6 +88,10 @@ export async function patchFromBody(db: Queryable, project: ProjectRow, body: Bo
   if (body.upload_id) {
     if (project.source_kind !== 'archive') throw projectError(400, 'E_UPLOAD_MISSING')
     if (!(await uploadReady(body.upload_id))) throw projectError(422, 'E_UPLOAD_MISSING')
+    // Une archive n'appartient qu'à un projet : sinon on lirait (ou effacerait)
+    // les sources d'un autre.
+    const used = await db.query(`SELECT 1 FROM projects WHERE upload_id = $1 AND id <> $2`, [body.upload_id, project.id])
+    if (used.rowCount) throw projectError(422, 'E_UPLOAD_MISSING')
     set('upload_id', body.upload_id)
   }
 

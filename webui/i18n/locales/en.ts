@@ -694,6 +694,7 @@ export default {
       E_GIT_URL: 'Git address refused: only HTTPS URLs without credentials and SSH URLs are accepted, never to the appliance itself.',
       E_KNOWN_HOSTS: 'SSH host keys missing or invalid: scan them and confirm the fingerprints.',
       E_SSH_KEYSCAN: 'The SSH server does not answer or gives no host key.',
+      E_PROJECT_DISCOVERED: 'This repository is discovered automatically from its forge and would come back: archive the project, or turn off discovery on the forge first.',
       E_UPLOAD_MISSING: 'Archive not found or already used: upload it again.',
       E_ARCHIVE_FORMAT: 'Unrecognised archive format (zip, tar or tar.gz expected).',
       E_CONFIRM: 'The confirmation does not match.',

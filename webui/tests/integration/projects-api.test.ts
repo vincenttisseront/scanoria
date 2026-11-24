@@ -332,6 +332,12 @@ describe.skipIf(!DATABASE_URL)('API des forges et des projets', () => {
     const patched = await call(`/api/projects/${id}`, { method: 'PATCH', client: operator, json: { upload_id: up2.data.upload_id } })
     expect(patched.data.project).toMatchObject({ upload_id: up2.data.upload_id })
     await expect(stat(join(root, 'uploads', uploadId))).rejects.toThrow()
+    // L'archive d'un autre projet ne peut pas être reprise (ni donc effacée).
+    const up3 = await call('/api/projects/uploads', { method: 'PUT', client: operator, body: tgz })
+    const other = await call('/api/projects', { method: 'POST', client: operator, json: { source: 'archive', upload_id: up3.data.upload_id, name: 'Autre livraison' } })
+    const steal = await call(`/api/projects/${(other.data.project as { id: string }).id}`, { method: 'PATCH', client: operator, json: { upload_id: up2.data.upload_id } })
+    expect([steal.status, code(steal)]).toEqual([422, 'E_UPLOAD_MISSING'])
+    expect((await stat(join(root, 'uploads', up2.data.upload_id as string))).isDirectory()).toBe(true)
   })
 
   it('modification, archivage, suppression confirmée (admin), audit sans secret', async () => {
@@ -341,6 +347,15 @@ describe.skipIf(!DATABASE_URL)('API des forges et des projets', () => {
     expect((await call(`/api/projects/${id}`, { method: 'PATCH', client: viewer, json: { schedule: 'daily' } })).status).toBe(403)
     const patched = await call(`/api/projects/${id}`, { method: 'PATCH', client: operator, json: { schedule: 'daily', profile_id: rapide.id, ai_opt_out: true, name: 'API' } })
     expect(patched.data.project).toMatchObject({ schedule: 'daily', profile_slug: 'rapide', ai_opt_out: true, name: 'API' })
+    // Le quality gate ne change que par un admin.
+    const gates = ((await call(`/api/projects/${id}`, { client: viewer })).data.choices as { gates: { id: string }[] }).gates
+    const otherGate = gates.find(g => g.id !== apiProject.gate_id)
+    if (otherGate) {
+      expect((await call(`/api/projects/${id}`, { method: 'PATCH', client: operator, json: { gate_id: otherGate.id } })).status).toBe(403)
+      expect((await call(`/api/projects/${id}`, { method: 'PATCH', client: admin, json: { gate_id: otherGate.id } })).status).toBe(200)
+      expect((await call(`/api/projects/${id}`, { method: 'PATCH', client: admin, json: { gate_id: apiProject.gate_id } })).status).toBe(200)
+    }
+    expect((await call(`/api/projects/${id}`, { method: 'PATCH', client: operator, json: { gate_id: apiProject.gate_id } })).status).toBe(200)
     const badProfile = await call(`/api/projects/${id}`, { method: 'PATCH', client: operator, json: { profile_id: '00000000-0000-4000-8000-000000000000' } })
     expect(badProfile.status).toBe(400)
     // Le jeton partagé avec la forge n'est pas modifié depuis un projet : un secret propre est créé.
@@ -360,6 +375,11 @@ describe.skipIf(!DATABASE_URL)('API des forges et des projets', () => {
     expect((await call(`/api/projects/${id}`, { method: 'DELETE', client: operator, json: { confirm: 'equipe-api' } })).status).toBe(403)
     const wrong = await call(`/api/projects/${id}`, { method: 'DELETE', client: admin, json: { confirm: 'autre' } })
     expect([wrong.status, code(wrong)]).toEqual([400, 'E_CONFIRM'])
+    // Découverte active : le dépôt reviendrait, la suppression est refusée.
+    await call(`/api/forges/${forgeId}`, { method: 'PATCH', client: admin, json: { discovery: true } })
+    const discovered = await call(`/api/projects/${id}`, { method: 'DELETE', client: admin, json: { confirm: 'equipe-api' } })
+    expect([discovered.status, code(discovered)]).toEqual([409, 'E_PROJECT_DISCOVERED'])
+    await call(`/api/forges/${forgeId}`, { method: 'PATCH', client: admin, json: { discovery: false } })
     const deleted = await call(`/api/projects/${id}`, { method: 'DELETE', client: admin, json: { confirm: 'equipe-api' } })
     expect(deleted.status).toBe(200)
     expect((await call(`/api/projects/${id}`, { client: viewer })).status).toBe(404)

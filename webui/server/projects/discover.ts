@@ -11,6 +11,7 @@ import type { Queryable } from '../utils/db'
 import { writeAudit } from '../utils/audit'
 import { ForgeError } from '../forges/http'
 import { getForge, openForge, type ForgeRepo, type ForgeRow } from '../forges'
+import { cloneUrlFor } from '../forges/types'
 import { ProjectExistsError, createProject } from './service'
 
 export interface DiscoveryResult {
@@ -44,7 +45,7 @@ export async function discoverForge(db: Queryable, forge: ForgeRow, actor: { use
           sourceKind: 'git',
           forgeId: forge.id,
           repoFullName: repo.full_name,
-          repoUrl: repo.clone_url,
+          repoUrl: cloneUrlFor(forge.base_url, repo.full_name),
           credentialId: forge.credential_id,
           defaultBranch: repo.default_branch,
           schedule: 'on-commit',

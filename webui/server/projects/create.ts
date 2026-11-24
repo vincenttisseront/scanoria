@@ -10,6 +10,7 @@ import type { Queryable } from '../utils/db'
 import { writeAudit, type AuditActor } from '../utils/audit'
 import { encryptSecret } from '../utils/secrets'
 import { forgeClient, getForge, openForge } from '../forges'
+import { cloneUrlFor } from '../forges/types'
 import { mapProjectError, projectError } from './errors'
 import { fullNameFromPath, parseGitUrl } from './git-url'
 import { parseKnownHosts } from './ssh'
@@ -52,7 +53,7 @@ export async function createFromBody(db: Queryable, body: ProjectCreateBody, act
       if (!forge) throw projectError(422, 'E_FORGE_NOT_FOUND')
       const client = await openForge(db, forge)
       const repo = await client.repo(body.repo)
-      if (await existing(db, { forgeId: forge.id, fullName: repo.full_name, url: repo.clone_url })) throw new ProjectExistsError()
+      if (await existing(db, { forgeId: forge.id, fullName: repo.full_name, url: cloneUrlFor(forge.base_url, repo.full_name) })) throw new ProjectExistsError()
       const ref = repo.default_branch
       const detection = ref ? await detect(client, repo.full_name, ref) : null
       project = await createProject(db, {
@@ -60,7 +61,7 @@ export async function createFromBody(db: Queryable, body: ProjectCreateBody, act
         sourceKind: 'git',
         forgeId: forge.id,
         repoFullName: repo.full_name,
-        repoUrl: repo.clone_url,
+        repoUrl: cloneUrlFor(forge.base_url, repo.full_name),
         credentialId: forge.credential_id,
         defaultBranch: ref,
         trackedBranches: body.tracked_branches ?? (ref ? [ref] : []),

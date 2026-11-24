@@ -268,9 +268,17 @@ describe.skipIf(!DATABASE_URL)('forges et projets (PostgreSQL, faux serveurs)', 
       const r4 = await runProjectSchedules(db.pool, new Date(t0.getTime() + 600_000), enqueue)
       expect(r4.enqueued).toBe(1)
       expect(calls.at(-1)).toMatchObject({ ref: 'main', commit: forgejo.repos[0]!.branches!.main, trigger: 'commit' })
+      // Branche suivie supprimée sur la forge : erreur comptée, main reste analysée.
+      const release = forgejo.repos[0]!.branches!['release/1.0']!
+      delete forgejo.repos[0]!.branches!['release/1.0']
+      forgejo.repos[0]!.branches!.main = fakeSha()
+      const r45 = await runProjectSchedules(db.pool, new Date(t0.getTime() + 900_000), enqueue)
+      expect(r45).toMatchObject({ enqueued: 1, errors: 1 })
+      expect(calls.at(-1)).toMatchObject({ ref: 'main', commit: forgejo.repos[0]!.branches!.main })
+      forgejo.repos[0]!.branches!['release/1.0'] = release
       // Forge en panne : erreur comptée, le cycle continue.
       forgejo.faults.set('/api/v1/repos/equipe/app/branches', 'server')
-      const r5 = await runProjectSchedules(db.pool, new Date(t0.getTime() + 900_000), enqueue)
+      const r5 = await runProjectSchedules(db.pool, new Date(t0.getTime() + 1_200_000), enqueue)
       expect(r5).toMatchObject({ enqueued: 0, errors: 1 })
     })
 

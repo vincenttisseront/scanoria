@@ -11,7 +11,7 @@ import { SecretError } from '../utils/secrets'
 import { GitUrlError } from './git-url'
 
 export const PROJECT_ERROR_CODES = [
-  'E_PROJECT_EXISTS', 'E_FORGE_NAME_TAKEN', 'E_GIT_URL', 'E_KNOWN_HOSTS', 'E_SSH_KEYSCAN', 'E_UPLOAD_MISSING',
+  'E_PROJECT_EXISTS', 'E_FORGE_NAME_TAKEN', 'E_GIT_URL', 'E_KNOWN_HOSTS', 'E_SSH_KEYSCAN', 'E_UPLOAD_MISSING', 'E_PROJECT_DISCOVERED',
   'E_ARCHIVE_FORMAT', 'E_CONFIRM', 'E_ARCHIVED', 'E_NO_FORGE_ACCESS', 'E_SECRET', 'E_FORGE_IN_USE',
 ] as const
 export type ProjectErrorCode = (typeof PROJECT_ERROR_CODES)[number] | ForgeErrorCode

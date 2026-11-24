@@ -694,6 +694,7 @@ export default {
       E_GIT_URL: 'Adresse Git refusée : seules les URL HTTPS sans identifiants et les URL SSH sont acceptées, jamais vers l’appliance elle-même.',
       E_KNOWN_HOSTS: 'Clés d’hôte SSH absentes ou invalides : relevez-les et confirmez les empreintes.',
       E_SSH_KEYSCAN: 'Le serveur SSH ne répond pas ou ne donne aucune clé d’hôte.',
+      E_PROJECT_DISCOVERED: 'Ce dépôt est découvert automatiquement depuis sa forge et reviendrait : archivez le projet, ou désactivez d’abord la découverte de la forge.',
       E_UPLOAD_MISSING: 'Archive introuvable ou déjà utilisée : téléversez-la à nouveau.',
       E_ARCHIVE_FORMAT: 'Format d’archive non reconnu (zip, tar ou tar.gz attendu).',
       E_CONFIRM: 'La confirmation ne correspond pas.',
