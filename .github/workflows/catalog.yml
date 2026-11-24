@@ -149,27 +149,16 @@ jobs:
     timeout-minutes: 180
     permissions:
       checks: read
+      contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
       - name: Attente de ci-ok réussi sur ce commit
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          end=$(( $(date +%s) + 170 * 60 ))
-          while :; do
-            state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=ci-ok&filter=latest" \
-              --jq '(.check_runs | sort_by(.started_at) | last) // {} | "\(.status // "absent")/\(.conclusion // "none")"')
-            case "$state" in
-              completed/success)
-                echo "ci-ok réussi sur $GITHUB_SHA"; exit 0 ;;
-              completed/*)
-                echo "::error::ci-ok en échec sur $GITHUB_SHA ($state) : aucune publication"; exit 1 ;;
-            esac
-            if [ "$(date +%s)" -ge "$end" ]; then
-              echo "::error::ci-ok toujours absent ou en cours sur $GITHUB_SHA ($state)"; exit 1
-            fi
-            echo "ci-ok : $state, nouvelle lecture dans 60 s"
-            sleep 60
-          done
+        run: .github/scripts/wait-ci-ok.sh 170
 
   sign:
     name: signature de l'index
