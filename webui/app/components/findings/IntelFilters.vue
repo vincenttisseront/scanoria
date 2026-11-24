@@ -32,7 +32,7 @@ onMounted(async () => {
   }
 })
 const imported = computed(() => (feeds.value ?? []).filter(f => f.imported_at))
-const oldest = computed(() => imported.value.map(f => f.source_updated_at ?? f.imported_at!).sort()[0] ?? null)
+const oldest = computed(() => imported.value.map(f => f.source_updated_at ?? f.imported_at!).sort((a, b) => a.localeCompare(b))[0] ?? null)
 </script>
 
 <template>

@@ -41,8 +41,14 @@ const PURL_TYPE: Record<string, string> = {
 const MASKED_SNIPPET_RE = /^\[secret masqué : [^\]]*\]$/
 
 /** Avis canonique : CVE (le plus petit, trié), sinon GHSA, sinon le premier avis trié ; en majuscules. */
+/** Ordre des points de code, indépendant de la locale : la clé reste stable d'une machine à l'autre. */
+export function byCodePoint(a: string, b: string): number {
+  if (a === b) return 0
+  return a < b ? -1 : 1
+}
+
 export function canonicalVulnId(ids: readonly string[] | null | undefined): string | null {
-  const list = [...new Set((ids ?? []).filter(i => typeof i === 'string' && i.length > 0).map(i => i.toUpperCase()))].sort()
+  const list = [...new Set((ids ?? []).filter(i => typeof i === 'string' && i.length > 0).map(i => i.toUpperCase()))].sort(byCodePoint)
   return list.find(i => i.startsWith('CVE-')) ?? list.find(i => i.startsWith('GHSA-')) ?? list[0] ?? null
 }
 
