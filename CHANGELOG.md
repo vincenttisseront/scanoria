@@ -10,7 +10,28 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.3.1 — non publiée
+## 0.3.2 — non publiée
+
+Correctifs constatés sur une appliance de test.
+
+### Corrigé
+- **Catalogue vide** : les répertoires du catalogue et des modules étaient
+  créés en `root:root`, donc illisibles par la console. La console refusait
+  aussi les descriptions bilingues des manifestes et écartait ainsi tous les
+  modules.
+- **Interface** : indicateurs d'attente et rafraîchissement de l'affichage à
+  la fin de chaque action envoyée au service système, sans recharger la
+  page. L'état est publié avant le résultat de la demande.
+- **Mises à jour** : les services ajoutés par une version (worker, runner,
+  IA) sont activés avant le contrôle de santé. Avant, la santé échouait et la
+  mise à jour revenait en arrière (`E_HEALTH_ROLLED_BACK`).
+
+### À savoir avant de mettre à jour
+- Une appliance 0.1 ou 0.2 ne peut pas passer seule à une 0.3.x : c'est son
+  propre code qui extrait le lot et active les services. La réinstaller depuis
+  l'ISO 0.3.2.
+
+## 0.3.1 — 2026-11-24
 
 Correctif de la 0.3.0, qui n'a pas reçu ce commit à temps.
 
