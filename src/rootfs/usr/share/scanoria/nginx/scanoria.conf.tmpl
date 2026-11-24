@@ -105,6 +105,20 @@ server {
 		proxy_pass http://127.0.0.1:3000;
 	}
 
+	# Lots hors ligne (0.6) : téléversement (images des modules, 64 Gio au plus)
+	# et téléchargement, en flux, sans tampon disque.
+	location ^~ /api/system/offline/uploads {
+		client_max_body_size 64g;
+		proxy_request_buffering off;
+		proxy_read_timeout 3600s;
+		proxy_pass http://127.0.0.1:3000;
+	}
+	location ^~ /api/system/offline/bundles/ {
+		proxy_buffering off;
+		proxy_read_timeout 3600s;
+		proxy_pass http://127.0.0.1:3000;
+	}
+
 	location / {
 		proxy_pass http://127.0.0.1:3000;
 	}

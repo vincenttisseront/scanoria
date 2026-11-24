@@ -60,7 +60,11 @@
             "backup-module",
             "restore-module",
             "reset-service-admin",
-            "package-dates"
+            "package-dates",
+            "export-bundle",
+            "import-bundle",
+            "set-mirror",
+            "trust-key"
           ]
         }
       ]
@@ -132,7 +136,22 @@
         "E_DTRACK_UNAVAILABLE",
         "E_DTRACK_ADMIN",
         "E_DTRACK_API",
-        "E_EXPORT_FAILED"
+        "E_EXPORT_FAILED",
+        "E_BUNDLE_INVALID",
+        "E_BUNDLE_SIGNATURE",
+        "E_BUNDLE_UNTRUSTED",
+        "E_BUNDLE_CHECKSUM",
+        "E_BUNDLE_ARCHIVE",
+        "E_BUNDLE_IMAGE",
+        "E_BUNDLE_FEED",
+        "E_BUNDLE_SOURCE",
+        "E_MIRROR_URL",
+        "E_MIRROR_UNRESOLVED",
+        "E_MIRROR_FORBIDDEN_ADDRESS",
+        "E_MIRROR_CA",
+        "E_MIRROR_UNTRUSTED",
+        "E_MIRROR_UNREACHABLE",
+        "E_KEY_INVALID"
       ]
     },
     "message": {

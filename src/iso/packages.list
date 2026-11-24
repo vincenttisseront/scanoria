@@ -8,6 +8,7 @@ postgresql-16
 postgresql-client-16
 nginx
 podman
+skopeo
 uidmap
 slirp4netns
 catatonit

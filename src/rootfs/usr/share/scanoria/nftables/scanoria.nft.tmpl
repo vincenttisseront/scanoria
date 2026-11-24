@@ -40,5 +40,8 @@ table inet scanoria {
 		# Modules permanents vers PostgreSQL (pool de services-network.conf) ;
 		# pg_hba n'accepte que le sous-réseau propre à chaque module.
 		iifname "podman*" ip saddr 10.90.0.0/16 tcp dport 5432 accept
+		# Bases de vulnérabilités servies par l'appliance aux modules permanents
+		# (Dependency-Track hors ligne, 0.6) : nginx, port 9790, lecture seule.
+		iifname "podman*" ip saddr 10.90.0.0/16 tcp dport 9790 accept
 	}
 }

@@ -123,3 +123,16 @@ export type ExceptionKind = (typeof EXCEPTION_KINDS)[number]
 /** Sujets d'une tâche IA (ai_tasks.subject_type, migration 006). */
 export const AI_SUBJECT_TYPES = ['finding', 'scan', 'testbed', 'rule', 'module', 'license', 'appliance'] as const
 export type AiSubjectType = (typeof AI_SUBJECT_TYPES)[number]
+
+/**
+ * G16 et § 9 (0.6, chantier A) : âge, en jours, au-delà duquel une base de
+ * vulnérabilités est signalée (console, verdict) quand le gate ne fixe pas
+ * feed_max_age_days (null = seulement signaler).
+ */
+export const FEED_ALERT_DAYS = 7
+
+/** Âge en jours entiers d'une base, ou null si sa date est absente ou illisible. */
+export function feedAgeDays(updatedAt: string | null | undefined, now: number = Date.now()): number | null {
+  const t = updatedAt ? Date.parse(updatedAt) : Number.NaN
+  return Number.isFinite(t) ? Math.max(0, Math.floor((now - t) / 86_400_000)) : null
+}

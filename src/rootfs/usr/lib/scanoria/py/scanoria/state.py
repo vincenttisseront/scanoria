@@ -160,6 +160,11 @@ def modules_usage():
         return []
 
 
+def appliance_key():
+    from . import offline
+    return offline.appliance_key_info()
+
+
 def build():
     return {
         "version": 1,
@@ -173,6 +178,7 @@ def build():
         "disks": disks(),
         "selftest": selftest(),
         "modules_usage": modules_usage(),
+        "appliance_key": appliance_key(),
     }
 
 

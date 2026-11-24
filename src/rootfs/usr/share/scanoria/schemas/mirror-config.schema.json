@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scanoria:schema:mirror-config:1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront.",
+  "title": "Appliance miroir déclarée (/etc/scanoria/mirror.json)",
+  "description": "Écrit par la demande set-mirror : adresse, adresses épinglées à la résolution, empreinte de la clé attendue. F17.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "enabled",
+    "url",
+    "host",
+    "port",
+    "addresses",
+    "literal",
+    "fingerprint",
+    "ca",
+    "pinned_at"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "enabled": {
+      "const": true
+    },
+    "url": {
+      "type": "string",
+      "minLength": 12,
+      "maxLength": 300,
+      "pattern": "^https://"
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "addresses": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "maxLength": 45,
+        "pattern": "^[0-9a-f.:]+$"
+      }
+    },
+    "literal": {
+      "type": "boolean"
+    },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ca": {
+      "type": "boolean"
+    },
+    "pinned_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    }
+  }
+}

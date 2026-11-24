@@ -33,7 +33,13 @@ ID_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?\Z", re.ASCII)
 LABEL_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\Z", re.ASCII)
 SITE_RE = re.compile(r"module-([a-z0-9][a-z0-9-]{0,63})\.conf\Z", re.ASCII)
 CATCHALL = "00-catchall.conf"
-MARK_RE = re.compile(r"# scanoria-route: id=(\S+) mode=(proxy|unavailable|catchall) host=(\S+) "
+# Sites de l'appliance elle-même (0.6, chantier A) : miroir F17 et bases servies
+# aux modules permanents. Libellés réservés, jamais attribués à un module.
+MIRROR_SITE = "10-mirror.conf"
+FEEDS_SITE = "10-feeds-mirror.conf"
+EXTRA_SITES = (MIRROR_SITE, FEEDS_SITE)
+RESERVED_LABELS = frozenset(("mirror", "feeds"))
+MARK_RE = re.compile(r"# scanoria-route: id=(\S+) mode=(proxy|unavailable|catchall|static) host=(\S+) "
                      r"port=(\S+) fqdn=(\S+)$", re.ASCII | re.MULTILINE)
 # Ports de la console et des services système, jamais attribués à un module.
 RESERVED_PORTS = frozenset((3000, 5432))
@@ -64,7 +70,7 @@ def validate(fqdn, services):
         sid, label, port, enabled = s["id"], s["hostname"], s["port"], s["enabled"]
         if not isinstance(sid, str) or not ID_RE.match(sid):
             raise Fail("E_INVALID_PARAM", "invalid module id")
-        if not isinstance(label, str) or not LABEL_RE.match(label):
+        if not isinstance(label, str) or not LABEL_RE.match(label) or label in RESERVED_LABELS:
             raise Fail("E_INVALID_PARAM", "invalid hostname label for %s" % sid)
         if len(label) + 1 + len(fqdn) > 253:
             raise Fail("E_INVALID_PARAM", "name too long for %s" % sid)
@@ -108,7 +114,19 @@ def render(fqdn, services):
         tmpl = "proxy.conf.tmpl" if s["enabled"] else "unavailable.conf.tmpl"
         files["module-%s.conf" % s["id"]] = _render(
             tmpl, fqdn, tls, s["id"], "%s.%s" % (s["hostname"], fqdn), str(s["port"]))
+    files.update(extra_sites(fqdn, tls))
     return files
+
+
+def extra_sites(fqdn, tls):
+    """Miroir F17 (dès qu'un lot est publié) et bases servies aux modules (Dependency-Track installé)."""
+    from . import dtmirror, mirror
+    out = {}
+    if mirror.published():
+        out[MIRROR_SITE] = _render("mirror.conf.tmpl", fqdn, tls, host="mirror.%s" % fqdn)
+    if dtmirror.dt_installed():
+        out[FEEDS_SITE] = _render("feeds-mirror.conf.tmpl", fqdn, tls, port=str(dtmirror.PORT))
+    return out
 
 
 def _sites_dir():
@@ -120,7 +138,7 @@ def _sites_dir():
 
 
 def _managed(name):
-    return name == CATCHALL or SITE_RE.match(name) is not None
+    return name == CATCHALL or name in EXTRA_SITES or SITE_RE.match(name) is not None
 
 
 def _snapshot():
@@ -319,6 +337,9 @@ def sites_status():
             problems.append("%s: not a generated site" % n)
         elif mark[4] != fqdn:
             problems.append("%s: generated for %s" % (n, mark[4]))
+        elif n in EXTRA_SITES:
+            if mark[1] != "static" or n != {"mirror": MIRROR_SITE, "feeds": FEEDS_SITE}.get(mark[0]):
+                problems.append("%s: does not match its file name" % n)
         elif n != CATCHALL and n != "module-%s.conf" % mark[0]:
             problems.append("%s: does not match its file name" % n)
         elif n != CATCHALL and mark[0] not in mods:
@@ -331,6 +352,7 @@ def sites_status():
     if problems:
         details["problems"] = problems[:20]
         return "fail", "; ".join(problems[:5])[:500], details
+    mod_sites = len([n for n in marks if n not in EXTRA_SITES]) - 1
     if not marks:
         return "pass", "no module site yet", details
-    return "pass", "%d module site(s) consistent with installed modules" % (len(marks) - 1), details
+    return "pass", "%d module site(s) consistent with installed modules" % mod_sites, details

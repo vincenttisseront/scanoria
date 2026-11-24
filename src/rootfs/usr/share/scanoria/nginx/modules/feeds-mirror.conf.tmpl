@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Généré par scanoria.routing (0.6) : ne pas modifier. Bases de
+# vulnérabilités de l'appliance servies aux modules permanents (Dependency-Track),
+# dont la sortie vers Internet est fermée. Joignable depuis les seuls réseaux
+# des modules (10.90.0.0/16), ici et dans nftables.
+# scanoria-route: id=feeds mode=static host=feeds port=@PORT@ fqdn=@FQDN@
+server {
+	listen @PORT@;
+	server_name _;
+	server_tokens off;
+	allow 10.90.0.0/16;
+	deny all;
+	root /var/lib/scanoria-feeds-mirror;
+	autoindex off;
+	client_max_body_size 1k;
+
+	location ~ /\. {
+		return 404;
+	}
+	location / {
+		limit_except GET HEAD {
+			deny all;
+		}
+		default_type application/octet-stream;
+		try_files $uri =404;
+	}
+}

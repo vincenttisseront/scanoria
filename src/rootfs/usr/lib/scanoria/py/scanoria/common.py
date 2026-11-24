@@ -68,6 +68,7 @@ REQUEST_TYPES = (
     "backup-module", "restore-module",
     "reset-service-admin",
     "package-dates",
+    "export-bundle", "import-bundle", "set-mirror", "trust-key",
 )
 REJECT_CODES = frozenset((
     "E_INVALID_NAME", "E_NOT_REGULAR_FILE", "E_BAD_OWNER", "E_TOO_LARGE", "E_INVALID_JSON",
@@ -85,6 +86,11 @@ ERROR_CODES = frozenset((
     "E_SONAR_UNAVAILABLE", "E_SONAR_ADMIN", "E_SONAR_API",
     "E_DTRACK_UNAVAILABLE", "E_DTRACK_ADMIN", "E_DTRACK_API",
     "E_EXPORT_FAILED",
+    "E_BUNDLE_INVALID", "E_BUNDLE_SIGNATURE", "E_BUNDLE_UNTRUSTED", "E_BUNDLE_CHECKSUM",
+    "E_BUNDLE_ARCHIVE", "E_BUNDLE_IMAGE", "E_BUNDLE_FEED", "E_BUNDLE_SOURCE",
+    "E_MIRROR_URL", "E_MIRROR_UNRESOLVED", "E_MIRROR_FORBIDDEN_ADDRESS", "E_MIRROR_CA",
+    "E_MIRROR_UNTRUSTED", "E_MIRROR_UNREACHABLE",
+    "E_KEY_INVALID",
 ))
 ALL_CODES = frozenset(("OK",)) | REJECT_CODES | ERROR_CODES
 
@@ -341,6 +347,7 @@ SYSTEM_CMDS = {
     "resolvectl": "/usr/bin/resolvectl",
     "podman": "/usr/bin/podman",
     "sysctl": "/usr/sbin/sysctl",
+    "skopeo": "/usr/bin/skopeo",
 }
 # Commandes sans effet sur le système, exécutées réellement en mode test.
 TEST_PASSTHROUGH = ("openssl", "zstd")

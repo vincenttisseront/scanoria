@@ -793,6 +793,12 @@ def refresh(m, options=None, timeout=DEFAULT_TIMEOUT):
     mid = _check_id(m.get("id"))
     if not is_declarative(m):
         raise Fail("E_PRECONDITION", "%s is not a downloadable feed" % mid)
+    from . import mirror
+    if mirror.configured():
+        # Appliance hors ligne avec miroir déclaré (F17) : la base vient du dernier
+        # lot signé du miroir, avec les mêmes contrôles qu'un import.
+        _dirs()
+        return mirror.refresh_feed(m, timeout)
     kind, _ = source_of(m)
     _dirs()
     sd = store_dir(mid)

@@ -21,6 +21,10 @@ export const REPO_RE = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
 /** Nom d'un fichier de demande ou de résultat (§ 5.3). */
 /** Adresse du serveur Ollama externe (set-ai-endpoint, CLAUDE.md § 3.5). */
 export const AI_URL_RE = /^https?:\/\/(\[[0-9a-f:.]{2,45}\]|[a-z0-9.-]{1,253})(:[0-9]{1,5})?\/?$/
+/** Lots hors ligne et miroir (0.6, chantier A) : clé Ed25519 brute en base64, empreinte SHA-256. */
+export const PUBLIC_KEY_B64_RE = /^[A-Za-z0-9+/]{43}=$/
+export const KEY_FINGERPRINT_RE = /^[0-9a-f]{64}$/
+export const MIRROR_URL_RE = /^https:\/\/(\[[0-9a-f:.]{2,45}\]|[a-z0-9.-]{1,253})(:[0-9]{1,5})?\/?$/
 /** Nom d'un fichier de demande ou de résultat (§ 5.3). */
 export const REQUEST_FILE_RE = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/
 
@@ -46,6 +50,10 @@ export const REQUEST_TYPES = [
   'restore-module',
   'reset-service-admin',
   'package-dates',
+  'export-bundle',
+  'import-bundle',
+  'set-mirror',
+  'trust-key',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -64,6 +72,11 @@ export const RESULT_CODES = [
   'E_SONAR_UNAVAILABLE', 'E_SONAR_ADMIN', 'E_SONAR_API',
   'E_DTRACK_UNAVAILABLE', 'E_DTRACK_ADMIN', 'E_DTRACK_API',
   'E_EXPORT_FAILED',
+  'E_BUNDLE_INVALID', 'E_BUNDLE_SIGNATURE', 'E_BUNDLE_UNTRUSTED', 'E_BUNDLE_CHECKSUM',
+  'E_BUNDLE_ARCHIVE', 'E_BUNDLE_IMAGE', 'E_BUNDLE_FEED', 'E_BUNDLE_SOURCE',
+  'E_MIRROR_URL', 'E_MIRROR_UNRESOLVED', 'E_MIRROR_FORBIDDEN_ADDRESS', 'E_MIRROR_CA',
+  'E_MIRROR_UNTRUSTED', 'E_MIRROR_UNREACHABLE',
+  'E_KEY_INVALID',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 
@@ -163,6 +176,40 @@ export const requestParamSchemas = {
   'backup-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE) }),
   'restore-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE), backup: z.string().regex(BACKUP_ID_RE) }),
   'reset-service-admin': z.strictObject({ id: z.string().regex(MODULE_ID_RE) }),
+  'export-bundle': z.union([
+    z.strictObject({
+      modules: z.array(z.string().regex(MODULE_ID_RE)).min(1).max(64).refine(unique, { message: 'duplicate' }),
+      dry_run: z.boolean().optional(),
+      keep: z.int().min(1).max(10).optional(),
+    }),
+    z.strictObject({
+      schedule: z.strictObject({
+        enabled: z.boolean(),
+        every_days: z.int().min(1).max(31),
+        keep: z.int().min(1).max(10),
+        modules: z.array(z.string().regex(MODULE_ID_RE)).max(64).refine(unique, { message: 'duplicate' }),
+      }),
+    }),
+    z.strictObject({ scheduled: z.literal(true) }),
+  ]),
+  'import-bundle': z.strictObject({ upload_id: uuidSchema }),
+  'set-mirror': z.union([
+    z.strictObject({
+      enabled: z.literal(true),
+      url: z.string().min(12).max(300).regex(MIRROR_URL_RE),
+      fingerprint: z.string().regex(KEY_FINGERPRINT_RE),
+      ca_pem: z.string().min(64).max(16384).regex(CERT_PEM_RE).optional(),
+    }),
+    z.strictObject({ enabled: z.literal(false) }),
+  ]),
+  'trust-key': z.union([
+    z.strictObject({
+      action: z.literal('add'),
+      public_key: z.string().regex(PUBLIC_KEY_B64_RE),
+      fingerprint: z.string().regex(KEY_FINGERPRINT_RE),
+    }),
+    z.strictObject({ action: z.literal('remove'), fingerprint: z.string().regex(KEY_FINGERPRINT_RE) }),
+  ]),
 } satisfies Record<RequestType, z.ZodType>
 
 export type RequestParams<T extends RequestType> = z.infer<(typeof requestParamSchemas)[T]>
