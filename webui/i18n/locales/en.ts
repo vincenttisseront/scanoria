@@ -12,6 +12,9 @@ export default {
     loading: 'Loading…',
   },
   nav: {
+    label: 'Main menu',
+    short: { health: 'Health', ai: 'AI', about: 'About' },
+    groups: { analysis: 'Analysis', modules: 'Modules', admin: 'Administration' },
     dashboard: 'Dashboard',
     findings: 'Findings',
     catalog: 'Catalog',

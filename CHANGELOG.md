@@ -23,6 +23,14 @@ déjà terminées.
   reprend exactement les réglages de l'appliance, ce qui aurait révélé
   l'écart.
 
+### Modifié
+- **Menu latéral de la console** regroupé en sections (Analyse, Modules,
+  Administration) et resserré. Les applications web des modules « service »
+  installés et sains (SonarQube, Dependency-Track…) y apparaissent sous
+  Modules, avec un lien vers leur nom. L'entrée de la page affichée reste
+  en surbrillance sur ses sous-pages (une analyse, un module), et le menu
+  replié affiche le nom de chaque entrée au survol.
+
 ### Ajouté
 - **Consommation réelle par module** (F14) : mémoire, CPU, durées et nombre
   d'analyses des scanners. Les modules inutilisés depuis 30 jours sont

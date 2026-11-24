@@ -12,6 +12,9 @@ export default {
     loading: 'Chargement…',
   },
   nav: {
+    label: 'Menu principal',
+    short: { health: 'Santé', ai: 'IA', about: 'À propos' },
+    groups: { analysis: 'Analyse', modules: 'Modules', admin: 'Administration' },
     dashboard: 'Tableau de bord',
     findings: 'Résultats',
     catalog: 'Catalogue',
