@@ -84,6 +84,12 @@ describe('G16 : seuil feed_max_age_days', () => {
     }
   })
 
+  it('module « not-applicable » (V6) : sa base n’a pas été lue, son âge ne compte pas', () => {
+    const v = run({ modules: [mod('osv-scanner', [{ id: 'osv-db', updated_at: daysBefore(30) }], 'not-applicable')] })
+    expect(v.verdict).toBe('passed')
+    expect(v.reasons).toEqual([])
+  })
+
   it('entrées hostiles ignorées sans planter (feeds non tableau, id absent)', () => {
     const v = run({ modules: [{ module_id: 'osv-scanner', status: 'ok', feeds: 'x' }, { module_id: 'trivy', status: 'ok', feeds: [null, { updated_at: daysBefore(99) }] }] })
     expect(v.verdict).toBe('passed')

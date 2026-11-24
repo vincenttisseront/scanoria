@@ -256,8 +256,10 @@ def fetch(conf, rel, dest, limit, timeout):
         args = ["-u", USER, "--", common.SYSTEM_CMDS["curl"], "--proto", "=https", "--tlsv1.2", "--silent",
                 "--connect-timeout", "20", "--max-time", str(max(10, int(timeout))),
                 "--max-filesize", str(limit), "--max-redirs", "0", "--noproxy", "*",
-                "--resolve", "%s:%d:%s" % (host, conf["port"], "[%s]" % addr if ":" in addr else addr),
                 "--output", out, "--write-out", "%{http_code}"]
+        if not conf.get("literal"):
+            # Nom épinglé sur l'adresse approuvée ; une adresse littérale est déjà dans l'URL.
+            args[-4:-4] = ["--resolve", "%s:%d:%s" % (host, conf["port"], "[%s]" % addr if ":" in addr else addr)]
         if conf.get("ca"):
             args += ["--cacert", CA_FILE]
         args.append(url)

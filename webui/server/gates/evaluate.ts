@@ -425,7 +425,8 @@ export function freshnessReasons(input: GateInput, rules: GateRules, exceptions:
   const limitDays = rules.feed_max_age_days ?? FEED_ALERT_DAYS
   const enforced = rules.feed_max_age_days !== null
   const oldest = new Map<string, number>()
-  for (const u of feedUses(input.modules)) {
+  // Un module « not-applicable » (V6) n'a jamais lu sa base : son âge ne compte pas.
+  for (const u of feedUses(applicableModules(input.modules))) {
     const ageDays = u.updatedAt === null ? Number.POSITIVE_INFINITY : (at - u.updatedAt) / DAY_MS
     if (ageDays <= limitDays) continue
     oldest.set(u.module, Math.max(oldest.get(u.module) ?? 0, ageDays))

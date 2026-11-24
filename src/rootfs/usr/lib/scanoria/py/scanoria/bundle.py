@@ -629,10 +629,22 @@ def install_catalog(work, man, raw):
     if n < cur or (n == cur and catalogverify.installed_index() is not None):
         return False
     common.shared_dir(catalogverify.CATALOG_DIR)
-    for name in ("SHA256SUMS", "SHA256SUMS.sig"):
-        with open(os.path.join(work, "catalog", name), "rb") as f:
-            common.atomic_write(os.path.join(catalogverify.CATALOG_DIR, name), f.read(), 0o640)
-    common.atomic_write(catalogverify.INDEX_FILE, raw, 0o640)
+    # Les trois fichiers sont préparés puis remplacés à la suite (fenêtre minimale).
+    staged = []
+    try:
+        for name, data in (("SHA256SUMS", None), ("SHA256SUMS.sig", None), ("catalog-index.json", raw)):
+            if data is None:
+                with open(os.path.join(work, "catalog", name), "rb") as f:
+                    data = f.read()
+            tmp = os.path.join(catalogverify.CATALOG_DIR, ".%s.new" % name)
+            common.atomic_write(tmp, data, 0o640)
+            staged.append((tmp, os.path.join(catalogverify.CATALOG_DIR, name)))
+        for tmp, final in staged:
+            os.replace(tmp, final)
+    finally:
+        for tmp, _ in staged:
+            if os.path.lexists(tmp):
+                os.unlink(tmp)
     try:
         repo = catalogverify.source_repo()
     except Fail:
@@ -642,13 +654,13 @@ def install_catalog(work, man, raw):
     return True
 
 
-def apply_plan(plan, man, work, timeout_left):
-    """Applique un plan vérifié ; retourne le compte rendu."""
-    out = {"catalog": {"version": man["catalog"]["version"], "installed": False},
-           "testbeds": [], "images": [], "feeds": []}
-    if work is not None:
-        set_step("bundle-catalog")
-        out["catalog"]["installed"] = install_catalog(work, man, plan["raw"])
+def apply_plan(plan, man, work, timeout_left, out=None):
+    """Applique un plan vérifié ; remplit et retourne le compte rendu out (partiel
+    si une étape échoue). L'index du catalogue passe en dernier : il n'annonce
+    jamais une ressource que l'appliance n'a pas encore."""
+    out = out if out is not None else {}
+    out.update({"catalog": {"version": man["catalog"]["version"], "installed": False},
+                "testbeds": [], "images": [], "feeds": []})
     os.makedirs(TESTBEDS, mode=0o750, exist_ok=True)
     for path, name in plan["testbeds"]:
         with open(path, "rb") as f:
@@ -661,6 +673,9 @@ def apply_plan(plan, man, work, timeout_left):
     for fe, m, dest in plan["feeds"]:
         set_step("bundle-feed")
         out["feeds"].append(apply_feed(fe, m, dest))
+    if work is not None:
+        set_step("bundle-catalog")
+        out["catalog"]["installed"] = install_catalog(work, man, plan["raw"])
     from . import dtmirror
     dtmirror.sync_all()
     return out
@@ -695,14 +710,22 @@ def apply_feed(fe, m, dest):
 # --------------------------------------------------------------------------
 
 class HashingReader(io.RawIOBase):
-    def __init__(self, f):
-        self.f, self.h, self.n = f, hashlib.sha256(), 0
+    """Lit au plus limit octets (taille figée à l'ouverture) en les hachant ;
+    un fichier qui grandit pendant l'import est refusé."""
+
+    def __init__(self, f, limit):
+        self.f, self.h, self.n, self.limit = f, hashlib.sha256(), 0, limit
 
     def readable(self):
         return True
 
     def readinto(self, b):
-        data = self.f.read(len(b))
+        want = min(len(b), self.limit - self.n)
+        if want <= 0:
+            if self.f.read(1):
+                raise Fail("E_BUNDLE_ARCHIVE", "bundle changed during the import")
+            return 0
+        data = self.f.read(want)
         self.h.update(data)
         self.n += len(data)
         b[:len(data)] = data
@@ -744,11 +767,12 @@ def _read_member(tf, mem, limit, name):
     return tf.extractfile(mem).read(limit + 1)
 
 
-def stage_tar(f, work):
+def stage_tar(f, work, size):
     """Lit le lot en flux ; retourne (manifeste vérifié, sha256 de l'archive)."""
-    reader = HashingReader(f)
+    reader = HashingReader(f, size)
+    buf = io.BufferedReader(reader, 1 << 20)
     try:
-        with tarfile.open(fileobj=io.BufferedReader(reader, 1 << 20), mode="r|") as tf:
+        with tarfile.open(fileobj=buf, mode="r|") as tf:
             raw = _read_member(tf, tf.next(), MAX_MANIFEST, "manifest.json")
             sig = _read_member(tf, tf.next(), MAX_SIG, "manifest.json.sig")
             man, declared = read_signed_manifest(raw, sig)
@@ -776,7 +800,8 @@ def stage_tar(f, work):
             missing = sorted(set(declared) - seen)
             if missing:
                 raise Fail("E_BUNDLE_ARCHIVE", "bundle lacks %s" % missing[0])
-            while reader.f.read(1 << 20):
+            # Fin de l'archive (blocs de remplissage) : lue et hachée, bornée par la taille.
+            while buf.read(1 << 20):
                 pass
     except (tarfile.TarError, EOFError, OSError, ValueError) as e:
         if isinstance(e, Fail):
@@ -795,10 +820,20 @@ def act_import_bundle(c):
         work = _new_work("import")
         set_step("bundle-read")
         with f:
-            man, sha = stage_tar(f, work)
+            man, sha = stage_tar(f, work, size)
         deadline = feeds.Deadline(c.left())
         plan = verify_staged(work, man, Selection(), deadline)
-        out = apply_plan(plan, man, work, c.left)
+        out = {}
+        try:
+            apply_plan(plan, man, work, c.left, out)
+        except BaseException:
+            # Application partielle : ce qui a réellement changé reste visible dans la console.
+            offline.publish_status({"last_import": {
+                "at": common.iso(common.now()), "sha256": sha, "signer_fingerprint": man["signer"]["fingerprint"],
+                "created_at": man["created_at"], "catalog_version": man["catalog"]["version"], "partial": True,
+                "feeds": [x["id"] for x in out.get("feeds", []) if x["applied"]],
+                "images": [x["module"] for x in out.get("images", [])]}})
+            raise
         out.update(sha256=sha, size_bytes=size, signer_fingerprint=man["signer"]["fingerprint"],
                    created_at=man["created_at"], modules=man["modules"])
         offline.publish_status({"last_import": {"at": common.iso(common.now()), "sha256": sha,
@@ -966,16 +1001,20 @@ def build_bundle(wanted, c, scheduled=False):
         name = bundle_name(now)
         part = os.path.join(BUNDLES, "." + name + ".part")
         mtime = int(now.timestamp())
-        with tarfile.open(part, "w", format=tarfile.PAX_FORMAT) as tf:
-            _tar_add(tf, mpath, "manifest.json", mtime)
-            _tar_add(tf, os.path.join(work, "manifest.json.sig"), "manifest.json.sig", mtime)
-            for e in cat_files + man_tb + man_feeds + man_images:
-                _tar_add(tf, os.path.join(work, e["path"]), e["path"], mtime)
-        os.chmod(part, 0o640)
-        if not common.TEST_ROOT:
-            os.chown(part, 0, common.scanoria_ids()[1])
         final = os.path.join(BUNDLES, name)
-        os.rename(part, final)
+        try:
+            with tarfile.open(part, "w", format=tarfile.PAX_FORMAT) as tf:
+                _tar_add(tf, mpath, "manifest.json", mtime)
+                _tar_add(tf, os.path.join(work, "manifest.json.sig"), "manifest.json.sig", mtime)
+                for e in cat_files + man_tb + man_feeds + man_images:
+                    _tar_add(tf, os.path.join(work, e["path"]), e["path"], mtime)
+            os.chmod(part, 0o640)
+            if not common.TEST_ROOT:
+                os.chown(part, 0, common.scanoria_ids()[1])
+            os.rename(part, final)
+        finally:
+            if os.path.lexists(part):
+                os.unlink(part)
         sha = _sha256_file(final)
         common.write_json(final[:-4] + ".json", {
             "name": name, "created_at": man["created_at"], "size_bytes": os.path.getsize(final), "sha256": sha,
@@ -988,7 +1027,7 @@ def build_bundle(wanted, c, scheduled=False):
         try:
             mirror.publish(work)
             work = None
-        except Fail as e:
+        except (Fail, OSError) as e:
             common.log("mirror publication skipped: %s" % e.message)
         return {"dry_run": False, "name": name, "sha256": sha, "size_bytes": os.path.getsize(final),
                 "created_at": man["created_at"], "signer_fingerprint": info["fingerprint"],
@@ -1003,6 +1042,10 @@ def build_bundle(wanted, c, scheduled=False):
 def rotate(keep):
     """Garde les keep lots les plus récents (fichier .tar et sa fiche .json)."""
     names = sorted((n for n in os.listdir(BUNDLES) if BUNDLE_RE.match(n)), reverse=True)
+    for n in os.listdir(BUNDLES):
+        # Fichiers partiels d'un export interrompu (coupure, disque plein).
+        if n.startswith(".scanoria-bundle-") and n.endswith(".part") and os.path.isfile(os.path.join(BUNDLES, n)):
+            os.unlink(os.path.join(BUNDLES, n))
     removed = []
     for n in names[keep:]:
         for p in (os.path.join(BUNDLES, n), os.path.join(BUNDLES, n[:-4] + ".json")):
@@ -1031,6 +1074,14 @@ def list_exports():
     return out
 
 
+def check_space(wanted, c):
+    _mkdir_private(BUNDLES)
+    est = estimate(wanted, c.left())
+    if est["estimated_bytes"] * 2 + (512 << 20) > _free_bytes(BUNDLES):
+        raise Fail("E_DISK_SPACE", "not enough disk space for this bundle (about %d MB needed)"
+                   % (est["estimated_bytes"] * 2 >> 20), {"estimated_bytes": est["estimated_bytes"]})
+
+
 def act_export_bundle(c):
     prm = c.params
     if "schedule" in prm:
@@ -1045,11 +1096,7 @@ def act_export_bundle(c):
     wanted = prm["modules"]
     if prm.get("dry_run"):
         return estimate(wanted, c.left())
-    _mkdir_private(BUNDLES)
-    est = estimate(wanted, c.left())
-    if est["estimated_bytes"] * 2 + (512 << 20) > _free_bytes(BUNDLES):
-        raise Fail("E_DISK_SPACE", "not enough disk space for this bundle (about %d MB needed)"
-                   % (est["estimated_bytes"] * 2 >> 20), {"estimated_bytes": est["estimated_bytes"]})
+    check_space(wanted, c)
     out = build_bundle(wanted, c)
     out["removed"] = rotate(prm.get("keep", offline.load_schedule().get("keep", DEFAULT_KEEP)))
     offline.publish_status()
@@ -1069,6 +1116,7 @@ def scheduled_export(c):
             age = None
         if age is not None and 0 <= age < s["every_days"] * 86400 - 3600:
             return {"skipped": "not-due"}
+    check_space(s["modules"], c)
     out = build_bundle(s["modules"], c, scheduled=True)
     out["removed"] = rotate(s["keep"])
     s["last_run_at"] = common.iso(common.now())

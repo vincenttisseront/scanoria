@@ -204,6 +204,15 @@ describe('bundle : page Hors ligne', () => {
     expect(JSON.stringify(toastAdd.mock.calls.at(-1))).not.toContain('E_BUNDLE_IMAGE')
   })
 
+  it('import interrompu : avertissement affiché', async () => {
+    setUser('admin')
+    state = view({ last_import: { at: '2026-11-24T03:00:00Z', signer_fingerprint: FPR, created_at: '2026-11-24T02:00:00Z', catalog_version: 12, feeds: ['osv-db'], images: [], partial: true } })
+    routes()
+    const w = await mountIn(OfflinePage)
+    await settle()
+    expect(w.find('[data-testid="last-import-partial"]').text()).toContain('interrompu')
+  })
+
   it('lot exporté : lien de téléchargement par son nom', async () => {
     setUser('admin')
     routes()

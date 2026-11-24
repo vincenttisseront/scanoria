@@ -194,7 +194,7 @@ def sync_all():
         os.makedirs(ROOT, mode=0o755, exist_ok=True)
         os.chmod(ROOT, 0o755)
         sources = [sync_osv(), sync_epss()]
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError, TypeError) as e:
         common.log("Dependency-Track feed mirror not updated: %r" % e)
         return None
     prev = _read_status() or {}

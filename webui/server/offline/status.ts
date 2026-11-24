@@ -44,6 +44,7 @@ export const offlineStatusSchema = z.object({
     catalog_version: z.number().int(),
     feeds: z.array(moduleId).max(64),
     images: z.array(moduleId).max(128),
+    partial: z.boolean().optional(),
   }).nullable(),
   mirror: z.object({
     url: z.string().max(300),

@@ -68,7 +68,11 @@ networks_json() { # lignes « version CIDR »
 cmd_apply() {
 	local boot=$1 nets new
 	if [[ ! -f "$CONF" ]]; then
-		[[ $boot -eq 1 ]] && emit OK "no admin networks configured, nothing loaded" '{"loaded": false, "admin_networks": []}'
+		if [[ $boot -eq 1 ]]; then
+			# Sortie fermée des modules et miroir : rechargés même sans réseaux d'administration.
+			load_extra
+			emit OK "no admin networks configured, nothing loaded" '{"loaded": false, "admin_networks": []}'
+		fi
 		emit E_PRECONDITION "admin networks not configured"
 	fi
 	if ! nets=$(read_networks 2>/dev/null); then

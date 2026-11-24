@@ -62,7 +62,7 @@ interface OfflineView {
   trusted_keys: TrustedKey[]
   exports: ExportedBundle[]
   history: HistoryRow[]
-  last_import: { at: string, signer_fingerprint: string, created_at: string, catalog_version: number, feeds: string[], images: string[] } | null
+  last_import: { at: string, signer_fingerprint: string, created_at: string, catalog_version: number, feeds: string[], images: string[], partial?: boolean } | null
   mirror: {
     url: string
     addresses: string[]
@@ -689,6 +689,15 @@ const runningLabel = computed(() => {
             images: view.last_import.images.join(', ') || t('common.none'),
           }) }}
         </p>
+        <UAlert
+          v-if="view.last_import?.partial"
+          class="mt-3"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-triangle-alert"
+          :title="t('offline.import.partial')"
+          data-testid="last-import-partial"
+        />
       </UCard>
 
       <!-- Appliance miroir -->

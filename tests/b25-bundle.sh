@@ -272,7 +272,9 @@ expect "réimport : base active inchangée" "$(readlink "$B/var/lib/scanoria/fee
 # Base plus récente sur A : bascule atomique sur B, version précédente gardée.
 sleep 1
 py "$A" 'from scanoria import feeds, modules; m = [x for x in modules.catalog() if x["id"] == "osv-db"][0]; feeds.refresh(m, None, timeout=60)'
+: > "$A/var/lib/scanoria/bundles/.scanoria-bundle-20261101T000000Z.tar.part"   # export interrompu
 hx "$A" export-bundle '{"modules": ["gitleaks"], "keep": 1}'
+expect "rotation : fichier partiel d'un export interrompu retiré" "$(find "$A/var/lib/scanoria/bundles" -maxdepth 1 -name '*.part' | wc -l)" 0
 expect "deuxième export : rotation (keep 1)" "$(code)/$(out '.removed | length')/$(find "$A/var/lib/scanoria/bundles" -maxdepth 1 -name '*.tar' | wc -l)" OK/1/1
 NEWER="$A/var/lib/scanoria/bundles/$(out .name)"
 hx "$B" import-bundle '{"upload_id": "'"$(upload "$B" "$NEWER")"'"}'

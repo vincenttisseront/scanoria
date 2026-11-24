@@ -2046,6 +2046,7 @@ export default {
       uploading: 'Uploading the bundle: {pct} %',
       uploadFailed: 'Upload failed (HTTP {status}).',
       last: 'Last import on {date}: bundle of {created}, databases {feeds}, images {images}.',
+      partial: 'This last import was interrupted: only the listed databases and images were applied, the catalog index did not change. Import the bundle again.',
       confirmTitle: 'Import this bundle?',
       confirmBody: '{name} ({size}) will be uploaded then checked. A bundle that fails any check is refused as a whole.',
     },
