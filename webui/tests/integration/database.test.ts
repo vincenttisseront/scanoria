@@ -46,7 +46,7 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
       ])
       const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       const files = loadMigrationsFromDir(MIGRATIONS_DIR)
-      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql'])
+      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_badges.sql'])
       expect(mig.rows).toEqual(files.map((f, i) => ({ version: i + 1, name: f.name, checksum: f.checksum })))
     })
 
