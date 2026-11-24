@@ -31,6 +31,7 @@ export default defineEventHandler(async (event) => {
     update_license: updateAvailable(installed, latest) ? latest!.license : null,
     plan: latest && !installed ? compatibility(ctx, [id]) : null,
     dependents: dependentsOf(id, ctx),
+    feed: installed ? (ctx.feeds ?? []).find(f => f.id === id) ?? null : null,
     operations: ctx.operations.filter(o => o.module === id).slice(-10),
     dns: ctx.dns,
   }

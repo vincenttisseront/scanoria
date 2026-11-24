@@ -85,6 +85,10 @@ cat > "$STUBS/curl" <<-EOF
 	    p = fix + "/rel/" + url.split("/releases/download/", 1)[1]
 	    if os.path.isfile(p):
 	        code, src = 200, p
+	elif url.startswith("https://feeds.exemple.test/"):
+	    # Base de vulnérabilités factice (feeds.py, 0.3.4) : une archive zip par écosystème.
+	    code = 503 if os.path.exists(fix + "/feed-fail") else 200
+	    src = fix + "/feed.zip" if code == 200 else None
 	elif url.startswith("http://127.0.0.1:"):
 	    code = 503 if os.path.exists(fix + "/health-fail") else 200
 	    # health-fail-image : seul le service qui tourne avec cette image est malade.
@@ -252,7 +256,10 @@ printf '%s' "$SARIF_OK" > "$FIX/scan-output"
 GL1=$(module gitleaks 8.0.0 scanner)
 GL2=$(module gitleaks 8.1.0 scanner)
 TRIVY=$(module trivy 0.60.0 scanner '.requires.feeds = ["trivy-db"]')
-TDB=$(module trivy-db 1 feed '.image = null | .health = null')
+TDB=$(module trivy-db 1 feed '.image = null | .health = null | .feed = {format: "osv-zip", mount: "/feeds/trivy-db",
+	source: {kind: "https", ref: "https://feeds.exemple.test/{ecosystem}/all.zip"}, schedule: "daily"}
+	| .options.properties.ecosystems = {type: "array", default: ["npm"], items: {type: "string"}}')
+python3 -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w"); z.writestr("GHSA-0000-0000-0000.json", "{}"); z.close()' "$FIX/feed.zip"
 SVC=$(module svc 1.0.0 service '.hostname = "svc" | .needs.postgres = true | .needs.sysctl = {"vm.max_map_count": 524288}
 	| .service = {port: 9000, health_path: "/health", units: [], volumes: [{name: "data", path: "/data"}],
 	              env: {DB_URL: "{db_url_jdbc}"}, secrets: [{name: "db-password", env: "DB_PASSWORD"}]} | .resources.min_ram_mb = 1024')
@@ -274,8 +281,17 @@ mk_testbed testbed-trapd-1.0.0.tar.zst dotdot
 ALL=$(jq -cn --argjson a "[$GL1,$GL2,$TRIVY,$TDB,$SVC,$SVC2,$BIG,$MANYCPU,$SEMG,$OPEN,$NEWAPP,$DEPTOP,$WOPT,$BADSYS,$TRAP1,$TRAP2,$DEEP]" '$a')
 
 publish 3 "$ALL"
+# Appliance installée avant l'entrée tmpfiles.d : répertoire créé en 0700 par un
+# helper plus ancien. Il doit être rétabli en 0750 (groupe scanoria hors mode test),
+# sinon la console ne peut pas lire l'index publié (« catalogue pas encore disponible »).
+mkdir -p "$T/var/lib/scanoria" && install -d -m 0700 "$T/var/lib/scanoria/catalog"
+rm -f "$T/var/lib/scanoria/modules/state.json"
 hx refresh-catalog '{}'
 expect "refresh-catalog : index signé accepté" "$(code)" OK
+expect "refresh-catalog : répertoire du catalogue lisible par la console (0750)" "$(stat -c %a "$T/var/lib/scanoria/catalog")" 750
+expect "refresh-catalog : état des modules publié dès la première actualisation" \
+	"$(jq -c '[.version, .modules]' "$T/var/lib/scanoria/modules/state.json" 2> /dev/null)" '[1,[]]'
+expect "refresh-catalog : répertoire des modules lisible par la console (0750)" "$(stat -c %a "$T/var/lib/scanoria/modules")" 750
 expect "refresh-catalog : numéro publié" "$(jq -r .version "$T/var/lib/scanoria/catalog/catalog-index.json")" 3
 expect "refresh-catalog : droits 0640" "$(stat -c %a "$T/var/lib/scanoria/catalog/catalog-index.json")" 640
 expect "refresh-catalog : source mémorisée" "$(jq -r .tag "$T/var/lib/scanoria/catalog/source.json")" catalog-v3
@@ -456,6 +472,17 @@ expect "install wopt avec option" "$(code)/$(jq -r '.modules[] | select(.id=="wo
 hx install-modules "$(inst trivy 0.60.0)"
 expect "install trivy : feed requis installé d'office" "$(code)/$(mstate trivy-db)" OK/healthy/true/1
 expect "trivy : feed monté en lecture seule" "$(grep -F '"podman","run"' "$CALLS" | grep -F /out:rw | tail -1 | grep -c -F '/feeds/trivy-db:ro')" 1
+expect "feed : base téléchargée avant le banc d'essai" "$(ls "$T/var/lib/scanoria/feeds/trivy-db/osv-scalibr/npm")" all.zip
+expect "feed : âge publié dans l'état" "$(jq -r '.feeds[] | select(.id == "trivy-db") | .status + "/" + (.updated_at != null | tostring)' "$STATE")" ok/true
+touch "$FIX/feed-fail"
+hx refresh-feeds '{}'
+expect "refresh-feeds : échec réseau signalé" "$(code)" E_FEED_UNAVAILABLE
+expect "refresh-feeds : base précédente gardée" "$(jq -r '.feeds[] | select(.id == "trivy-db") | .status' "$STATE")/$(ls "$T/var/lib/scanoria/feeds/trivy-db/osv-scalibr/npm")" stale/all.zip
+rm "$FIX/feed-fail"
+hx refresh-feeds '{"ids": ["trivy-db"]}'
+expect "refresh-feeds : nouvelle base" "$(code)/$(jq -r '.feeds[] | select(.id == "trivy-db") | .status' "$STATE")" OK/ok
+hx refresh-feeds '{"ids": ["gitleaks"]}'
+expect "refresh-feeds : id qui n'est pas un feed installé" "$(code)" E_NOT_FOUND
 hx uninstall-module '{"id": "trivy-db", "keep_data": true}'
 expect "uninstall : retrait bloqué par une dépendance" "$(code)/$(jq -r '.output.required_by[0]' <<< "$R")" E_DEPENDENCY/trivy
 hx set-module-state '{"id": "trivy-db", "enabled": false}'

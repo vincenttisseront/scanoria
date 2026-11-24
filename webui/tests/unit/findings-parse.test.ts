@@ -321,3 +321,38 @@ describe('findings : masquage des secrets (F7)', () => {
     expect(entropy('aaaa')).toBe(0)
   })
 })
+
+describe('G19 : empreintes inchangées par le masquage élargi de la 0.4', () => {
+  // Extraits que le masquage de la 0.4 traite autrement que celui de la 0.3,
+  // construits par morceaux (aucun secret d'apparence réelle dans le dépôt).
+  const CASES = [
+    'password = "un deux trois quatre"',
+    `const k = '${'AI' + 'za'}${'Bc1De2Fg3Hi4Jk5Lm6No7Pq8Rs9Tu0Vw1Xy2'.slice(0, 35)}'`,
+    `Authorization: ${'Ba' + 'sic'} ${'Zm9vOmJhcg'.repeat(3)}`,
+    'auth=abc',
+    `jdbc:postgresql://user:p${'@'}ss@db.exemple.test/base`,
+    'client_secret: "xyz"',
+    'x = 1',
+  ]
+  // Empreintes calculées par le code de main avant la 0.4 (commit c6f7b32), sur ces mêmes entrées.
+  const GOLDEN = [
+    '88002f3e8c141ad79f41f0489312a45e86ed03cd1fa8f1d49552477a969054c8',
+    'e56fe8bd76e936695b45611f67884ddc521f4617f8b978b19f94035b45096ea1',
+    '43f5fb12256230115b42833bf5b9c993061310d2ff1aa35cf56a89fcaaddacf8',
+    '25cb1ba6633b6df9876e209b7fcb36f3024a44877738227679dc67a7c169473c',
+    'b5e576414052cb46a48c13247420753c555a55eda1bf47844c4de4b18bd58c18',
+    '9fa3d104319607fb25355ab3cafb16f89a075d2ae3d6789aef107b7736c22270',
+    '76edd6016e6c7f17d4276ab90dcc8ee132d82f7461b36306e852804e5fe7bc57',
+  ]
+
+  it('même empreinte qu’avant la PR, extrait masqué plus largement', () => {
+    const doc = sarif(CASES.map((s, i) => result('python.rule', `app/f${i}.py`, s)).map(r => ({ ...r, message: { text: 'm' } })))
+    const out = parseSarif(doc, { moduleId: 'semgrep', moduleCategories: ['sast'] })
+    expect(out.findings.map(f => f.fingerprint)).toEqual(GOLDEN)
+    // L'affichage, lui, profite du masquage élargi.
+    expect(out.findings[0]!.snippet).not.toContain('trois')
+    expect(out.findings[2]!.snippet).not.toContain('Zm9v')
+    expect(out.findings[4]!.snippet).toContain('@db.exemple.test/base')
+    expect(out.findings[4]!.snippet).not.toContain('@ss')
+  })
+})

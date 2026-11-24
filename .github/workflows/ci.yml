@@ -345,6 +345,28 @@ jobs:
       - name: tests/b14-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b14-live.sh
 
+  feeds-live:
+    # Le test qui aurait attrapé le code 127 de la 0.3.3 : OSV-Scanner et Trivy
+    # installés par le helper à partir de bases vides, téléchargées par
+    # l'appliance elle-même depuis leurs vraies sources (tests/b18-live.sh).
+    name: feeds-live (bases téléchargées par le helper, b18-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dépendances (podman, jq, zstd, python3-yaml)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq zstd podman python3-yaml curl openssl
+          sudo podman --version
+      # Machine jetable : le helper tourne en root avec le vrai podman (§ 6.4).
+      - name: tests/b18-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b18-live.sh
+
   services-live:
     name: services-live (podman, systemd, PostgreSQL réels, b16-live)
     runs-on: ubuntu-24.04
@@ -368,7 +390,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, services-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

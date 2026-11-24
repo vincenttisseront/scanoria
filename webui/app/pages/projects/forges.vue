@@ -31,6 +31,25 @@ async function load() {
 }
 onMounted(load)
 
+// Découverte lancée en arrière-plan à l'ajout : la liste (dépôts, dernière
+// découverte, erreur) est relue toutes les 5 s pendant 2 minutes.
+let follow: ReturnType<typeof setInterval> | undefined
+function followDiscovery() {
+  if (follow) clearInterval(follow)
+  const until = Date.now() + 120_000
+  follow = setInterval(() => {
+    if (Date.now() > until) {
+      clearInterval(follow)
+      follow = undefined
+      return
+    }
+    void load()
+  }, 5000)
+}
+onBeforeUnmount(() => {
+  if (follow) clearInterval(follow)
+})
+
 // --- Ajout ---
 const kinds = computed(() => [
   { label: label('forgeKind', 'forgejo'), value: 'forgejo' },
@@ -58,6 +77,7 @@ async function add() {
     })
     Object.assign(form, { name: '', base_url: '', token: '' })
     await load()
+    if (res.discovery_started) followDiscovery()
   }
   catch (err) {
     addError.value = message(err)

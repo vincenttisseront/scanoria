@@ -29,6 +29,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 
 from . import common, netutil, schema
@@ -40,7 +41,9 @@ AI_CA = common.ETC + "/ai-ca.pem"
 NFT_FILE = common.ETC + "/nftables/ai.nft"
 STATUS_FILE = common.RUN + "/ai-status.json"
 RUNTIME_DIR = common.p("/run/scanoria-ai")
-SECRET_KEY = common.VARLIB + "/console/secret.key"
+# Clé dédiée au seul jeton IA (webui/server/ai/token.ts) : jamais secret.key,
+# qui ouvre aussi les jetons de forge et les clés SSH.
+AI_TOKEN_KEY = common.VARLIB + "/console/ai-token.key"
 GRANTS_SQL = common.SHARE_DIR + "/sql/ai-grants.sql"
 AI_USER = "scanoria-ai"
 TABLE = "scanoria_ai"
@@ -363,6 +366,26 @@ def ensure_db_role():
         raise Fail("E_INTERNAL", "PostgreSQL role or grants for scanoria-ai could not be applied")
 
 
+def read_token_key():
+    """Clé du jeton IA, lue sans suivre de lien (le répertoire appartient à la console).
+
+    Ouverte avec O_NOFOLLOW puis contrôlée sur le descripteur : fichier
+    régulier, un seul lien, exactement 32 octets. Sinon : None (rien copié).
+    """
+    try:
+        fd = os.open(AI_TOKEN_KEY, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size != 32:
+            return None
+        data = os.read(fd, 33)
+        return data if len(data) == 32 else None
+    finally:
+        os.close(fd)
+
+
 def install_runtime(conf):
     """Fichiers lus par le service, copiés dans /run/scanoria-ai (propriétaire scanoria-ai)."""
     os.makedirs(RUNTIME_DIR, mode=0o700, exist_ok=True)
@@ -371,9 +394,10 @@ def install_runtime(conf):
     if conf.get("enabled") and conf.get("ca") and os.path.isfile(AI_CA):
         with open(AI_CA, "rb") as f:
             wanted["ca.pem"] = (f.read(65536), 0o400)
-    if conf.get("enabled") and conf.get("token") and os.path.isfile(SECRET_KEY):
-        with open(SECRET_KEY, "rb") as f:
-            wanted["secret.key"] = (f.read(4096), 0o400)
+    if conf.get("enabled") and conf.get("token"):
+        key = read_token_key()
+        if key is not None:
+            wanted["ai-token.key"] = (key, 0o400)
     for name in os.listdir(RUNTIME_DIR):
         if name not in wanted:
             path = os.path.join(RUNTIME_DIR, name)

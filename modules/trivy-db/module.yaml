@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Vincent Tisseront
 #
-# Base de vulnérabilités de Trivy (module feed). En 0.2, manifeste seulement :
-# il rend « requires.feeds » vérifiable ; la mise à jour planifiée et l'import
-# d'un lot hors ligne signé arrivent en 0.6 (CLAUDE.md § 9). Licence relevée
-# le 2026-11-24 sur le dépôt amont.
+# Base de vulnérabilités de Trivy (module feed). Depuis la 0.3.4, le helper la
+# télécharge à l'installation puis chaque jour (feeds.py : registre OCI,
+# empreinte de la couche vérifiée), dans la disposition de « trivy --cache-dir ».
+# Sources dans l'ordre de Trivy lui-même : mirror.gcr.io, puis ghcr.io en
+# secours (limite de débit). L'import d'un lot hors ligne signé arrive en 0.6
+# (CLAUDE.md § 9). Licence relevée le 2026-11-24 sur le dépôt amont.
 id: trivy-db
 name: Trivy DB
 description:
@@ -22,7 +24,7 @@ upstream:
   homepage: https://trivy.dev
   source: https://github.com/aquasecurity/trivy-db
 version: "2"
-resources: { min_ram_mb: 16, min_cpu: 0.1, disk_mb: 1500 }
+resources: { min_ram_mb: 16, min_cpu: 0.1, disk_mb: 4000 }
 hostname: null
 requires: { modules: [], feeds: [], appliance: ">=0.2.0" }
 conflicts: []
@@ -34,5 +36,5 @@ feed:
   format: trivy-db
   mount: /feeds/trivy-db
   max_age_days: 7
-  source: { kind: oci, ref: "mirror.gcr.io/aquasec/trivy-db:2" }
+  source: { kind: oci, ref: "mirror.gcr.io/aquasec/trivy-db:2", mirrors: ["ghcr.io/aquasecurity/trivy-db:2"] }
   schedule: daily

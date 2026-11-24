@@ -76,7 +76,8 @@ describe('liste des gates', () => {
     route('GET', '/api/gates', () => apiFail(500, 'E_INTERNAL'))
     await mount(GatesPage)
     expect(document.body.querySelector('[data-testid="gate-create"]')).toBeNull()
-    expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ color: 'error' }))
+    // Erreur de chargement affichée dans la page (et non un simple toast fugitif).
+    expect(document.body.textContent).toContain('Erreur interne de la console.')
   })
 })
 

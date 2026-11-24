@@ -42,11 +42,20 @@ export function encodeData(data: unknown): string {
     .replace(/\u2029/g, '\\u2029')
 }
 
+/**
+ * Données réellement envoyées : les clés de premier niveau qui commencent par
+ * « _ » servent au traitement local (identifiants, liens) et ne sortent pas.
+ */
+export function promptView(data: unknown): unknown {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data
+  return Object.fromEntries(Object.entries(data as Record<string, unknown>).filter(([k]) => !k.startsWith('_')))
+}
+
 export function buildMessages(locale: Locale, instruction: string, data: unknown, nonce = randomBytes(8).toString('hex')): ChatMessage[] {
   const tag = `data-${nonce}`
   return [
     { role: 'system', content: RULES[locale].replace(/\{TAG\}/g, tag) },
-    { role: 'user', content: `${instruction}\n\n<${tag}>\n${encodeData(data)}\n</${tag}>` },
+    { role: 'user', content: `${instruction}\n\n<${tag}>\n${encodeData(promptView(data))}\n</${tag}>` },
   ]
 }
 

@@ -18,7 +18,7 @@ export interface FakeModel {
   family?: string
 }
 
-export type FakeMode = 'ok' | 'down' | 'slow' | 'invalid-json' | 'invalid-schema' | 'echo-data'
+export type FakeMode = 'ok' | 'down' | 'slow' | 'invalid-json' | 'invalid-schema' | 'echo-data' | 'uncited'
 
 export interface RecordedRequest {
   method: string
@@ -50,8 +50,58 @@ export function extractData(content: string): Record<string, unknown> | null {
   }
 }
 
+/** Tâches de la 0.4 : réponses sages, déterministes, jamais une consigne des données. */
+function wellBehaved04(required: string[], data: Record<string, unknown>): Record<string, unknown> | null {
+  if (required.includes('suggestion')) {
+    const f = (data.finding ?? {}) as Record<string, unknown>
+    const hints = (data.path_hints ?? {}) as Record<string, boolean>
+    const fp = hints.test || hints.example
+    return {
+      suggestion: fp ? 'likely-false-positive' : 'likely-true-positive',
+      summary: fp ? 'Located in test or example code.' : `Reachable code in ${String(f.path)}.`,
+      reasons: [{ kind: fp ? 'test-code' : 'real-risk', quote: String(f.path ?? ''), explanation: 'Based on the file location.' }],
+    }
+  }
+  if (required.includes('headline')) {
+    const reasons = (data.blocking_reasons as { code: string, module: string | null }[] | undefined) ?? []
+    const gaps = (data.not_covered as { kind: string, detail: string }[] | undefined) ?? []
+    const cands = (data.candidates as { ref: number, tool: string, rule_id: string }[] | undefined) ?? []
+    const counts = (data.new_by_severity ?? {}) as Record<string, number>
+    return {
+      headline: `Analysis ${String(data.scan_number)}: verdict ${String(data.verdict)}.`,
+      changes: `New findings: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ')}; fixed ${String(data.fixed_count)}.`,
+      priorities: cands.slice(0, 3).map(c => ({ ref: c.ref, why: `${c.tool} rule ${c.rule_id}.` })),
+      blocking: reasons.length ? reasons.map(r => `${r.code}${r.module ? ` (${r.module})` : ''}`).join(', ') : 'nothing',
+      not_covered: gaps.length ? gaps.map(g => `${g.kind}: ${g.detail}`).join('; ') : 'everything was covered',
+    }
+  }
+  if (required.includes('class')) {
+    const hints = (data.path_hints ?? {}) as Record<string, boolean>
+    const msg = String(data.message ?? '')
+    const cls = hints.test || hints.example ? 'likely-false-positive' : /password/i.test(msg) ? 'password' : 'internal-token'
+    return { class: cls, confidence: 'medium', summary: `Probably ${cls}.`, reasons: [`File ${String(data.path)}.`] }
+  }
+  if (required.includes('cause')) {
+    const mods = (data.modules as { module: string, status: string }[] | undefined) ?? []
+    const logs = JSON.stringify(data.logs ?? [])
+    const m = mods[0]
+    const cause = m?.status === 'oom' ? 'memory' : m?.status === 'timeout' ? 'timeout' : /config/i.test(logs) ? 'tool-error' : 'unknown'
+    return {
+      cause,
+      module: m?.module ?? null,
+      summary: `Module ${m?.module ?? '?'} failed (${m?.status ?? '?'}): ${cause}.`,
+      fix: cause === 'tool-error' ? 'Check the configuration of the module.' : cause === 'memory' ? 'Give the module more memory.' : 'Raise the timeout of the module, then rerun.',
+      steps: ['Rerun the analysis.'],
+    }
+  }
+  if (required.includes('translation')) return { translation: `Traduction : ${String(data.text)}` }
+  return null
+}
+
 /** Réponse sage : reprend le titre, le message et les métadonnées, jamais l'extrait de code. */
 function wellBehaved(required: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const v04 = wellBehaved04(required, data)
+  if (v04) return v04
   if (required.includes('detects')) {
     const pkg = data.package as { name?: string, fixed?: string[] } | null
     const fixed = pkg?.fixed?.length ? ` Upgrade ${pkg.name} to ${pkg.fixed[0]}.` : ''
@@ -123,6 +173,10 @@ export async function startFakeOllama(models: FakeModel[] = [
         const injected = /CANARY-[0-9]+/.exec(JSON.stringify(data))?.[0] ?? ''
         const out = wellBehaved(parsed.format.required ?? [], data)
         content = JSON.stringify(Object.fromEntries(Object.entries(out).map(([k, v]) => [k, typeof v === 'string' ? `${injected} ${v}`.trim() : v])))
+      }
+      else if (state.mode === 'uncited' && (parsed.format.required ?? []).includes('suggestion')) {
+        // Pré-tri tranché, citation inventée : doit redevenir « à confirmer ».
+        content = JSON.stringify({ suggestion: 'likely-false-positive', summary: 'Looks fake.', reasons: [{ kind: 'dummy-value', quote: 'value = "changeme-not-in-data"', explanation: 'Placeholder.' }] })
       }
       else content = JSON.stringify(wellBehaved(parsed.format.required ?? [], data))
       return send(res, 200, { model: parsed.model, message: { role: 'assistant', content }, done: true })

@@ -7,6 +7,7 @@
 // échappe tout). Fonctions pures, sans accès à la base.
 
 import { maskToken, redact } from './redact'
+import { redactForFingerprint } from './redact-v1'
 import {
   cleanText, ecosystemFromPath, extractCwe, extractVulnIds, fingerprintOf, fixedFromHelp,
   inferCategory, isVulnId, normalizePath, packageFromMessage, parsePurl, primaryVulnId, splitVersions,
@@ -115,8 +116,11 @@ function finish(ctx: ParseContext, d: Draft): ParsedFinding {
   const title = mask(d.title || d.ruleId)
   const message = mask(d.message)
   const ruleId = cleanText(d.ruleId, 255) || 'unknown'
+  // G19 : l'empreinte garde le masquage de la 0.3 (figé), jamais le masquage
+  // élargi de l'affichage : un résultat déjà trié garde son identité.
+  const fpContext = !d.snippet ? '' : secret ? snippet : redactForFingerprint(d.snippet)
   return {
-    fingerprint: fingerprintOf({ tool: ctx.moduleId, ruleId, path: d.path, context: snippet, pkg: d.pkg, vulnId, partial: d.partial }),
+    fingerprint: fingerprintOf({ tool: ctx.moduleId, ruleId, path: d.path, context: fpContext, pkg: d.pkg, vulnId, partial: d.partial }),
     tool: ctx.moduleId,
     ruleId,
     category,

@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Met à jour les bases de vulnérabilités des modules feed installés (principe 8 :
+# automatique, sans réglage). Une base qui échoue garde la précédente ; sans
+# Internet, l'échec est journalisé et l'âge de la base reste affiché.
+[Unit]
+Description=Scanoria vulnerability databases refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/scanoria-helper exec --origin timer --type refresh-feeds --params {}
+UMask=0022
+PrivateTmp=yes
+ProtectHome=read-only

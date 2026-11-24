@@ -83,7 +83,7 @@ const rows = computed(() => (data.value?.modules ?? []).filter((m) => {
   if (typeFilter.value !== 'all' && m.type !== typeFilter.value) return false
   const q = search.value.trim().toLowerCase()
   if (!q) return true
-  return [m.id, m.name, m.description ?? '', ...m.categories].some(s => s.toLowerCase().includes(q))
+  return [m.id, m.name, text.localized(m.description), ...m.categories].some(s => s.toLowerCase().includes(q))
 }))
 
 function statusOf(m: CatalogEntry): { label: string, color: 'success' | 'error' | 'warning' | 'neutral' | 'info' } {
@@ -106,6 +106,9 @@ const columns = computed<TableColumn<CatalogEntry>[]>(() => [
   { id: 'status', header: t('catalog.list.status') },
 ])
 
+// Complet seulement si chaque module du pack est installé (un module absent du
+// catalogue n'est ni installable ni installé).
+const packComplete = (p: CatalogPack) => p.modules.every(id => p.installed_modules.includes(id))
 const packResourcesOk = (p: CatalogPack) => !p.plan || p.plan.checks.every(c => c.ok)
 </script>
 
@@ -275,7 +278,7 @@ const packResourcesOk = (p: CatalogPack) => !p.plan || p.plan.checks.every(c => 
               v-if="p.description"
               class="mb-2 text-sm"
             >
-              {{ p.description }}
+              {{ text.localized(p.description) }}
             </p>
             <div class="flex flex-wrap gap-1">
               <UBadge
@@ -288,7 +291,7 @@ const packResourcesOk = (p: CatalogPack) => !p.plan || p.plan.checks.every(c => 
               />
             </div>
             <p
-              v-if="!p.pending_modules.length"
+              v-if="packComplete(p)"
               class="mt-3 text-sm text-success"
             >
               {{ t('catalog.packs.complete') }}
@@ -368,7 +371,7 @@ const packResourcesOk = (p: CatalogPack) => !p.plan || p.plan.checks.every(c => 
               v-if="row.original.description"
               class="max-w-md truncate text-sm text-muted"
             >
-              {{ row.original.description }}
+              {{ text.localized(row.original.description) }}
             </p>
           </template>
           <template #type-cell="{ row }">
@@ -403,6 +406,16 @@ const packResourcesOk = (p: CatalogPack) => !p.plan || p.plan.checks.every(c => 
               class="ml-1"
               :label="t('catalog.list.updateAvailable', { version: row.original.update_available })"
             />
+            <p
+              v-if="row.original.feed"
+              class="mt-1 text-xs"
+              :class="row.original.feed.status === 'ok' ? 'text-muted' : 'text-warning'"
+              data-feed-age
+            >
+              {{ row.original.feed.updated_at
+                ? t('catalog.feed.age', { date: fmt.date(row.original.feed.updated_at) })
+                : t('catalog.feed.none') }}
+            </p>
             <p
               v-if="!row.original.installed && row.original.blockers.length"
               class="mt-1 max-w-xs text-xs text-warning"

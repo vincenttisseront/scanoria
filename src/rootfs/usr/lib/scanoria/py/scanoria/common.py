@@ -14,6 +14,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -63,7 +64,7 @@ REQUEST_TYPES = (
     "check-update", "apply-update", "rollback-update", "set-update-policy", "run-selftest",
     "check-dns",
     "refresh-catalog", "install-modules", "uninstall-module", "set-module-state", "update-module",
-    "set-ai-endpoint",
+    "set-ai-endpoint", "refresh-feeds",
     "backup-module", "restore-module",
 )
 REJECT_CODES = frozenset((
@@ -77,6 +78,7 @@ ERROR_CODES = frozenset((
     "E_ROLLBACK_FAILED", "E_TIMEOUT", "E_INTERNAL",
     "E_RESOURCES", "E_DEPENDENCY", "E_CONFLICT", "E_LICENSE", "E_TESTBED",
     "E_AI_URL", "E_AI_UNRESOLVED", "E_AI_FORBIDDEN_ADDRESS", "E_AI_CA",
+    "E_FEED_UNAVAILABLE",
     "E_SERVICE_RESOURCES", "E_BACKUP_FAILED", "E_BACKUP_NOT_FOUND", "E_BACKUP_INVALID",
 ))
 ALL_CODES = frozenset(("OK",)) | REJECT_CODES | ERROR_CODES
@@ -242,6 +244,36 @@ def scanoria_ids():
     return (pw.pw_uid, pw.pw_gid)
 
 
+def shared_dir(path):
+    """Crée ou rétablit un répertoire d'état lu par la console : root:scanoria 0750.
+
+    Un simple os.makedirs sous l'UMask du helper laisserait root:root 0750 et la
+    console (utilisateur scanoria) ne pourrait pas y entrer : le fichier publié
+    paraîtrait absent. tmpfiles.d crée ces répertoires à l'installation ; ce
+    rattrapage couvre une appliance installée avant leur ajout. Un lien
+    symbolique est refusé."""
+    try:
+        os.mkdir(path, 0o750)
+    except FileExistsError:
+        pass
+    # Descripteur ouvert sans suivre de lien : droits posés sur le répertoire
+    # lui-même, sans fenêtre entre la vérification et le changement.
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        raise Fail("E_INTERNAL", "%s is not a directory" % path)
+    try:
+        st = os.fstat(fd)
+        if stat.S_IMODE(st.st_mode) != 0o750:
+            os.fchmod(fd, 0o750)
+        if not TEST_ROOT:
+            gid = scanoria_ids()[1]
+            if st.st_uid != 0 or st.st_gid != gid:
+                os.fchown(fd, 0, gid)
+    finally:
+        os.close(fd)
+
+
 def atomic_write(path, data, mode=0o640, group_scanoria=True):
     """Écrit path atomiquement (root, groupe scanoria si demandé)."""
     if isinstance(data, str):
@@ -350,8 +382,12 @@ class Result:
         return self.stdout.decode("utf-8", "replace")
 
 
-def run(name, args=(), *, input=None, timeout=600, env=None, stdout_limit=8 << 20, cwd="/"):
-    """Lance une commande connue ; stderr va au journal."""
+def run(name, args=(), *, input=None, timeout=600, env=None, stdout_limit=8 << 20, cwd="/",
+        stderr_tail=0):
+    """Lance une commande connue ; stderr va au journal.
+
+    stderr_tail > 0 : stderr est aussi recopié (borné) dans le journal, et ses
+    derniers octets sont rendus dans Result.stderr pour le diagnostic."""
     exe = resolve(name)
     argv = [str(a) for a in args]
     if exe is None:
@@ -361,15 +397,23 @@ def run(name, args=(), *, input=None, timeout=600, env=None, stdout_limit=8 << 2
     try:
         proc = subprocess.Popen(
             [exe] + argv, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=None, env=child_env(env), cwd=cwd,
-            start_new_session=True, close_fds=True)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE if stderr_tail else None,
+            env=child_env(env), cwd=cwd, start_new_session=True, close_fds=True)
     except OSError as e:
         return Result(127, b"", str(e).encode())
     try:
-        out, _ = proc.communicate(input=input, timeout=timeout)
+        out, err = proc.communicate(input=input, timeout=timeout)
     except subprocess.TimeoutExpired:
         kill_group(proc)
         raise Fail("E_TIMEOUT", "%s timed out after %ss" % (name, timeout))
+    if stderr_tail:
+        err = err or b""
+        try:
+            sys.stderr.buffer.write(err[-(64 << 10):])
+            sys.stderr.flush()
+        except (OSError, ValueError, AttributeError):
+            pass
+        return Result(proc.returncode, out[:stdout_limit], err[-stderr_tail:])
     return Result(proc.returncode, out[:stdout_limit])
 
 

@@ -4,7 +4,8 @@ Copyright (C) 2026 Vincent Tisseront
 
 Détail d'une analyse : état, plan figé (G11) avec la raison de chaque module
 (décidé automatiquement), modules (état, durée, journal téléchargeable, G20),
-couverture (G15) et verdict. Annuler, relancer et rejouer à l'identique
+couverture (G15) et verdict ; résumé (I5) et diagnostic d'un échec (I15)
+proposés par IA quand le connecteur est actif. Annuler, relancer et rejouer à l'identique
 passent par une modale de la console, avec indicateur d'attente.
 -->
 
@@ -31,6 +32,9 @@ async function load() {
   }
 }
 const active = computed(() => !!scan.value && ACTIVE_STATUSES.includes(scan.value.status))
+const FAILED_MODULE = ['error', 'timeout', 'oom', 'invalid-output', 'missing']
+const failed = computed(() => !!scan.value && !active.value && scan.value.status !== 'cancelled'
+  && (scan.value.status === 'error' || scan.value.modules.some(m => FAILED_MODULE.includes(m.status))))
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   void load()
@@ -258,6 +262,16 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
         />
       </UCard>
 
+      <!-- IA (I5, I15) : rien sans connecteur ni pour un projet exclu. -->
+      <AiScanSummary
+        v-if="scan.status === 'done'"
+        :scan-id="scan.id"
+      />
+      <AiDiagnosis
+        v-if="failed"
+        :scan-id="scan.id"
+      />
+
       <UCard>
         <template #header>
           <h2 class="font-semibold">
@@ -298,7 +312,7 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
                   class="text-muted"
                 >{{ t('scans.results', { count: moduleRow(m.id)!.results_count }) }}</span>
                 <UButton
-                  v-if="moduleRow(m.id)!.has_log"
+                  v-if="moduleRow(m.id)!.has_log && canAct"
                   :to="`/api/scans/${scan.id}/modules/${m.id}/log`"
                   external
                   download

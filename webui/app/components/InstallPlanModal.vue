@@ -57,7 +57,7 @@ function toggle(id: string, value: boolean | 'indeterminate') {
 }
 
 async function install() {
-  if (!props.request || !canInstall.value) return
+  if (!props.request || !canInstall.value || req.running.value) return
   const r = await req.run('/api/catalog/install', { ...props.request, accept_licenses: accepted.value }, { timeoutMs: 60 * 60_000 })
   open.value = false
   emit('done', r?.status ?? null)

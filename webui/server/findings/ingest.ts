@@ -13,7 +13,7 @@ import { lstat, readFile, realpath } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 import type pg from 'pg'
 import { CATEGORIES } from '#shared/analysis'
-import { enqueueAiTask } from '../ai/enqueue'
+import { enqueueFindingTasks } from '../ai/hooks'
 import type { Queryable } from '../utils/db'
 import { readModuleHints } from './manifest'
 import { parseCycloneDx, parseSarif, type ParsedFinding, type ParseIssue } from './parse'
@@ -130,6 +130,10 @@ interface UpsertRow {
   id: string
   inserted: boolean
   severity: string
+  tool: string
+  rule_id: string
+  category: string
+  secret_type: string | null
 }
 
 async function upsert(db: Queryable, scan: ScanRow, findings: (ParsedFinding & { severity: string })[]): Promise<UpsertRow[]> {
@@ -184,7 +188,7 @@ async function upsert(db: Queryable, scan: ScanRow, findings: (ParsedFinding & {
               status_at = CASE WHEN f.status = 'fixed' OR (f.status = 'accepted' AND f.status_until < current_date)
                                THEN now() ELSE f.status_at END,
               last_scan_id = EXCLUDED.last_scan_id, last_commit = EXCLUDED.last_commit, updated_at = now()
-       RETURNING id, (xmax = 0) AS inserted, severity`,
+       RETURNING id, (xmax = 0) AS inserted, severity, tool, rule_id, category, secret_type`,
       [scan.project_id, scan.id, scan.commit_sha, JSON.stringify(batch)],
     )
     out.push(...res.rows)
@@ -235,16 +239,8 @@ export async function ingestModuleOutputs(db: Db, input: IngestInput): Promise<I
     return res
   })
 
-  // I2 : explication précalculée des nouveaux résultats critical / high (contrat 7).
-  for (const r of rows) {
-    if (!r.inserted || (r.severity !== 'critical' && r.severity !== 'high')) continue
-    try {
-      await enqueueAiTask(db, { kind: 'explain-finding', subjectType: 'finding', subjectId: r.id, projectId: scan.project_id })
-    }
-    catch (err) {
-      console.error('[findings] explain-finding not queued:', (err as Error).message)
-    }
-  }
+  // Précalculs IA (contrat 7) : I2 explication, I3 pré-tri, I14 typage des secrets, I17 traduction.
+  await enqueueFindingTasks(db, scan.project_id, rows, await moduleVersion(db, input.scanId, input.moduleId))
   return { count: rows.length, newCount: rows.filter(r => r.inserted).length, errors }
 }
 

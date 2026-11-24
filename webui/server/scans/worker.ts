@@ -14,6 +14,8 @@ import type pg from 'pg'
 import { GateRules, VerdictDetails, type ErrorClass, type ScanModuleStatus } from '#shared/analysis'
 import { UUID_V4_RE } from '#shared/schemas'
 import { readModulesState } from '../utils/catalog'
+import { logExcerpt, MAX_AI_EXCERPT } from '../health/log'
+import { FAILED_MODULE_STATUSES } from '../health/scans'
 import { scanJobSchema, type JobCredential, type RunnerError, type ScanJob, type ScanResult } from './contract'
 import { copyModuleLog, jobPending, listIncomingJobs, readResult, readRunnerState, resultDir, withdrawJob, writeJob } from './files'
 import { pendingGate, type Integrations } from './integrations'
@@ -23,6 +25,8 @@ import {
 } from './plan'
 import { EFFECTIVE_PRIORITY_SQL, retryDelayS } from './priority'
 import { makeRedactor } from './redact'
+import { loadTimeoutOverrides } from '../ai/overrides'
+import { aiLogContext } from '../ai/context'
 import type { WorkerConfig } from './config'
 
 export interface WorkerPaths {
@@ -259,6 +263,7 @@ export class ScanWorker {
       projectLicense: project.spdx_license,
       installed: state.modules,
       catalog,
+      timeoutOverrides: await loadTimeoutOverrides(client),
     })
     const plan: ScanPlan = {
       version: PLAN_VERSION,
@@ -488,10 +493,12 @@ export class ScanWorker {
       await this.pool.query(
         `UPDATE scan_modules SET status = $3, error_class = $4, image_digest = COALESCE($5, image_digest), feeds = $6,
                 results_count = $7, duration_ms = $8, log_path = $9, started_at = $10, finished_at = $11,
-                attempts = $12
+                attempts = $12, peak_memory_mb = $13, cpu_ms = $14
           WHERE scan_id = $1 AND module_id = $2`,
         [scan.id, m.id, status, errorClass, m.image_digest, JSON.stringify(m.feeds), count,
-          m.stats?.duration_ms ?? null, logPath, m.started_at ?? null, m.finished_at ?? null, scan.attempt])
+          m.stats?.duration_ms ?? null, logPath, m.started_at ?? null, m.finished_at ?? null, scan.attempt,
+          // F14, G20 : mesures du runner ; absentes, elles restent NULL (jamais 0).
+          m.stats?.peak_memory_mb ?? null, m.stats?.cpu_ms ?? null])
     }
     return complete
   }
@@ -529,7 +536,7 @@ export class ScanWorker {
     if (res.rowCount) {
       await this.pool.query(
         `UPDATE scan_modules SET status = 'pending', error_class = NULL, results_count = NULL, duration_ms = NULL,
-                started_at = NULL, finished_at = NULL WHERE scan_id = $1 AND status <> 'missing'`, [scan.id])
+                peak_memory_mb = NULL, cpu_ms = NULL, started_at = NULL, finished_at = NULL WHERE scan_id = $1 AND status <> 'missing'`, [scan.id])
       this.log(`scan ${scan.id}: ${error.code}, retry ${scan.attempt + 1} in ${delay}s`)
     }
   }
@@ -614,9 +621,44 @@ export class ScanWorker {
       await this.integrations.enqueueAiTask(this.pool, {
         kind: 'explain-verdict', subjectType: 'scan', subjectId: scanId, projectId: r.rows[0].project_id, priority: 10,
       })
+      // I5 : résumé de l'analyse, même branchement (contrat 13).
+      await this.integrations.enqueueAiTask(this.pool, {
+        kind: 'summarize-scan', subjectType: 'scan', subjectId: scanId, projectId: r.rows[0].project_id, priority: 10,
+      })
     }
     catch (e) {
       this.log(`scan ${scanId}: AI task not queued: ${(e as Error).message}`)
+    }
+    await this.requestDiagnosis(scanId, r.rows[0].project_id)
+  }
+
+  /**
+   * I15 : un module fini en error, timeout, oom ou invalid-output demande le
+   * diagnostic IA de l'analyse (contrat 13), une seule fois, après le dernier
+   * module. Contexte joint au format du chantier D, {logs: [{module, excerpt}]} :
+   * fin masquée du journal de chaque module en échec (8 au plus, 16 Ko en tout),
+   * seule source lisible par scanoria-ai. Sans effet sans connecteur.
+   */
+  private async requestDiagnosis(scanId: string, projectId: string): Promise<void> {
+    try {
+      const failed = await this.pool.query<{ module_id: string, log_path: string | null }>(
+        `SELECT module_id, log_path FROM scan_modules
+          WHERE scan_id = $1 AND status = ANY($2::text[]) ORDER BY module_id LIMIT 8`, [scanId, [...FAILED_MODULE_STATUSES]])
+      if (!failed.rows.length) return
+      const share = Math.floor(MAX_AI_EXCERPT / failed.rows.length)
+      const logs: { module: string, excerpt: string }[] = []
+      for (const m of failed.rows) {
+        const excerpt = await logExcerpt(this.cfg.scanLogsDir, m.log_path, share).catch(() => null)
+        if (excerpt) logs.push({ module: m.module_id, excerpt })
+      }
+      await this.integrations.enqueueAiTask(this.pool, {
+        kind: 'diagnose-scan', subjectType: 'scan', subjectId: scanId, projectId,
+        // Format et bornes du chantier D : masqué de nouveau (règle IA), fin de journal, 16 Ko en tout.
+        context: aiLogContext(logs.map(l => ({ module: l.module, log: l.excerpt }))),
+      })
+    }
+    catch (e) {
+      this.log(`scan ${scanId}: diagnosis not queued: ${(e as Error).message}`)
     }
   }
 

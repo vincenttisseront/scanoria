@@ -933,8 +933,8 @@ def auto_rollback(cur, old_prev, dump, new):
         deploy_rootfs(os.path.join(RELEASES, cur))
         post_deploy()
         console("start")
-        health(cur)
         sync_units()
+        health(cur)
     except Fail as e:
         msg = "automatic rollback to %s failed: %s" % (cur, e.message)
         write_alert(msg, cur)
@@ -998,6 +998,11 @@ def _apply(cur, old_prev, stg, version, upload_id):
         set_step("migrate")
         console("start")
         set_step("start")
+        # Unités ajoutées par la version (worker, runner…) activées AVANT le
+        # contrôle de santé : scanoria-selftest les exige, sinon la mise à jour
+        # échoue et revient en arrière (constaté de la 0.2.0 vers la 0.3.0).
+        set_step("services")
+        sync_units()
         set_step("health")
         health(new)
     except Fail as e:
@@ -1005,8 +1010,6 @@ def _apply(cur, old_prev, stg, version, upload_id):
         auto_rollback(cur, old_prev, dump, new)
         raise Fail("E_HEALTH_ROLLED_BACK", "update to %s failed (%s); %s restored" % (new, e.message, cur),
                    {"from_version": cur, "to_version": new, "rolled_back": True})
-    set_step("services")
-    sync_units()
     set_step("cleanup")
     cleanup((new, cur))
     if upload_dir:
@@ -1041,9 +1044,9 @@ def cmd_rollback(expected_current, expected_target):
         post_deploy()
         set_step("start")
         console("start")
+        sync_units()
         set_step("health")
         health(prev)
-        sync_units()
     except Fail as e:
         msg = "rollback to %s failed: %s" % (prev, e.message)
         write_alert(msg, prev)

@@ -51,6 +51,7 @@ const OPS: Record<string, Record<string, Op>> = {
     put: { summary: 'Upload one release file (raw body): release.json, SHA256SUMS, SHA256SUMS.sig, scanoria-X.Y.Z.tar.zst', role: 'admin', status: 201 },
   },
   '/api/catalog': { get: { summary: 'Catalog modules, install state, compatibility, packs, dependency graph, recommended selection, operations', role: 'viewer' } },
+  '/api/catalog/feeds/refresh': { post: { summary: 'Request refresh-feeds (download the vulnerability databases of installed feeds now)', role: 'admin', body: 'refresh-feeds', status: 202 } },
   '/api/catalog/refresh': { post: { summary: 'Request refresh-catalog (download and verify the signed index)', role: 'admin', body: 'refresh-catalog', status: 202 } },
   '/api/catalog/plan': { post: { summary: 'Install plan without side effect: added dependencies, licenses to accept, resource checks', role: 'viewer', body: 'CatalogPlan' } },
   '/api/catalog/install': { post: { summary: 'Request install-modules for modules or a pack (409 E_PLAN when blocked)', role: 'admin', body: 'CatalogInstall', status: 202 } },
@@ -66,8 +67,14 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/ai/disconnect': { post: { summary: 'Request set-ai-endpoint: remove the connector and close its firewall rule', role: 'admin', status: 202 } },
   '/api/ai/probe': { post: { summary: 'Rediscover the models of the AI server', role: 'admin', status: 202 } },
   '/api/ai/models': { put: { summary: 'Force a model per AI task, or back to automatic (null)', role: 'admin', body: 'AiModels' } },
-  '/api/ai/explain': { post: { summary: 'Interactive AI explanation of a finding (I2) or a verdict (I9)', role: 'viewer', body: 'AiExplain', status: 202 } },
-  '/api/ai/output': { get: { summary: 'Latest AI output for a finding or a scan, marked as AI with model and digest', role: 'viewer' } },
+  '/api/ai/explain': { post: { summary: 'Interactive AI request: explanation (I2, I9), pre-triage (I3), scan summary (I5), secret type (I14), failure diagnosis (I15), rule translation (I17)', role: 'viewer', body: 'AiExplain', status: 202 } },
+  '/api/ai/output': { get: { summary: 'Latest AI output for a finding, a scan or a rule key, marked as AI with model and digest, with the caller\'s feedback', role: 'viewer' } },
+  '/api/ai/suggestions': { get: { summary: 'Latest AI pre-triage (I3) or secret type (I14) for up to 200 findings; suggestions only, never a status change', role: 'viewer' } },
+  '/api/ai/rule-key': { get: { summary: 'Translation key (tool:version:rule) of a finding\'s rule (I17); null for secrets and opted-out projects', role: 'viewer' } },
+  '/api/ai/feedback': { post: { summary: 'Thumbs up/down and optional correction on an AI output (I24); never sent to the model', role: 'viewer', body: 'AiFeedback' } },
+  '/api/ai/agreement': { get: { summary: 'AI/human agreement over 90 days per task and model (I24)', role: 'operator' } },
+  '/api/ai/diagnosis/proposal': { get: { summary: 'Safe setting proposed for a failed scan (I15), recomputed from facts, never taken from the AI output', role: 'operator' } },
+  '/api/ai/diagnosis/apply': { post: { summary: 'Apply the proposed module timeout (409 E_AI_STALE if it changed); audited', role: 'operator', body: 'AiDiagnosisApply' } },
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
   '/api/gates': {
@@ -104,7 +111,10 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/scans/{id}/cancel': { post: { summary: 'Cancel a queued, dispatched or running scan (409 E_SCAN_STATE when finished)', role: 'operator' } },
   '/api/scans/{id}/retry': { post: { summary: 'Queue a new scan of the same project, ref and profile', role: 'operator', status: 202 } },
   '/api/scans/{id}/replay': { post: { summary: 'Replay identically (G11): same commit and frozen plan', role: 'operator', status: 202 } },
-  '/api/scans/{id}/modules/{module}/log': { get: { summary: 'Full module log (text/plain, G20)', role: 'viewer' } },
+  '/api/scans/{id}/modules/{module}/log': { get: { summary: 'Full module log (text/plain, G20): secrets masked, size bounded, truncation marked; audited', role: 'operator' } },
+  '/api/usage/modules': { get: { summary: 'Real usage per installed module (F14) over 30 days and modules unused for N days (query unused_days, default 30); modules required by another are never unused', role: 'viewer' } },
+  '/api/usage/modules/{id}': { get: { summary: 'Usage of one installed module (F14): scanner statistics, or memory, CPU and disk series over 7 and 30 days', role: 'viewer' } },
+  '/api/health/scans': { get: { summary: 'Scan health per tool over 7 and 30 days (G20): failures by class, timeouts, out of memory, durations; recent failed scans', role: 'viewer' } },
   '/api/findings': { get: { summary: 'Unified findings (filters: project_id, scan_id, tool, severity, category, status, is_new, secret, malicious, q; paginated)', role: 'viewer' } },
   '/api/findings/summary': { get: { summary: 'Open findings per project and severity, secrets to revoke, malicious packages', role: 'viewer' } },
   '/api/findings/{id}': { get: { summary: 'Finding detail (masked snippet, scans where it appears); never a secret value', role: 'viewer' } },
@@ -124,6 +134,7 @@ const OPS: Record<string, Record<string, Op>> = {
 const HELPER_BODIES = [
   'set-hostname', 'set-admin-networks', 'issue-certificate', 'import-certificate', 'check-update',
   'apply-update', 'rollback-update', 'set-update-policy', 'run-selftest', 'refresh-catalog', 'check-dns',
+  'refresh-feeds',
 ]
 
 const PLAN_PROPERTIES = {
@@ -207,7 +218,19 @@ export default defineEventHandler(async () => {
         },
         AiExplain: {
           type: 'object', additionalProperties: false, required: ['kind', 'subject_id'],
-          properties: { kind: { enum: ['explain-finding', 'explain-verdict'] }, subject_id: { type: 'string', format: 'uuid' }, locale: { enum: ['fr', 'en'] } },
+          properties: {
+            kind: { enum: ['explain-finding', 'explain-verdict', 'triage-finding', 'summarize-scan', 'classify-secret', 'diagnose-scan', 'translate-rule'] },
+            subject_id: { type: 'string', maxLength: 400, description: 'Finding or scan UUID; tool:version:rule key for translate-rule' },
+            locale: { enum: ['fr', 'en'] },
+          },
+        },
+        AiFeedback: {
+          type: 'object', additionalProperties: false, required: ['task_id', 'vote'],
+          properties: { task_id: { type: 'string', format: 'uuid' }, vote: { enum: [1, -1] }, correction: { type: ['string', 'null'], minLength: 1, maxLength: 4000 } },
+        },
+        AiDiagnosisApply: {
+          type: 'object', additionalProperties: false, required: ['scan_id', 'module', 'proposed_s'],
+          properties: { scan_id: { type: 'string', format: 'uuid' }, module: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,40}$' }, proposed_s: { type: 'integer', minimum: 60, maximum: 86400 } },
         },
         Error: {
           type: 'object',

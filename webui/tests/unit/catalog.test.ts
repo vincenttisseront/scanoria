@@ -5,13 +5,14 @@
 // helper, versions, options typées (G3), plan d'installation (G1, F11) avec
 // dépendances ajoutées, conflits, licences et ressources, vue du catalogue.
 
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Ajv2020 from 'ajv/dist/2020.js'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   compareVersions, findModule, latestModules, readCatalogIndex, readDnsStatus, readModulesState, satisfiesAppliance,
   type CatalogIndex, type DnsStatus, type InstalledModule,
@@ -21,6 +22,7 @@ import { buildCatalogView, dependencyEdges, updateAvailable, type CatalogContext
 import { changedOptions, checkOption, optionDefaults, optionFields, resolveOptions } from '#shared/module-options'
 
 const FIXTURES = fileURLToPath(new URL('../fixtures/', import.meta.url))
+const REPO = fileURLToPath(new URL('../../../', import.meta.url))
 const SCHEMAS = fileURLToPath(new URL('../../../src/rootfs/usr/share/scanoria/schemas/', import.meta.url))
 const MACHINE: Machine = { cpu_count: 4, memory_mb: 8192, disks: [{ mount: '/', size_mb: 40960, avail_mb: 20000 }] }
 
@@ -52,6 +54,24 @@ describe('lecture des fichiers publiés', () => {
     expect(index.packs.map(p => p.id)).toEqual(['secrets', 'iac', 'base'])
   })
 
+  it('lit les descriptions traduites du manifeste { fr, en } et le texte seul', () => {
+    expect(findModule(index, 'osv-scanner')!.description).toEqual({ fr: 'Vulnérabilités des dépendances.', en: 'Dependency vulnerabilities.' })
+    expect(findModule(index, 'gitleaks')!.description).toEqual({ fr: 'Recherche de secrets dans l’historique Git.', en: 'Recherche de secrets dans l’historique Git.' })
+  })
+
+  // Régression : l'index réel (catalog/build.py sur modules/) était écarté en entier
+  // par la console (description { fr, en }) et le catalogue paraissait vide.
+  // En CI, PyYAML absent = échec (jamais sauté en silence).
+  it.runIf(!!process.env.CI || spawnSync('python3', ['-c', 'import yaml']).status === 0)('accepte sans rejet l’index construit depuis modules/', async () => {
+    const out = join(tmp, 'real')
+    const r = spawnSync('python3', ['-I', join(REPO, 'catalog/build.py'), 'build', '--out', out], { cwd: REPO, encoding: 'utf8' })
+    expect(r.status, r.stderr).toBe(0)
+    const real = (await readCatalogIndex(join(out, 'catalog-index.json')))!
+    expect(real.rejected).toBe(0)
+    expect(real.modules.length).toBeGreaterThan(0)
+    expect(real.modules.every(m => !m.description || (m.description.fr && m.description.en))).toBe(true)
+  })
+
   it('refuse un index absent, illisible, trop gros ou d’un autre schéma', async () => {
     const write = async (name: string, content: string) => {
       await writeFile(join(tmp, name), content)
@@ -66,12 +86,32 @@ describe('lecture des fichiers publiés', () => {
     expect(await readCatalogIndex(await write('big.json', ' '.repeat(8 * 1024 * 1024 + 1)))).toBeNull()
   })
 
+  // Répertoire du helper illisible pour la console : signalé au journal (une fois), lu comme absent.
+  it.runIf(process.getuid?.() !== 0)('journalise une fois un index illisible (droits)', async () => {
+    const dir = join(tmp, 'locked')
+    await mkdir(dir)
+    await writeFile(join(dir, 'catalog-index.json'), '{}')
+    await chmod(dir, 0o000)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(await readCatalogIndex(join(dir, 'catalog-index.json'))).toBeNull()
+      expect(await readCatalogIndex(join(dir, 'catalog-index.json'))).toBeNull()
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]![0])).toContain('EACCES')
+    }
+    finally {
+      warn.mockRestore()
+      await chmod(dir, 0o700)
+    }
+  })
+
   it('lit l’état des modules en écartant les entrées invalides', async () => {
     const state = await readModulesState(join(FIXTURES, 'modules-state.json'))
     expect(state.available).toBe(true)
     expect(state.modules.map(m => m.id)).toEqual(['gitleaks', 'trivy-db', 'trivy', 'ancien'])
     expect(state.operations).toHaveLength(2)
-    expect(await readModulesState(join(tmp, 'absent.json'))).toEqual({ available: false, modules: [], operations: [] })
+    expect(state.feeds).toEqual([expect.objectContaining({ id: 'trivy-db', status: 'ok', size_mb: 1732.8 })])
+    expect(await readModulesState(join(tmp, 'absent.json'))).toEqual({ available: false, modules: [], operations: [], feeds: [] })
   })
 
   // Contrat 4 : le jeu d'essai suit les schémas des chantiers B et C dès qu'ils sont fusionnés
@@ -271,7 +311,7 @@ describe('plan d’installation', () => {
 })
 
 describe('vue du catalogue', () => {
-  const view = () => buildCatalogView({ ...ctx({ installed }), operations: [], stateAvailable: true } as CatalogContext)
+  const view = () => buildCatalogView({ ...ctx({ installed }), operations: [], feeds: [], stateAvailable: true } as CatalogContext)
 
   it('fusionne index et état : installé, mise à jour, compatibilité, orphelins', () => {
     const v = view()
@@ -287,6 +327,15 @@ describe('vue du catalogue', () => {
     expect(v.index).toEqual({ available: true, version: 7, generated_at: '2026-11-23T06:00:00Z', rejected: 1 })
   })
 
+  it('joint l’âge de la base aux feeds installés seulement', () => {
+    const feed = { id: 'trivy-db', updated_at: '2026-11-24T03:00:00Z', size_mb: 12, status: 'ok' as const, error: null }
+    const v = buildCatalogView({ ...ctx({ installed }), operations: [], feeds: [feed], stateAvailable: true } as CatalogContext)
+    const byId = Object.fromEntries(v.modules.map(m => [m.id, m]))
+    expect(byId['trivy-db']!.feed).toEqual(feed)
+    expect(byId.gitleaks!.feed).toBeNull()
+    expect(byId['osv-db']!.feed).toBeNull()
+  })
+
   it('packs : modules inconnus, installés, restants et plan global', () => {
     const packs = Object.fromEntries(view().packs.map(p => [p.id, p]))
     expect(packs.iac!.unknown_modules).toEqual(['checkov'])
@@ -300,7 +349,7 @@ describe('vue du catalogue', () => {
     expect(v.recommended.ids).toEqual(['osv-scanner', 'shellcheck'])
     expect(v.recommended.first_access).toBe(false)
     expect(v.recommended.plan?.items.map(i => i.id)).toEqual(['osv-scanner', 'shellcheck', 'osv-db'])
-    const fresh = buildCatalogView({ ...ctx(), operations: [], stateAvailable: false } as CatalogContext)
+    const fresh = buildCatalogView({ ...ctx(), operations: [], feeds: [], stateAvailable: false } as CatalogContext)
     expect(fresh.recommended.first_access).toBe(true)
     expect(fresh.recommended.ids).toEqual(['gitleaks', 'osv-scanner', 'trivy', 'shellcheck'])
   })
@@ -311,7 +360,7 @@ describe('vue du catalogue', () => {
       { from: 'semgrep', to: 'opengrep', kind: 'conflict' },
       { from: 'orphelin-dep', to: 'inexistant', kind: 'module' },
     ]))
-    const empty = buildCatalogView({ ...ctx({ index: null, installed }), operations: [], stateAvailable: true } as CatalogContext)
+    const empty = buildCatalogView({ ...ctx({ index: null, installed }), operations: [], feeds: [], stateAvailable: true } as CatalogContext)
     expect(empty.index.available).toBe(false)
     expect(empty.modules).toEqual([])
     expect(empty.orphans).toHaveLength(4)

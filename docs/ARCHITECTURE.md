@@ -677,6 +677,7 @@ scanoria-ai (scanoria-ai, Node) ─ file ai_tasks ─HTTPS─▶ Ollama externe 
 | `…/scans/results/<job-id>/` | root:scanoria 0750, fichiers 0640 | `result.json` et sorties, purgés après 24 h |
 | `…/scans/workspaces/<job-id>/` | root:root 0700 | source récupérée, **supprimée** après la tâche (§ 6.4, étape 3) |
 | `/var/lib/scanoria/console/secret.key` | scanoria:scanoria 0600 | clé AES-256 des secrets en base, créée au premier démarrage de la console, incluse dans les sauvegardes |
+| `/var/lib/scanoria/console/ai-token.key` | scanoria:scanoria 0600 | clé AES-256 dédiée au seul jeton du connecteur IA, créée au premier jeton ; seule clé copiée dans `/run/scanoria-ai` (scanoria-ai ne peut déchiffrer rien d'autre) |
 | `/var/lib/scanoria/console/scan-logs/<scan-id>/<module>.log` | scanoria:scanoria 0600 | journaux des modules copiés par le worker (G20), purgés avec l'analyse |
 
 ### 12.3 Secrets en base

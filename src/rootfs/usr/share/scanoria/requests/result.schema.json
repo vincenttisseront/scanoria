@@ -56,6 +56,7 @@
             "set-module-state",
             "update-module",
             "set-ai-endpoint",
+            "refresh-feeds",
             "backup-module",
             "restore-module"
           ]
@@ -118,6 +119,7 @@
         "E_AI_UNRESOLVED",
         "E_AI_FORBIDDEN_ADDRESS",
         "E_AI_CA",
+        "E_FEED_UNAVAILABLE",
         "E_SERVICE_RESOURCES",
         "E_BACKUP_FAILED",
         "E_BACKUP_NOT_FOUND",
