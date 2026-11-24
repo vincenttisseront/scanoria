@@ -132,9 +132,9 @@ def extract(archive, dest):
         # Préfixe unique « testbed/ » retiré s'il couvre toutes les entrées.
         if all(rel == "testbed" or rel.startswith("testbed/") for rel, _ in members):
             members = [(rel[len("testbed/"):], m) for rel, m in members if rel != "testbed"]
-        # Lisible par l'utilisateur du conteneur (65534) malgré l'umask 027 du helper.
-        os.makedirs(dest, mode=0o755, exist_ok=False)
-        os.chmod(dest, 0o755)
+        # Droits du seul propriétaire : l'arbre est ensuite donné à l'utilisateur
+        # du conteneur (_give_to_container), monté en lecture seule.
+        os.makedirs(dest, mode=0o700, exist_ok=False)
         base = os.path.realpath(dest)
         for rel, m in members:
             # rel est relatif sans « .. » et seuls des répertoires réels sont créés
@@ -145,9 +145,8 @@ def extract(archive, dest):
                 continue
             _mkdirs(base, os.path.dirname(rel))
             src = tf.extractfile(m)
-            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "wb") as out, src:
-                os.fchmod(out.fileno(), 0o644)
                 shutil.copyfileobj(src, out, 1 << 20)
     os.unlink(tar_path)
 
@@ -159,8 +158,7 @@ def _mkdirs(base, rel):
         try:
             st = os.lstat(cur)
         except FileNotFoundError:
-            os.mkdir(cur, 0o755)
-            os.chmod(cur, 0o755)
+            os.mkdir(cur, 0o700)
             continue
         if not stat.S_ISDIR(st.st_mode):
             raise Fail("E_ARCHIVE", "path conflict in the testbed archive")
@@ -308,14 +306,22 @@ def collect(manifest, out_dir):
 # Banc d'essai complet
 # --------------------------------------------------------------------------
 
+def _give_to_container(path):
+    """Donne l'arbre path à l'utilisateur du conteneur (65534), droits du propriétaire seul."""
+    if os.geteuid() == 0:
+        for d, dirs, files in os.walk(path):
+            for n in [d] + [os.path.join(d, x) for x in dirs + files]:
+                os.lchown(n, NOBODY, NOBODY)
+    # podman sans root (essais) : 65534 du conteneur est un sous-uid de l'appelant.
+    elif common.run("podman", ["unshare", "chown", "-R", "%d:%d" % (NOBODY, NOBODY), path],
+                    timeout=60).returncode != 0:
+        raise Fail("E_INTERNAL", "cannot hand the work directory to the container user")
+
+
 def _prepare_out(out):
     """/out appartient à l'utilisateur du conteneur, et à lui seul (0700)."""
     os.mkdir(out, 0o700)
-    if os.geteuid() == 0:
-        os.chown(out, NOBODY, NOBODY)
-    # podman sans root (essais) : 65534 du conteneur est un sous-uid de l'appelant.
-    elif common.run("podman", ["unshare", "chown", "%d:%d" % (NOBODY, NOBODY), out], timeout=60).returncode != 0:
-        raise Fail("E_INTERNAL", "cannot prepare the output directory")
+    _give_to_container(out)
 
 
 def run(manifest, timeout=None):
@@ -331,12 +337,13 @@ def run(manifest, timeout=None):
     os.makedirs(WORK, mode=0o700, exist_ok=True)
     import secrets
     work = os.path.join(WORK, "testbed-%s-%s" % (manifest["id"], secrets.token_hex(6)))
-    os.mkdir(work, 0o711)
+    os.mkdir(work, 0o700)
     try:
         archive = os.path.join(work, "testbed.tar.zst")
         fetch_archive(manifest, archive)
         src, out = os.path.join(work, "src"), os.path.join(work, "out")
         extract(archive, src)
+        _give_to_container(src)
         os.unlink(archive)
         _prepare_out(out)
         t = scan.get("timeout_s") if isinstance(scan.get("timeout_s"), int) else DEFAULT_TIMEOUT
