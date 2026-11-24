@@ -114,7 +114,8 @@ describe.skipIf(!DATABASE_URL)('bundle : API hors ligne (PostgreSQL réel)', () 
     expect(req).toBeDefined()
     const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
     const result = {
-      version: 1, id: requestId, type: req!.doc.type, origin: 'console', status: ok ? 'ok' : 'error', code: codeName,
+      // Identifiant relu du fichier de demande déposé, jamais celui de la réponse HTTP.
+      version: 1, id: req!.doc.id, type: req!.doc.type, origin: 'console', status: ok ? 'ok' : 'error', code: codeName,
       message: ok ? 'done' : 'invalid bundle signature', received_at: now, started_at: now, finished_at: now, output,
     }
     await writeFile(join(root, 'requests', ok ? 'done' : 'failed', req!.name), JSON.stringify(result))

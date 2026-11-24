@@ -34,7 +34,7 @@ export default defineEventHandler(async (event) => {
     throw apiError(404, 'E_NOT_FOUND')
   }
   const target = join(dir, BUNDLE_UPLOAD_NAME)
-  const refuse = (status: number, code: string) => {
+  const refuse = (status: number, code: 'E_UPLOAD' | 'E_TOO_LARGE') => {
     // Corps non lu : vidé pour répondre proprement au lieu de couper la connexion.
     event.node.req.resume()
     return apiError(status, code)
