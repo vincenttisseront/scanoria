@@ -138,6 +138,12 @@ fresh
 head -c 63 "$TMP/signed/SHA256SUMS.sig" > "$TMP/w/SHA256SUMS.sig"
 expect_ko "signature tronquée refusée" "64 octets" python3 "$B" verify "$TMP/w" --pubkey "$K/test.pub"
 fresh
+echo x > "$TMP/w/extra.txt"
+expect_ko "fichier étranger à SHA256SUMS refusé" "absents de SHA256SUMS" python3 "$B" verify "$TMP/w" --pubkey "$K/test.pub"
+fresh
+cp "$TMP/w/testbed-alpha-scan-1.2.3.tar.zst" "$TMP/w/testbed-x-1.tar.zst"
+expect_ko "archive non signée ajoutée refusée" "absents de SHA256SUMS" python3 "$B" verify "$TMP/w" --pubkey "$K/test.pub"
+fresh
 rm "$TMP/w/SHA256SUMS.sig"
 expect_ko "signature absente refusée" "absent" python3 "$B" verify "$TMP/w" --pubkey "$K/test.pub"
 fresh
@@ -153,14 +159,13 @@ fresh
 rm "$TMP/w/testbed-gamma-svc-10.0.0.tar.zst"
 expect_ko "archive absente refusée" "absent" python3 "$B" verify "$TMP/w" --pubkey "$K/test.pub"
 fresh
-ln -sf catalog-index.json "$TMP/w/lien.json"
 rm "$TMP/w/testbed-gamma-svc-10.0.0.tar.zst" && ln -s testbed-alpha-scan-1.2.3.tar.zst "$TMP/w/testbed-gamma-svc-10.0.0.tar.zst"
 expect_ko "archive remplacée par un lien refusée" "lien" python3 "$B" verify "$TMP/w" --pubkey "$K/test.pub"
 
 # Republication cohérente mais incomplète : SHA256SUMS sans une archive, re-signé.
 resign() { SIGNING_KEY_PEM=$(cat "$K/test.key") bash "$ROOT/.github/scripts/sign-assets.sh" "$K/test.pub" "$TMP/w/SHA256SUMS" > /dev/null; }
 fresh
-sed -i '/testbed-gamma/d' "$TMP/w/SHA256SUMS" && resign
+sed -i '/testbed-gamma/d' "$TMP/w/SHA256SUMS" && rm "$TMP/w/testbed-gamma-svc-10.0.0.tar.zst" && resign
 expect_ko "archive de l'index absente de SHA256SUMS refusée" "mêmes archives" python3 "$B" verify "$TMP/w" --pubkey "$K/test.pub"
 fresh
 { sed -n 2p "$TMP/signed/SHA256SUMS"; sed -n 1p "$TMP/signed/SHA256SUMS"; sed -n 3p "$TMP/signed/SHA256SUMS"; } > "$TMP/w/SHA256SUMS" && resign
@@ -221,6 +226,7 @@ hostile_index "type inconnu" "schéma" '.modules[0].type = "plugin"'
 hostile_index "requires avec champ inconnu" "schéma" '.modules[0].requires.services = []'
 hostile_index "requires.appliance mal formé" "schéma" '.modules[0].requires.appliance = "0.2"'
 hostile_index "libellé DNS invalide" "schéma" '.modules[2].hostname = "Gamma_svc"'
+hostile_index "libellé DNS en double" "en double" '.modules[1].hostname = "gamma"'
 hostile_index "service sans libellé DNS" "schéma" '.modules[2].hostname = null'
 hostile_index "module en double" "non triés\|double" '.modules += [.modules[0]]'
 hostile_index "modules non triés" "non triés" '.modules |= reverse'
@@ -268,7 +274,10 @@ hostile_build "YAML : alias" "alias" 'printf "a: &x [1]\nb: *x\n" >> modules/bet
 hostile_build "YAML : clé en double" "double" 'echo "name: Autre" >> modules/beta-db/module.yaml'
 hostile_build "YAML : plusieurs documents" "un seul document" 'printf -- "---\nid: x\n" >> modules/beta-db/module.yaml'
 hostile_build "YAML : étiquette Python" "YAML invalide" 'echo "x: !!python/object/apply:os.system [id]" >> modules/beta-db/module.yaml'
-hostile_build "YAML : yes n'est pas un booléen" "schéma" 'sed -i "s/^name: Beta DB/name: yes\nupstream: no/" modules/beta-db/module.yaml'
+rm -rf "$TMP/hb" && cp -a "$FX" "$TMP/hb" && sed -i "s/^name: Beta DB/name: yes/" "$TMP/hb/modules/beta-db/module.yaml"
+fx_build "$TMP/hb-out" "$TMP/hb/modules" "$TMP/hb/packs.yaml" > /dev/null 2>&1 \
+	&& [[ "$(jq -r '.modules[1].name | type + ":" + .' "$TMP/hb-out/catalog-index.json")" == "string:yes" ]] \
+	&& ok "YAML : yes reste une chaîne" || ko "YAML : yes reste une chaîne"
 hostile_build "YAML : version flottante" "schéma" 'sed -i "s/^version: \"2026.11.1\"/version: 2026.11/" modules/beta-db/module.yaml'
 hostile_build "requires.appliance mal formé" "appliance" 'sed -i "s/>=0.2.0/0.2/" modules/alpha-scan/module.yaml'
 rm -rf "$TMP/hb" && cp -a "$FX" "$TMP/hb" && echo "0" > "$TMP/VERSION0"

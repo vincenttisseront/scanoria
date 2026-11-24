@@ -7,10 +7,12 @@
 #     de l'index ; si modules/ ou catalog/ change alors que catalog/VERSION de
 #     la base est déjà publié (tag catalog-v<N>), le numéro doit augmenter.
 #   - Sur main : si le tag catalog-v<N> n'existe pas encore, construction,
-#     attente de ci-ok sur le commit, signature de SHA256SUMS dans
+#     attente de ci-ok sur le commit, puis signature de SHA256SUMS dans
 #     l'environment « release » (même clé et même script que release.yml), puis
 #     release catalog-v<N> marquée « not latest » (releases/latest reste la
-#     console). Un numéro publié n'est jamais reconstruit.
+#     console). Un numéro publié n'est jamais reconstruit ; si le contenu
+#     construit diffère de catalog-v<N> déjà publié (hors date), le travail
+#     échoue : il faut augmenter catalog/VERSION.
 name: Catalog
 
 on:
@@ -18,12 +20,16 @@ on:
     paths:
       - modules/**
       - catalog/**
+      - src/rootfs/usr/lib/scanoria/py/scanoria/schema.py
+      - update-pubkey.pem
       - .github/workflows/catalog.yml
   push:
     branches: [main]
     paths:
       - modules/**
       - catalog/**
+      - src/rootfs/usr/lib/scanoria/py/scanoria/schema.py
+      - update-pubkey.pem
       - .github/workflows/catalog.yml
   workflow_dispatch:
 
@@ -62,9 +68,13 @@ jobs:
           if [ -z "$base" ]; then
             echo "catalog/VERSION absent de la base : premier index ($head)"; exit 0
           fi
-          if ! git ls-remote --exit-code --tags origin "refs/tags/catalog-v$base" > /dev/null; then
-            echo "catalog-v$base pas encore publié : numéro $head accepté"; exit 0
-          fi
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/catalog-v$base" > /dev/null || rc=$?
+          case "$rc" in
+            0) ;;
+            2) echo "catalog-v$base pas encore publié : numéro $head accepté"; exit 0 ;;
+            *) echo "::error::lecture des tags impossible (code $rc)"; exit 1 ;;
+          esac
           changed=$(git diff --name-only "$BASE_SHA" HEAD -- modules catalog \
             | grep -vE '^catalog/(tests/|README\.md$)' || true)
           if [ -n "$changed" ] && [ "$head" -le "$base" ]; then
@@ -101,11 +111,25 @@ jobs:
         run: |
           p=false
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$GITHUB_REF" = "refs/heads/main" ] && [ -n "$VERSION" ]; then
-            if git ls-remote --exit-code --tags origin "refs/tags/catalog-v$VERSION" > /dev/null; then
-              echo "::notice::catalog-v$VERSION déjà publié : jamais reconstruit (augmenter catalog/VERSION pour publier)"
-            else
-              p=true
-            fi
+            rc=0
+            git ls-remote --exit-code --tags origin "refs/tags/catalog-v$VERSION" > /dev/null || rc=$?
+            case "$rc" in
+              2) p=true ;;
+              0)
+                # Déjà publié : jamais reconstruit. Le contenu construit doit
+                # être celui de la release (date mise à part), sinon un
+                # changement resterait sans publication.
+                pub="https://github.com/$GITHUB_REPOSITORY/releases/download/catalog-v$VERSION"
+                curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/pub-index.json" \
+                  "$pub/catalog-index.json"
+                if ! diff <(jq -S 'del(.generated_at)' "$RUNNER_TEMP/pub-index.json") \
+                          <(jq -S 'del(.generated_at)' out/catalog/catalog-index.json) > /dev/null; then
+                  echo "::error::le contenu du catalogue a changé mais catalog-v$VERSION est déjà publié : passer catalog/VERSION à $((VERSION + 1))"
+                  exit 1
+                fi
+                echo "::notice::catalog-v$VERSION déjà publié avec ce contenu : rien à faire" ;;
+              *) echo "::error::lecture des tags impossible (code $rc)"; exit 1 ;;
+            esac
           fi
           echo "publish=$p" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -149,7 +173,7 @@ jobs:
 
   sign:
     name: signature de l'index
-    needs: [build]
+    needs: [build, ci-green]
     if: needs.build.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -246,13 +270,15 @@ jobs:
             echo "Vérification : \`SHA256SUMS.sig\` (Ed25519, \`update-pubkey.pem\`), puis empreintes de \`SHA256SUMS\`."
           } > "$RUNNER_TEMP/notes.md"
           cd dist
+          # Liste explicite : exactement les fichiers vérifiés de SHA256SUMS.
+          mapfile -t assets < <(awk '{ print $2 }' SHA256SUMS)
           gh release create "catalog-v$VERSION" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --latest=false \
             --title "Catalogue Scanoria $VERSION" \
             --notes-file "$RUNNER_TEMP/notes.md" \
-            catalog-index.json SHA256SUMS SHA256SUMS.sig testbed-*.tar.zst
+            "${assets[@]}" SHA256SUMS SHA256SUMS.sig
       - name: Vérification depuis les adresses publiques (comme l'appliance)
         env:
           VERSION: ${{ needs.build.outputs.version }}
@@ -263,8 +289,9 @@ jobs:
           for a in SHA256SUMS SHA256SUMS.sig; do
             curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-all-errors -o "$d/$a" "$base/$a"
           done
+          openssl pkeyutl -verify -pubin -inkey update-pubkey.pem -rawin -in "$d/SHA256SUMS" -sigfile "$d/SHA256SUMS.sig"
           awk '{ print $2 }' "$d/SHA256SUMS" | while read -r a; do
-            case "$a" in catalog-index.json|testbed-*.tar.zst) ;; *) echo "::error::nom inattendu : $a"; exit 1 ;; esac
+            [[ "$a" =~ ^(catalog-index\.json|testbed-[A-Za-z0-9._+-]+\.tar\.zst)$ ]] || { echo "::error::nom inattendu : $a"; exit 1; }
             curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-all-errors -o "$d/$a" "$base/$a"
           done
           python3 -I catalog/build.py verify "$d" --pubkey update-pubkey.pem --expect-version "$VERSION"

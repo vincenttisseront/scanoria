@@ -16,7 +16,8 @@ testbed-<id>-<version>.tar.zst reproductible, puis écrit catalog-index.json et
 SHA256SUMS dans le répertoire de sortie (vidé au préalable). Deux constructions
 du même arbre, à la même date, donnent les mêmes octets.
 
-« verify » contrôle un répertoire de publication comme le fera l'appliance :
+« verify » contrôle un répertoire de publication avant et après la release
+(mêmes contrôles que le service root de l'appliance, qui a sa propre vérification) :
 signature Ed25519 brute de SHA256SUMS (openssl pkeyutl -rawin, même procédé que
 le lot de mise à jour), empreintes, index conforme au schéma et cohérent,
 archives des bancs d'essai sans lien ni chemin sortant.
@@ -57,6 +58,7 @@ MAX_TESTBED_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE = 16 * 1024 * 1024
 MAX_MODULES = 500
 ZSTD_LEVEL = "-19"
+TOOL_DIRS = ("/usr/bin", "/bin", "/usr/local/bin")
 
 ID_RE = re.compile(r"[a-z0-9][a-z0-9-]{1,40}\Z")
 NAME_RE = re.compile(r"[A-Za-z0-9._+@-]{1,128}\Z")
@@ -152,6 +154,15 @@ def _check_json_value(v, where, depth=0):
 
 # --- Utilitaires -----------------------------------------------------------------
 
+def tool(name):
+    """Chemin absolu d'un outil système (jamais résolu par PATH)."""
+    for d in TOOL_DIRS:
+        exe = os.path.join(d, name)
+        if os.path.isfile(exe) and os.access(exe, os.X_OK):
+            return exe
+    raise BuildError("%s absent de %s" % (name, ", ".join(TOOL_DIRS)))
+
+
 def _lstat_regular(path):
     try:
         st = os.lstat(path)
@@ -216,10 +227,10 @@ def source_epoch(root, explicit):
             raise BuildError("SOURCE_DATE_EPOCH invalide")
         return int(env)
     try:
-        out = subprocess.run(["git", "-C", root, "log", "-1", "--format=%ct"],
+        out = subprocess.run([tool("git"), "-C", root, "log", "-1", "--format=%ct"],
                              capture_output=True, text=True, check=True, timeout=30).stdout.strip()
         return int(out)
-    except (OSError, subprocess.SubprocessError, ValueError) as e:
+    except (OSError, subprocess.SubprocessError, ValueError, BuildError) as e:
         raise BuildError("date de construction inconnue : --date ou SOURCE_DATE_EPOCH") from e
 
 
@@ -297,10 +308,8 @@ def make_testbed_archive(base, dest, epoch):
             except ValueError as e:
                 raise BuildError("banc d'essai : chemin trop long pour USTAR : %s" % rel) from e
     try:
-        r = subprocess.run(["zstd", "-q", ZSTD_LEVEL, "-T1", "-c"], input=buf.getvalue(),
+        r = subprocess.run([tool("zstd"), "-q", ZSTD_LEVEL, "-T1", "-c"], input=buf.getvalue(),
                            capture_output=True, check=True, timeout=600)
-    except FileNotFoundError as e:
-        raise BuildError("zstd absent") from e
     except subprocess.CalledProcessError as e:
         raise BuildError("zstd en échec : %s" % e.stderr.decode("utf-8", "replace")) from e
     if len(r.stdout) > MAX_ARCHIVE:
@@ -317,20 +326,42 @@ def _norm(ti, epoch, kind, mode):
     ti.uname = ti.gname = ""
 
 
+def _decompress_capped(path, limit):
+    """zstd -d en flux, arrêté dès que la sortie dépasse limit octets."""
+    try:
+        proc = subprocess.Popen([tool("zstd"), "-q", "-d", "-c", "--", path],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError as e:
+        raise BuildError("%s : décompression impossible" % path) from e
+    chunks, total = [], 0
+    try:
+        while True:
+            chunk = proc.stdout.read(1 << 16)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > limit:
+                raise BuildError("%s : contenu décompressé trop gros" % path)
+            chunks.append(chunk)
+        if proc.wait(timeout=600) != 0:
+            raise BuildError("%s : décompression impossible" % path)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        proc.stdout.close()
+    return b"".join(chunks)
+
+
 def check_testbed_archive(path):
     """Contrôle d'une archive publiée : membres ordinaires ou répertoires sous testbed/."""
     st = _lstat_regular(path)
     if st.st_size > MAX_ARCHIVE:
         raise BuildError("%s : archive trop grosse" % path)
-    try:
-        r = subprocess.run(["zstd", "-q", "-d", "-c", "--", path], capture_output=True, check=True, timeout=600)
-    except (OSError, subprocess.SubprocessError) as e:
-        raise BuildError("%s : décompression impossible" % path) from e
-    if len(r.stdout) > MAX_TESTBED_BYTES + (MAX_TESTBED_FILES * 2 + 2) * 1024:
-        raise BuildError("%s : contenu décompressé trop gros" % path)
+    raw = _decompress_capped(path, MAX_TESTBED_BYTES + (MAX_TESTBED_FILES * 2 + 2) * 1024)
     seen = set()
     try:
-        with tarfile.open(fileobj=io.BytesIO(r.stdout), mode="r:") as tf:
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as tf:
             for m in tf.getmembers():
                 n = m.name
                 parts = n.split("/")
@@ -421,6 +452,13 @@ def check_index(index, index_validator):
         if m.get("testbed_archive") not in (None, want):
             raise BuildError("%s : testbed_archive attendu « %s »" % (m["id"], want))
         modules[m["id"]] = m
+    hostnames = {}
+    for m in index["modules"]:
+        h = m.get("hostname")
+        if h is not None:
+            if h in hostnames:
+                raise BuildError("libellé DNS « %s » en double : %s et %s" % (h, hostnames[h], m["id"]))
+            hostnames[h] = m["id"]
     ids = [m["id"] for m in index["modules"]]
     if ids != sorted(ids):
         raise BuildError("modules de l'index non triés par identifiant")
@@ -577,11 +615,15 @@ def verify(a):
         if _lstat_regular(sig).st_size != SIG_SIZE:
             raise BuildError("SHA256SUMS.sig : signature brute de 64 octets attendue")
         _lstat_regular(sums_path)
-        r = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", a.pubkey, "-rawin",
+        r = subprocess.run([tool("openssl"), "pkeyutl", "-verify", "-pubin", "-inkey", a.pubkey, "-rawin",
                             "-in", sums_path, "-sigfile", sig], capture_output=True, timeout=60)
         if r.returncode != 0:
             raise BuildError("signature de SHA256SUMS invalide")
     sums = read_sums(sums_path)
+    allowed = set(sums) | {SUMS_NAME} | (set() if a.no_signature else {SIG_NAME})
+    extra = sorted(set(os.listdir(d)) - allowed)
+    if extra:
+        raise BuildError("fichiers absents de SHA256SUMS : %s" % ", ".join(extra))
     for name, want in sums.items():
         p = os.path.join(d, name)
         _lstat_regular(p)

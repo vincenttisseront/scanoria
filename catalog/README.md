@@ -48,6 +48,7 @@ un seul document par fichier.
   de l'ensemble requis par un module ou par un pack, un conflit qui vise un
   module absent (G1) ;
 - un pack qui cite un module absent ou une base (F11) ;
+- deux modules qui déclarent le même libellé DNS (`hostname`) ;
 - un scanner sans banc d'essai, un banc d'essai qui contient un lien, un
   fichier spécial ou un nom hors de `[A-Za-z0-9._+@-]` (F12).
 
@@ -67,10 +68,10 @@ Deux constructions du même commit donnent les mêmes octets (même version de
 
 | Travail | Contenu |
 |---|---|
-| `build` | Construit deux fois et compare, puis vérifie. Sur PR, contrôle le numéro. Sur `main`, décide de publier seulement si le tag `catalog-v<N>` n'existe pas. |
+| `build` | Construit deux fois et compare, puis vérifie. Sur PR, contrôle le numéro. Sur `main`, publie seulement si le tag `catalog-v<N>` n'existe pas ; s'il existe et que le contenu construit (date mise à part) diffère de la release, le travail échoue : augmenter `catalog/VERSION`. |
 | `ci-green` | Attend `ci-ok` réussi sur le commit (CLAUDE.md § 16). |
-| `sign` | Environment `release` (limité à `main`, secret `UPDATE_SIGNING_KEY`). Signe `SHA256SUMS` et vérifie avec `update-pubkey.pem` versionné. |
-| `publish` | Revérifie tout, contrôle que le numéro est libre (brouillons compris), crée la release `catalog-v<N>` marquée *not latest* (`releases/latest` reste la console), puis retélécharge et vérifie depuis les adresses publiques. |
+| `sign` | Après `ci-green`. Environment `release` (limité à `main`, secret `UPDATE_SIGNING_KEY`). Signe `SHA256SUMS` et vérifie avec `update-pubkey.pem` versionné. |
+| `publish` | Revérifie tout (aucun fichier hors de `SHA256SUMS`), contrôle que le numéro est libre (brouillons compris), crée la release `catalog-v<N>` marquée *not latest* (`releases/latest` reste la console) avec exactement les fichiers listés, puis retélécharge et vérifie depuis les adresses publiques. |
 
 Un numéro publié n'est jamais reconstruit : pour republier, augmenter
 `catalog/VERSION`. La vérification côté appliance (rafraîchissement du
