@@ -34,6 +34,26 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
     await db?.drop()
   })
 
+  describe('re-corrélation (009, 011)', () => {
+    it('supprimer l’analyse source supprime ses re-corrélations, et une re-corrélation exige sa source', async () => {
+      const q = db.pool
+      const p = (await q.query<{ id: string }>(`SELECT id FROM profiles ORDER BY slug LIMIT 1`)).rows[0]!.id
+      const g = (await q.query<{ id: string }>(`SELECT id FROM gates WHERE slug = 'defaut'`)).rows[0]!.id
+      const project = (await q.query<{ id: string }>(
+        `INSERT INTO projects (slug, name, source_kind, profile_id, gate_id) VALUES ('recorr', 'recorr', 'archive', $1, $2) RETURNING id`, [p, g])).rows[0]!.id
+      const mk = async (n: number, trigger: string, source: string | null) => (await q.query<{ id: string }>(
+        `INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id, sbom_source)
+         VALUES ($1, $2, $3, 10, 'main', $4, $5, $6) RETURNING id`, [project, n, trigger, p, g, source])).rows[0]!.id
+      const src = await mk(1, 'manual', null)
+      const rec = await mk(2, 'recorrelate', src)
+      await expect(mk(3, 'recorrelate', null)).rejects.toThrow(/scans_recorrelate_source/)
+      await expect(mk(4, 'manual', src)).rejects.toThrow(/scans_recorrelate_source/)
+      await q.query('DELETE FROM scans WHERE id = $1', [src])
+      expect((await q.query('SELECT 1 FROM scans WHERE id = $1', [rec])).rowCount).toBe(0)
+      await q.query('DELETE FROM projects WHERE id = $1', [project])
+    })
+  })
+
   describe('migrations', () => {
     it('crée toutes les tables et enregistre chaque migration avec son empreinte', async () => {
       const { rows } = await db.pool.query<{ table_name: string }>(
@@ -46,7 +66,7 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
       ])
       const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       const files = loadMigrationsFromDir(MIGRATIONS_DIR)
-      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql'])
+      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql'])
       expect(mig.rows).toEqual(files.map((f, i) => ({ version: i + 1, name: f.name, checksum: f.checksum })))
     })
 
