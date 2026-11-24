@@ -5,11 +5,11 @@
 // catalogue : ses catégories et sa table de gravités (scan.severity_map,
 // contrat 9). Lecture tolérante : un index absent donne des valeurs vides.
 
-import { readFile, stat } from 'node:fs/promises'
 import { z } from 'zod'
 import { SEVERITIES } from '#shared/analysis'
 import { getConfig } from '../utils/config'
 import { compareVersions } from '../utils/catalog'
+import { readBoundedText } from './fsread'
 
 export interface ModuleHints {
   categories: string[]
@@ -31,8 +31,9 @@ export async function readModuleHints(moduleId: string, version?: string | null,
   const empty: ModuleHints = { categories: [], severityMap: null }
   let doc: unknown
   try {
-    if ((await stat(file)).size > MAX_INDEX_BYTES) return empty
-    doc = JSON.parse(await readFile(file, 'utf8'))
+    const text = await readBoundedText(file, MAX_INDEX_BYTES)
+    if (text === null) return empty
+    doc = JSON.parse(text)
   }
   catch {
     return empty

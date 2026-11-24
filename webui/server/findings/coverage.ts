@@ -7,10 +7,10 @@
 // que ses propres types d'entrée. Le quality gate (E) en fait une raison non
 // bloquante en 0.3.
 
-import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Queryable } from '../utils/db'
 import { readModuleHints } from './manifest'
+import { readBoundedText } from './fsread'
 
 export type CoverageGap
   = | { kind: 'skipped-files', count: number, reasons: Record<string, number>, sample: string[] }
@@ -30,8 +30,9 @@ export async function skippedFromResult(jobId: string | null): Promise<CoverageG
   if (!jobId || !JOB_RE.test(jobId)) return null
   const file = join(scansDir(), 'results', jobId, 'result.json')
   try {
-    if ((await stat(file)).size > 8 * 1024 * 1024) return null
-    const doc = JSON.parse(await readFile(file, 'utf8')) as { source?: { skipped?: unknown } }
+    const text = await readBoundedText(file, 8 * 1024 * 1024)
+    if (text === null) return null
+    const doc = JSON.parse(text) as { source?: { skipped?: unknown } }
     const skipped = Array.isArray(doc.source?.skipped) ? doc.source.skipped : []
     if (!skipped.length) return null
     const reasons: Record<string, number> = {}
