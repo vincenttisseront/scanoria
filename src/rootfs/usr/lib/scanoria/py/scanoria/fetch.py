@@ -38,8 +38,24 @@ from .common import Fail
 NOBODY = testbed.NOBODY
 NETWORK = "scanoria-fetch"
 BRIDGE = "scanoria-fetch0"
-SUBNET = ipaddress.ip_network("10.89.250.0/24")
-GATEWAY = "10.89.250.1"
+
+
+def _fetch_subnet():
+    """Sous-réseau du réseau de récupération, déclaré dans share/scanoria/runner/fetch-network.conf."""
+    conf = {}
+    with open(os.path.join(common.SHARE_DIR, "runner", "fetch-network.conf"), encoding="utf-8") as f:
+        for line in f:
+            key, sep, value = line.partition("=")
+            if sep and not key.lstrip().startswith("#"):
+                conf[key.strip()] = value.strip()
+    net = ipaddress.ip_network(conf["subnet"])
+    if net.version != 4 or not net.is_private or net.prefixlen != 24:
+        raise ValueError("the fetch network must be a private IPv4 /24")
+    return net
+
+
+SUBNET = _fetch_subnet()
+GATEWAY = str(SUBNET.network_address + 1)
 NFT_TABLE = "scanoria_fetch"
 NFT_TEMPLATE = os.path.join(common.SHARE_DIR, "nftables", "scanoria-fetch.nft")
 CRED_DIR = common.RUN + "/runner-cred"
@@ -312,7 +328,7 @@ SSH_COMMAND = ("ssh -F /dev/null -i /cred/id_key -o IdentitiesOnly=yes -o BatchM
 def git_env(credential):
     """(variables passées par nom à podman, valeurs gardées hors de l'argv)."""
     cfg = list(GIT_CONFIG)
-    env = {"HOME": "/tmp", "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/bin/false",
+    env = {"HOME": "/nonexistent", "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/bin/false",
            "SSH_ASKPASS": "/bin/false", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
            "GIT_LFS_SKIP_SMUDGE": "1", "GIT_PROTOCOL_FROM_USER": "0"}
     secret = {}

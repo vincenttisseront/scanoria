@@ -49,7 +49,7 @@ echo "AC de test" > "$T/etc/ssl/certs/ca-certificates.crt"
 
 # Jeton de test : forme manifestement fausse, générée à l'exécution (jamais dans le dépôt).
 TOKEN="scn_$(head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)"
-COMMIT=$(printf 'b14' | sha1sum | cut -d' ' -f1)
+COMMIT=$(printf 'b14' | sha256sum | cut -c1-40)
 SCEN="$TMP/scenario"
 echo ok > "$SCEN"
 

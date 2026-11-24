@@ -45,7 +45,7 @@ def _test_path(var, default):
 
 SCANS = _test_path("SCANORIA_SCANS_DIR", common.VARLIB + "/scans")
 JOBS = SCANS + "/jobs"
-TMP = JOBS + "/tmp"
+TMP = os.path.join(JOBS, "tmp")
 INCOMING = JOBS + "/incoming"
 WORK = JOBS + "/work"
 RESULTS = SCANS + "/results"

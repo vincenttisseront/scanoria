@@ -162,7 +162,7 @@ Service root, file `/var/lib/scanoria/scans/jobs/incoming/` alimentée par
 3. **Source** (`fetch.py`) :
    - dépôt Git : conteneur jetable de l'image `git-fetch`, sans capacité,
      racine en lecture seule, utilisateur 65534, sur le réseau podman
-     `scanoria-fetch` (10.89.250.0/24, sans DNS) ; le runner résout lui-même
+     `scanoria-fetch` (10.89.250.0/24 par défaut, déclaré dans `share/scanoria/runner/fetch-network.conf`, sans DNS) ; le runner résout lui-même
      l'hôte de la forge (adresses de bouclage, lien local, multidiffusion et
      réseau de récupération refusées), passe l'adresse par `--add-host`, et
      ouvre dans la table nftables `inet scanoria_fetch` le seul triplet
