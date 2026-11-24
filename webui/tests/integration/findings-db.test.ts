@@ -82,7 +82,7 @@ describe.skipIf(!DATABASE_URL)('résultats unifiés (PostgreSQL réel)', () => {
     }
     await writeFile(join(root, 'catalog-index.json'), JSON.stringify(index))
     setConfig(loadConfig({ NUXT_DATABASE_URL: db.url, NUXT_CATALOG_INDEX_FILE: join(root, 'catalog-index.json') }))
-    userId = (await createUser(db.pool, { username: 'ops', role: 'operator', password: 'ops-long-password' })).id
+    userId = Number((await createUser(db.pool, { username: 'ops', role: 'operator', password: 'ops-long-password' })).id)
     const p = await db.pool.query<{ id: string }>(
       `INSERT INTO projects (slug, name, source_kind, repo_url, profile_id, gate_id, detection)
        VALUES ('demo', 'Démo', 'git', 'https://forge.exemple.test/demo.git', (SELECT id FROM profiles WHERE slug = 'rapide'),

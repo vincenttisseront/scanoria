@@ -7,7 +7,7 @@
 // résultat malveillant ne peut être exempté (H4).
 
 import { z } from 'zod'
-import { EXCEPTION_KINDS, ExceptionTargets } from '#shared/analysis'
+import { ExceptionTargets, type ExceptionKind } from '#shared/analysis'
 import type { Queryable } from '../utils/db'
 
 /** Durée maximale d'une exception : elle doit être revue au moins une fois par an. */
@@ -30,7 +30,7 @@ export const exceptionCreateSchema = z.discriminatedUnion('kind', [
 
 export type ExceptionCreate = {
   project_id: string
-  kind: (typeof EXCEPTION_KINDS)[number]
+  kind: ExceptionKind
   target: Record<string, unknown>
   reason: string
   expires_on: string

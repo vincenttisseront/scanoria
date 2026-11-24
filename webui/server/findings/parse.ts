@@ -274,4 +274,3 @@ export function parseCycloneDx(doc: unknown, ctx: ParseContext): ParseOutput {
   }
   return { findings: dedupe(drafts.map(d => finish(ctx, d))), issues }
 }
-

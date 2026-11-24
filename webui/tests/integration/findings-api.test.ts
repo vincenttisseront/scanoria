@@ -71,7 +71,7 @@ describe.skipIf(!DATABASE_URL)('API des résultats (h3, PostgreSQL réel)', () =
     await writeFile(join(root, 'catalog-index.json'), JSON.stringify({ schema: 1, version: 1, modules: [{ id: 'trivy', version: '1', categories: ['sca'], scan: { severity_map: { error: 'critical' } } }] }))
     setConfig(loadConfig({ NUXT_DATABASE_URL: db.url, NUXT_CATALOG_INDEX_FILE: join(root, 'catalog-index.json') }))
     for (const role of ['viewer', 'operator', 'admin'] as const) {
-      users[role] = (await createUser(db.pool, { username: role, role, password: `${role}-long-password` })).id
+      users[role] = Number((await createUser(db.pool, { username: role, role, password: `${role}-long-password` })).id)
     }
     projectId = (await db.pool.query<{ id: string }>(
       `INSERT INTO projects (slug, name, source_kind, profile_id, gate_id)

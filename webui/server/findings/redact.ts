@@ -43,10 +43,12 @@ const PATTERNS: { type: string, re: RegExp, group?: number }[] = [
   { type: 'scanoria-token', re: /\bscn_[A-Za-z0-9]{40}\b/g },
   { type: 'api-key', re: /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b/g },
   // Identifiants dans une URL : seul le mot de passe est masqué.
+  // eslint-disable-next-line no-control-regex
   { type: 'url-password', re: /(?<=[a-z][a-z0-9+.-]*:\/\/[^\s:/@]{1,256}:)[^\s@/\u0000]{1,256}(?=@)/gi },
   // Affectation « clé = valeur » dont le nom évoque un secret.
   {
     type: 'assignment',
+    // eslint-disable-next-line no-control-regex
     re: /(?<=\b[A-Za-z0-9_.-]*(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|credential)s?[A-Za-z0-9_.-]*["']?\s*(?::=|=>|[:=])\s*["'`]?)[^\s"'`,;<>\u0000]{4,}/gi,
   },
   { type: 'bearer', re: /(?<=\bBearer\s+)[A-Za-z0-9._~+/-]{8,}=*/g },
