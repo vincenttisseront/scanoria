@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module Trivy (dépendances, IaC, conteneurs, secrets). Version, empreinte
+# d'image et licence relevées en amont le 2026-11-24 (tag v0.76.2, index OCI
+# multi-architecture, même empreinte sur ghcr.io et docker.io). Base hors
+# ligne : module feed trivy-db, montée en lecture seule sur /feeds/trivy-db
+# (répertoire de cache de Trivy : db/trivy.db et db/metadata.json). Les règles
+# IaC sont celles embarquées dans le binaire (--skip-check-update).
+id: trivy
+name: Trivy
+description:
+  fr: Vulnérabilités des dépendances, erreurs de configuration IaC et Dockerfile, secrets.
+  en: Dependency vulnerabilities, IaC and Dockerfile misconfigurations, secrets.
+type: scanner
+categories: [sca, iac, container, secrets]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/aquasecurity/trivy/blob/v0.76.2/LICENSE
+  restrictions: none
+  verified_at: "2026-11-24"
+upstream:
+  homepage: https://trivy.dev
+  source: https://github.com/aquasecurity/trivy
+image: ghcr.io/aquasecurity/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+version: "0.76.2"
+resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 300 }
+hostname: null
+requires: { modules: [], feeds: [trivy-db], appliance: ">=0.2.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties:
+    scanners:
+      type: array
+      default: [vuln, misconfig, secret]
+      minItems: 1
+      uniqueItems: true
+      items: { type: string, enum: [vuln, misconfig, secret, license] }
+      title: Analyses Trivy
+      description: Familles d'analyses lancées (appliqué par le worker d'analyses, 0.3).
+    ignore_unfixed:
+      type: boolean
+      default: false
+      title: Ignorer les vulnérabilités sans correctif
+      description: Ne remonte que les vulnérabilités pour lesquelles une version corrigée existe.
+options_i18n:
+  scanners:
+    fr: { title: Analyses Trivy, description: Familles d'analyses lancées. }
+    en: { title: Trivy scanners, description: Scan families to run. }
+  ignore_unfixed:
+    fr: { title: Ignorer les vulnérabilités sans correctif, description: Ne remonte que les vulnérabilités qui ont une version corrigée. }
+    en: { title: Ignore unfixed vulnerabilities, description: Only reports vulnerabilities that have a fixed version. }
+scan:
+  inputs: [repo, archive]
+  command: ["trivy", "fs", "--cache-dir", "/feeds/trivy-db",
+            "--skip-db-update", "--skip-java-db-update", "--skip-check-update", "--offline-scan",
+            "--scanners", "vuln,misconfig,secret", "--exit-code", "0", "--quiet",
+            "--format", "sarif", "--output", "/out/result.sarif", "/src"]
+  timeout_s: 1200
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/result.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # minimist 1.2.5 dans package-lock.json.
+    - { rule: CVE-2021-44906, category: sca, min: 1 }
+    # Dockerfile sans USER (exécution en root).
+    - { rule: DS-0002, category: iac, min: 1 }
+health: { command: ["trivy", "--version"] }
+upgrade: { policy: on-demand }

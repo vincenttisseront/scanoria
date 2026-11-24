@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module gitleaks (secrets). Manifeste : docs/MODULES.md, schéma
+# catalog/schema/module.schema.json. Version, empreinte d'image et licence
+# relevées en amont le 2026-11-24 (tag v8.30.1, index OCI multi-architecture,
+# même empreinte sur ghcr.io et docker.io).
+id: gitleaks
+name: gitleaks
+description:
+  fr: Détection de secrets (clés, jetons, mots de passe) dans le code et l'historique Git.
+  en: Detects secrets (keys, tokens, passwords) in code and Git history.
+type: scanner
+categories: [secrets]
+license:
+  spdx: MIT
+  url: https://github.com/gitleaks/gitleaks/blob/v8.30.1/LICENSE
+  restrictions: none
+  verified_at: "2026-11-24"
+upstream:
+  homepage: https://gitleaks.io
+  source: https://github.com/gitleaks/gitleaks
+image: ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+version: "8.30.1"
+resources: { min_ram_mb: 256, min_cpu: 1, disk_mb: 100 }
+hostname: null
+requires: { modules: [], feeds: [], appliance: ">=0.2.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties:
+    history:
+      type: boolean
+      default: true
+      title: Analyser l'historique Git
+      description: Parcourt tous les commits quand la source est un dépôt Git (appliqué par le worker d'analyses, 0.3).
+    max_target_megabytes:
+      type: integer
+      default: 10
+      minimum: 1
+      maximum: 1000
+      title: Taille maximale d'un fichier (Mo)
+      description: Les fichiers plus gros sont ignorés et signalés dans la couverture d'analyse (G15).
+options_i18n:
+  history:
+    fr: { title: Analyser l'historique Git, description: Parcourt tous les commits quand la source est un dépôt Git. }
+    en: { title: Scan Git history, description: Walks every commit when the source is a Git repository. }
+  max_target_megabytes:
+    fr: { title: Taille maximale d'un fichier (Mo), description: Les fichiers plus gros sont ignorés et signalés dans la couverture. }
+    en: { title: Maximum file size (MB), description: Larger files are skipped and reported in the scan coverage. }
+scan:
+  inputs: [repo, archive]
+  # Le secret n'apparaît jamais dans la sortie (--redact) : CLAUDE.md § 6.3.
+  command: ["gitleaks", "dir", "/src", "--no-banner", "--redact", "--exit-code", "0",
+            "--max-target-megabytes", "10",
+            "--report-format", "sarif", "--report-path", "/out/result.sarif"]
+  timeout_s: 900
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/result.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    - { rule: generic-api-key, category: secrets, min: 2 }
+    - { rule: jwt, category: secrets, min: 1 }
+health: { command: ["gitleaks", "version"] }
+upgrade: { policy: on-demand }

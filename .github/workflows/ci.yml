@@ -76,10 +76,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Les bancs d'essai des modules (modules/<id>/testbed/, F12) figent
+      # volontairement des dépendances vulnérables : ils sont exclus (motif
+      # absolu, la recherche part de « / »), jamais le reste du dépôt.
       - name: osv-scanner (exceptions datées dans osv-scanner.toml)
         run: |
           .github/scripts/install-tools.sh "$RUNNER_TEMP/tools" osv-scanner
-          "$RUNNER_TEMP/tools/osv-scanner" scan source --config osv-scanner.toml --recursive .
+          "$RUNNER_TEMP/tools/osv-scanner" scan source --config osv-scanner.toml --recursive \
+            --x-exclude 'r:/modules/[^/]+/testbed$' .
 
   dependency-review:
     name: dependency-review
@@ -92,6 +96,10 @@ jobs:
       - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           fail-on-severity: moderate
+          # Seule exception : minimist 1.2.5, figé volontairement dans les bancs
+          # d'essai modules/{osv-scanner,trivy}/testbed/ (F12, docs/MODULES.md).
+          # Avis unique de cette version ; à retirer si le banc d'essai change.
+          allow-ghsas: GHSA-xvch-5gv4-984h
 
   console:
     name: console (lint, types, tests, construction)
@@ -267,6 +275,27 @@ jobs:
           args: >-
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=600
+
+  modules-testbed-live:
+    # Chaque scanner du catalogue sur son banc d'essai, en vrai conteneur Podman
+    # confiné (CLAUDE.md § 6.4, F12) : tests/b10-live.sh. Hors de ci-ok
+    # (optionnel) : il dépend des registres d'images et de l'export OSV.
+    name: modules (bancs d'essai, podman)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dépendances
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq python3-yaml python3-jsonschema
+          podman --version
+      - name: tests/b10-live.sh
+        run: bash tests/b10-live.sh
 
   ci-ok:
     name: ci-ok
