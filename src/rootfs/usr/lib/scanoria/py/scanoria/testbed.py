@@ -309,11 +309,13 @@ def collect(manifest, out_dir):
 # --------------------------------------------------------------------------
 
 def _prepare_out(out):
+    """/out appartient à l'utilisateur du conteneur, et à lui seul (0700)."""
     os.mkdir(out, 0o700)
-    if os.geteuid() == 0 and not common.TEST_ROOT:
+    if os.geteuid() == 0:
         os.chown(out, NOBODY, NOBODY)
-    else:  # podman sans root : l'utilisateur du conteneur est un sous-uid
-        os.chmod(out, 0o777)
+    # podman sans root (essais) : 65534 du conteneur est un sous-uid de l'appelant.
+    elif common.run("podman", ["unshare", "chown", "%d:%d" % (NOBODY, NOBODY), out], timeout=60).returncode != 0:
+        raise Fail("E_INTERNAL", "cannot prepare the output directory")
 
 
 def run(manifest, timeout=None):

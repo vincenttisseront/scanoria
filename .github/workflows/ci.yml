@@ -264,6 +264,12 @@ jobs:
           args: >-
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=600
+      - name: Détail du quality gate
+        if: always() && env.SONAR_TOKEN != ''
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.ref_name }}
+        run: .github/scripts/sonar-report.sh
 
   modules-live:
     name: modules-live (podman réel, b12-live)
