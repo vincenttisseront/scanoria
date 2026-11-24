@@ -22,7 +22,7 @@ L'appliance analyse les dépôts Git de l'entreprise, réunit les résultats dan
 
 Besoin d'origine : n'utiliser **que des outils gratuits**, en SaaS gratuit ou déployés on-prem. Les dépôts **privés** ne doivent pas dépendre de services payants : SonarQube Cloud et CodeQL sont gratuits seulement pour le code public.
 
-Hors périmètre initial : la haute disponibilité (un seul nœud), le multi-tenant, et l'« IA partout ». Une aide par un modèle local n'est envisageable que via un connecteur **Ollama externe** optionnel, désactivé par défaut, sur un cas réellement utile, par exemple expliquer un résultat.
+Hors périmètre initial : la haute disponibilité (un seul nœud) et le multi-tenant. **Changement de périmètre assumé le 2026-11-24** : l'IA, d'abord limitée à un cas isolé, couvre désormais tous les usages où elle aide (demande de Vincent). Elle n'est en revanche **jamais embarquée** dans l'appliance : elle passe par un **connecteur vers un serveur Ollama externe** de l'entreprise (section 3.5), et ses fonctionnalités (I1–I26, section 15) aident sans jamais décider à la place d'une personne ni d'un quality gate. Sans connecteur, ou serveur injoignable, l'appliance fonctionne à l'identique, hors ligne compris.
 
 ## 2. Principes non négociables
 
@@ -49,6 +49,7 @@ Hors périmètre initial : la haute disponibilité (un seul nœud), le multi-ten
 │  scanoria-helper (root) ── demandes de la console : modules (Quadlet), pare-feu, MàJ      │
 │  scanoria-worker ── file d'analyses (PostgreSQL) → conteneurs scanners jetables (Podman)  │
 │  Podman + Quadlet ── un module = une ou plusieurs unités systemd générées                  │
+│  scanoria-ai ── file de tâches IA (PostgreSQL) ──HTTPS──▶ serveur Ollama externe (option)  │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -77,7 +78,7 @@ Hors périmètre initial : la haute disponibilité (un seul nœud), le multi-ten
   - **Catalogue** (modules) ;
   - **Mises à jour** ;
   - **Sauvegardes** ;
-  - **Système** (réseau, TLS, utilisateurs, journal d'audit, À propos et licence).
+  - **Système** (réseau, TLS, utilisateurs, connecteur IA, journal d'audit, À propos et licence).
 - **API REST** documentée (OpenAPI) et jetons d'API par projet pour la CI.
 
 ### 3.4 Accès aux applications par nom
@@ -87,6 +88,30 @@ Hors périmètre initial : la haute disponibilité (un seul nœud), le multi-ten
 - En option, l'appliance crée elle-même les enregistrements par **mise à jour dynamique RFC 2136 signée TSIG** vers le serveur DNS de l'entreprise (BIND, DDI…). Elle ne dépend d'aucun produit DNS particulier.
 - **Certificat** : l'AC interne émet un certificat pour `<nom>` et `*.<nom>`, renouvelé automatiquement. Un certificat importé doit couvrir les deux noms, et la console le vérifie.
 - Le proxy n'expose que les modules installés et actifs. Un module désactivé renvoie une page d'erreur de la console, jamais l'application.
+
+### 3.5 Connecteur IA : Ollama externe
+L'appliance n'héberge aucun modèle. Elle appelle l'**API HTTP d'un serveur Ollama** de l'entreprise (`/api/version`, `/api/tags`, `/api/show`, `/api/chat`, `/api/embed`), sur le réseau local, ce qui reste compatible avec une appliance sans Internet.
+
+**Mise en service (une seule saisie obligatoire, une seule confirmation)**
+- La seule saisie obligatoire est l'**adresse du serveur** (`https://ollama.exemple.test:11434`, ou `http://192.0.2.10:11434` sur un réseau de confiance, avec un avertissement affiché). Optionnel : un jeton porteur pour un proxy placé devant Ollama (Ollama n'a pas d'authentification propre), qui **impose HTTPS**, et une AC à faire confiance. Le jeton est chiffré en base. La vérification de la connexion affiche un indicateur d'attente.
+- La console propose d'elle-même un serveur candidat si `ollama.<domaine de l'appliance>` résout et répond à `/api/version`.
+- **Activer le connecteur est une action à risque** (des extraits de code quittent l'appliance) : une modale unique montre ce qui sera envoyé, à qui, et ce qui ne l'est jamais. Une fois confirmée, la console dépose une demande `set-ai-endpoint` : le helper root valide l'adresse (schéma, port, aucune adresse de bouclage ni de l'appliance), **résout lui-même le nom et épingle les adresses obtenues**, puis ouvre dans nftables la sortie vers ces adresses et ce port seulement, **pour l'UID de `scanoria-ai` seulement** (`meta skuid`). La console n'appelle jamais Ollama directement. Un changement de résolution n'élargit jamais la règle : il est signalé et demande une nouvelle confirmation. Retirer le connecteur referme la règle.
+- Tout le reste est **automatique** (principe 8) : découverte des modèles par `/api/tags` et `/api/show` (capacités `completion`, `embedding`, taille du contexte), choix du modèle par tâche, contexte dimensionné à la demande, toutes les fonctionnalités IA activées avec leurs défauts. La console affiche le modèle retenu pour chaque tâche et pourquoi ; l'administrateur peut le changer, sans y être obligé. Si aucun modèle d'embedding n'est présent, les fonctions qui en ont besoin passent en recherche lexicale et le signalent.
+
+**Exécution**
+- Le service `scanoria-ai` (utilisateur dédié, sans privilège) traite une **file de tâches IA** en PostgreSQL : priorité aux demandes interactives, puis aux précalculs (résultats `critical`/`high` nouveaux, résumés d'analyse). Concurrence 1 par défaut, délai par tâche, relance avec recul exponentiel, **disjoncteur** quand le serveur ne répond plus.
+- **Cache** : une sortie est rattachée à l'empreinte de son entrée et à l'empreinte du modèle (`digest` de `/api/show`) ; elle est réutilisée tant que les deux sont inchangés.
+- Réponses **structurées** : chaque tâche fixe un schéma JSON passé à Ollama (`format`) puis revalidé par zod ; une sortie invalide est rejetée, jamais affichée à moitié.
+- Langue de sortie : celle de l'utilisateur (français ou anglais), comme le reste de la console.
+
+**Garde-fous (non négociables)**
+- **L'IA ne décide rien** : elle n'entre pas dans le calcul d'un verdict, ne change jamais un statut de tri, ne crée ni n'approuve d'exception, ne fusionne ni ne ferme rien, n'enregistre aucun réglage ni aucune règle. Ces décisions passent par un clic d'une personne qui a le rôle requis, via l'API normale et l'audit. Les seules **écritures automatiques** permises, toutes réversibles et marquées IA, sont : un texte joint à un objet que l'appliance publie déjà (commentaire de PR I13 et I25, description de ticket I26, annexe de release I6) et une PR **brouillon** de correctif vérifié (I4). L'indisponibilité de l'IA ne rend jamais un verdict non concluant (G13 ne s'applique pas à elle).
+- **Rien de secret ne sort** : les valeurs des secrets trouvés sont remplacées par leur forme (type, longueur, jeu de caractères) avant tout envoi, ainsi que tout ce qui ressemble à un secret dans l'extrait. Les secrets de la console (jetons de forge, clés) ne sont jamais transmis.
+- **Code analysé = données hostiles** : il est délimité dans l'invite comme donnée, jamais comme instruction ; le modèle n'a **aucun outil** à effets ; la sortie est échappée (aucun HTML, liens limités à la console et aux références connues CWE/CVE/OSV), **dans la console comme dans tout ce qui est publié vers une forge ou un gestionnaire de tickets**, où les mentions (`@…`, `#…`) et les images sont en plus neutralisées.
+- **Aucune exécution** : les recherches dans le code faites pour l'IA (I11, I22) utilisent des analyseurs sans exécution, dans le conteneur confiné d'une analyse (section 6.4).
+- **Traçabilité** : chaque texte IA porte la mention « proposé par IA », le modèle et son empreinte ; chaque appel est journalisé (tâche, projet, taille envoyée, durée), sans le contenu par défaut.
+- Un projet peut être marqué **« aucun envoi à l'IA »** ; c'est le seul réglage IA par projet, et il peut être imposé par un profil verrouillé (G8). Rien d'un tel projet n'est envoyé, même comme exemple ou contexte d'un autre projet.
+- **Cloisonnement** : le contexte envoyé pour un projet ne contient que des données de ce projet ; les fonctions transverses (I7, I8, I21, I26) n'envoient que des métadonnées (règle, gravité, chemin, composant), jamais du code d'un autre projet.
 - La **connexion unique** est souhaitée : les modules qui savent faire de l'OIDC (SonarQube, Dependency-Track, DefectDojo) sont branchés sur le fournisseur d'identité configuré dans la console.
 
 ## 4. Catalogue modulaire
@@ -294,6 +319,7 @@ docs/                    # ARCHITECTURE, MODULES, SECURITE, TESTING, RELEASING, 
   - unitaires et **bout en bout** de la console contre un vrai PostgreSQL 16, dans la locale de l'appliance (`en_US.UTF-8`) ;
   - pour chaque module : validation du manifeste par le schéma, conversion SARIF sur des **jeux d'essai** (dépôts piégés : faux secrets, dépendances vulnérables, IaC fautive), installation et désinstallation `-live` ;
   - pour le service root : demandes hostiles (injections, chemins `..`, liens symboliques).
+  - pour l'IA : un **faux serveur Ollama** en CI (réponses enregistrées, pannes, lenteurs, sorties invalides), tests de **masquage des secrets** avant envoi, d'**injection d'invite** depuis le code analysé, et vérification que chaque fonction de la console marche à l'identique sans connecteur.
 - **CI GitHub Actions, dépôt public** : runners standard **gratuits et sans quota**. La CI reste raisonnable (annulation des exécutions dépassées sur une même PR, caches npm et images), mais n'a pas à économiser les minutes.
 - **Outils** : lint shell et workflows (shellcheck, actionlint), gitleaks sur tout l'historique, osv-scanner avec exceptions datées, **dependency-review** sur les PR, **CodeQL** (JavaScript/TypeScript et workflows), **SonarQube Cloud** (gratuit pour un dépôt public, quality gate bloquant), alertes et mises à jour **Dependabot**. À partir de la 0.8, le verdict de Scanoria sur son propre dépôt s'y ajoute.
 - Actions épinglées par empreinte, droits minimaux par travail ; contrôle unique **`ci-ok`** qui résume la CI.
@@ -305,20 +331,20 @@ docs/                    # ARCHITECTURE, MODULES, SECURITE, TESTING, RELEASING, 
 - **Dépôt public, mais non annoncé** : rien dans le dépôt ne doit trahir une infrastructure réelle (principe 3), et aucun secret n'y entre jamais ; gitleaks bloque la CI au moindre doute.
 
 ## 13. Itérations
-Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10) est rattachée à une itération.
+Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I1–I26) est rattachée à une itération.
 
 | Version | Contenu |
 |---|---|
 | 0.1 | **Socle** : ISO (console seule), assistant de premier démarrage, console (auth locale, rôles, audit, À propos et licence), PostgreSQL, pare-feu, nom de l'appliance, AC interne et certificat `<nom>` / `*.<nom>`. **Mise à jour en ligne par les releases GitHub (F18)**, `scanoria-selftest`, chaîne de publication (CI, version candidate, validation, promotion) |
 | 0.2 | **Moteur de modules** : manifeste, catalogue signé publié en release, service root, Quadlet, aiguillage par nom et vérification DNS. **Banc d'essai à l'installation (F12)**, **packs (F11)**, **dépendances et conflits de modules (G1)**, **paramètres de module typés (G3)**. Premiers scanners : gitleaks, OSV-Scanner, Trivy |
-| 0.3 | **Analyses** : projets Git avec **assistant d'ajout (F1)**, file d'analyses, confinement, résultats SARIF unifiés, tri, quality gate, API et client CI. **Suivi des secrets jusqu'à révocation (F7)**, **paquets malveillants bloquants (H4)**. Profils : **profils par couverture (G7)**. Catalogue : **contrat de sortie vérifié (G2)**, **normalisation des gravités (G5)**. Fiabilité : **analyses reproductibles (G11)**, **relances distinguées (G12)**, **échec par défaut (G13)**, **couverture d'analyse (G15)**, **ordonnancement (G17)**, **empreintes stables (G19)** |
-| 0.4 | **SonarQube Community Build** (PostgreSQL, sysctl, proxy, sauvegarde, mise à jour à la demande). **Consommation réelle par module (F14)**, **santé des analyses (G20)** |
-| 0.5 | **SBOM** : Syft → Dependency-Track. **Politique de licences (F8)**, **recherche transverse CVE / composant avec re-corrélation (F3)**, **recoupement entre outils (F16)**, **priorisation EPSS + KEV (H3)**, **quarantaine des nouvelles versions (H5)** |
-| 0.6 | **Hors ligne et vigilance** : modules `feed`, lots signés, âge des bases. **Appliance miroir (F17)**, **mise à jour d'outil à l'essai (F13)**, **alertes sur l'appliance elle-même (F19)**, **canaris nocturnes (G14)**, **fraîcheur obligatoire (G16)**, **version de module figée par projet (G6)** |
-| 0.7 | **SAST/IaC étendus** (Semgrep/Opengrep, Checkov, KICS, Bandit), profils personnalisés, webhooks et statuts de commit. **Tri en masse (F4)**, **exceptions soumises à approbation (F5)**, **affectation `CODEOWNERS` (F6)**, **analyse incrémentale des PR (G18)**, **jeux de règles gérés dans la console (G4)**, **héritage et verrouillage des profils (G8)**, **profil par déclencheur (G9)**, **aperçu d'un profil (G10)**, **audit des workflows CI (H1)**, **posture des dépôts (H2)**, **revue des dépendances en PR (H6)** |
-| 0.8 | **Gate de release** : profil `release`, modes tiré et poussé, rapport de release signé, `scanoria-verify`. **Comparaison entre releases (F2)**, **simulateur de quality gate (F9)**, **VEX (H7)**. Branchement sur Ipnoria |
-| 0.9 | **Runners CI** (Forgejo Actions, runner GitHub pour dépôts privés). **Notifications et rapport mensuel (F10)**, **kit développeur (F20)**, **remédiation automatique (H8)**, **tickets synchronisés (H9)** |
-| 0.10 | **DAST** (ZAP, Nuclei) avec cibles autorisées ; DefectDojo optionnel. **Catalogue privé et SDK de scanner (F15)**, **surveillance du registre interne (H10)** |
+| 0.3 | **Analyses** : projets Git avec **assistant d'ajout (F1)**, file d'analyses, confinement, résultats SARIF unifiés, tri, quality gate, API et client CI. **Suivi des secrets jusqu'à révocation (F7)**, **paquets malveillants bloquants (H4)**. Profils : **profils par couverture (G7)**. Catalogue : **contrat de sortie vérifié (G2)**, **normalisation des gravités (G5)**. Fiabilité : **analyses reproductibles (G11)**, **relances distinguées (G12)**, **échec par défaut (G13)**, **couverture d'analyse (G15)**, **ordonnancement (G17)**, **empreintes stables (G19)**. IA : **connecteur Ollama externe (I1)**, **explication d'un résultat (I2)**, **verdict expliqué (I9)**, **banc d'essai IA (I23)** |
+| 0.4 | **SonarQube Community Build** (PostgreSQL, sysctl, proxy, sauvegarde, mise à jour à la demande). **Consommation réelle par module (F14)**, **santé des analyses (G20)**. IA : **pré-tri assisté (I3)**, **résumé d'analyse (I5)**, **typage des secrets génériques (I14)**, **diagnostic des analyses en échec (I15)**, **traduction des messages des outils (I17)**, **retours et qualité mesurée (I24)** |
+| 0.5 | **SBOM** : Syft → Dependency-Track. **Politique de licences (F8)**, **recherche transverse CVE / composant avec re-corrélation (F3)**, **recoupement entre outils (F16)**, **priorisation EPSS + KEV (H3)**, **quarantaine des nouvelles versions (H5)**. IA : **regroupement sémantique (I7)**, **atteignabilité assistée (I11)**, **explication des licences (I18)** |
+| 0.6 | **Hors ligne et vigilance** : modules `feed`, lots signés, âge des bases. **Appliance miroir (F17)**, **mise à jour d'outil à l'essai (F13)**, **alertes sur l'appliance elle-même (F19)**, **canaris nocturnes (G14)**, **fraîcheur obligatoire (G16)**, **version de module figée par projet (G6)**. IA : **diagnostic de l'appliance (I16)** |
+| 0.7 | **SAST/IaC étendus** (Semgrep/Opengrep, Checkov, KICS, Bandit), profils personnalisés, webhooks et statuts de commit. **Tri en masse (F4)**, **exceptions soumises à approbation (F5)**, **affectation `CODEOWNERS` (F6)**, **analyse incrémentale des PR (G18)**, **jeux de règles gérés dans la console (G4)**, **héritage et verrouillage des profils (G8)**, **profil par déclencheur (G9)**, **aperçu d'un profil (G10)**, **audit des workflows CI (H1)**, **posture des dépôts (H2)**, **revue des dépendances en PR (H6)**. IA : **recherche en langage naturel (I8)**, **rédaction des exceptions (I10)**, **générateur de règles (I12)**, **commentaires de PR expliqués (I25)** |
+| 0.8 | **Gate de release** : profil `release`, modes tiré et poussé, rapport de release signé, `scanoria-verify`. **Comparaison entre releases (F2)**, **simulateur de quality gate (F9)**, **VEX (H7)**. Branchement sur Ipnoria. IA : **notes de sécurité de release (I6)**, **seuils de quality gate suggérés (I19)** |
+| 0.9 | **Runners CI** (Forgejo Actions, runner GitHub pour dépôts privés). **Notifications et rapport mensuel (F10)**, **kit développeur (F20)**, **remédiation automatique (H8)**, **tickets synchronisés (H9)**. IA : **correctif proposé et vérifié (I4)**, **évaluation des PR de remédiation (I13)**, **rapport mensuel commenté (I20)**, **assistant « Demander à Scanoria » (I21)**, **tickets rédigés et dédupliqués (I26)** |
+| 0.10 | **DAST** (ZAP, Nuclei) avec cibles autorisées ; DefectDojo optionnel. **Catalogue privé et SDK de scanner (F15)**, **surveillance du registre interne (H10)**. IA : **cartographie de la surface d'attaque (I22)** |
 | 1.0 | LDAP/AD, OIDC et connexion unique aux modules, sauvegardes distantes, durcissement, documentation complète |
 
 ## 14. Décisions
@@ -326,7 +352,7 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10) e
 - **Accès aux applications par nom** : `<libellé>.<nom de l'appliance>`, avec un DNS générique et un certificat générique (section 3.4).
 - **Installation de base = console seule** : tout outil s'ajoute par le catalogue, et aucune image n'est embarquée dans l'ISO (section 5.3).
 - **Releases passées par tous les outils** installés, via la CI de chaque dépôt (section 7).
-- **Fonctionnalités F1 à F20, G1 à G20 et H1 à H10 retenues** (section 15), réparties dans les itérations (section 13).
+- **Fonctionnalités F1 à F20, G1 à G20, H1 à H10 et I1 à I26 retenues** (section 15), réparties dans les itérations (section 13).
 - **Dépôt GitHub public, sans aucune communication** (« non publié ») : CI, CodeQL, SonarQube Cloud, protection de `main` et environments gratuits ; mises à jour des appliances sans jeton. Conséquences : sections 10 et 12.
 - **Claude gère tout le cycle Git** : branches, commits, push, PR, merges, versions et suivi des publications, selon les règles de la section 16.
 - **Mises à jour de la console par les releases GitHub** dès la 0.1 (section 10, F18).
@@ -340,12 +366,13 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10) e
 - **D4 — Forge intégrée en premier : Forgejo** (gratuit, tout on-prem). L'appliance sait d'abord analyser les dépôts d'une forge Forgejo ; GitHub, puis GitLab suivent. Le développement de Scanoria lui-même reste sur GitHub (section 12).
 - **D6 — Planchers matériels** : console seule **2 vCPU / 4 Go / 40 Go**, installation refusée en dessous (section 11). Pour chaque module, son manifeste fait foi.
 - **Automatique par défaut, configuration minimale** (principe 8, 2026-11-24) : exigence de Vincent en retenant H1–H10, applicable à toutes les fonctionnalités.
+- **IA par un Ollama externe** (2026-11-24) : l'IA n'est plus hors périmètre ; aucun modèle embarqué, connecteur vers l'API HTTP d'un serveur Ollama de l'entreprise, une seule saisie obligatoire (l'adresse), activation confirmée une fois, puis tout automatique ; l'IA propose et explique, ne décide jamais ; appliance identique sans elle (section 3.5, I1–I26).
 - **Signature des mises à jour : clé Ed25519**, clé publique versionnée dans `update-pubkey.pem` à la racine, épinglée dans l'appliance. La clé privée vit hors ligne et dans le secret `UPDATE_SIGNING_KEY` de l'environment `release` (limité à `main`) ; Claude ne la voit jamais.
 
 **Ouvertes**
 - Aucune à ce jour.
 
-## 15. Fonctionnalités retenues (F1–F20, G1–G20, H1–H10)
+## 15. Fonctionnalités retenues (F1–F20, G1–G20, H1–H10, I1–I26)
 
 ### Console
 | # | Fonctionnalité | Ce qu'elle doit faire |
@@ -427,6 +454,38 @@ Licences à revérifier à l'intégration (section 5). Toutes **actives par déf
 | H8 | Remédiation automatique | Module Renovate Community Edition (AGPL-3.0, on-prem) : PR de montée de version ouvertes automatiquement pour les dépendances vulnérables, priorisées par H3, chacune analysée par l'appliance |
 | H9 | Tickets synchronisés | Résultat confirmé → ticket Forgejo, GitHub, GitLab ou Jira, créé automatiquement ; statut synchronisé dans les deux sens (ticket fermé → analyse de vérification) |
 | H10 | Surveillance du registre interne | Images d'un registre d'entreprise (Harbor, Forgejo, registre OCI) découvertes et analysées en continu, réanalysées à chaque mise à jour des bases |
+
+### IA via Ollama externe (I1–I26)
+Toutes passent par le connecteur de la section 3.5 et en respectent les garde-fous. **Actives par défaut dès que le connecteur est activé**, sans autre réglage (principe 8) ; chacune se désactive seule si son banc d'essai (I23) échoue. Sans connecteur, elles sont masquées et rien d'autre ne change. Aucune ne remplace une fonctionnalité F, G ou H : elle l'explique, la prépare ou la rédige.
+
+| # | Fonctionnalité | Ce qu'elle doit faire | Automatique / confirmation |
+|---|---|---|---|
+| I1 | Connecteur Ollama externe | Adresse seule à saisir, serveur candidat détecté (`ollama.<domaine>`), découverte et choix automatique des modèles par tâche, file `scanoria-ai`, cache par empreintes d'entrée et de modèle, disjoncteur, santé et latence dans la photographie de santé (section 10), journal des appels | Activation confirmée une fois (sortie de données) ; le reste automatique |
+| I2 | Explication d'un résultat | Pour un résultat : ce que la règle détecte, pourquoi c'est un risque ici (extrait de code, CWE, CVE), impact probable, correction recommandée, références ; précalculée pour chaque nouveau résultat `critical`/`high`, à la demande pour les autres | Automatique |
+| I3 | Pré-tri assisté | Indice « faux positif probable / à confirmer / vrai positif probable » avec justification citée (code de test, valeur factice, code mort, chemin non atteignable) ; affiché comme suggestion à côté du statut `nouveau` ; à partir de la 0.7, propose une règle F4 quand plusieurs résultats partagent la même raison | Suggestion automatique ; changer le statut reste un clic humain |
+| I4 | Correctif proposé et vérifié | Diff minimal pour un résultat SAST, IaC, Dockerfile ou workflow ; **vérifié** en rejouant le scanner concerné sur le code corrigé, dans un conteneur jetable (section 6.4) : le résultat disparaît et aucun nouveau n'apparaît. Seul un correctif vérifié est proposé ; il peut ouvrir une **PR brouillon** marquée « proposé par IA » par le même client de forge que H9 (circuit propre, distinct de Renovate), jamais fusionnée par l'appliance | PR brouillon automatique si vérifiée ; la fusion reste humaine |
+| I5 | Résumé d'analyse | Synthèse en quelques lignes de chaque analyse : ce qui a changé, les trois priorités, ce qui bloque, ce qui n'a pas été couvert (G15) ; en tête de la page d'analyse, puis dans les notifications dès la 0.9 (F10) | Automatique |
+| I6 | Notes de sécurité de release | À partir de la comparaison F2 et du rapport de release : texte prêt à publier (corrigé, introduit, accepté avec motif), joint au rapport comme **annexe non signée** marquée IA, à côté du rapport signé inchangé | Automatique ; publication par la chaîne de release |
+| I7 | Regroupement sémantique | Embeddings des résultats (règle, message, contexte) pour regrouper les problèmes semblables entre outils, fichiers et projets, au-delà du recoupement exact de F16 ; un groupe propose un tri commun, puis une règle F4 dès la 0.7 | Automatique ; action de tri confirmée |
+| I8 | Recherche en langage naturel | Couche de langage naturel sur les filtres et sur F3 : « secrets dans les projets Python depuis un mois », « qui est touché par une faille de désérialisation ? » : traduit en **filtres structurés** de la console (jamais en SQL), affichés et modifiables avant exécution, limités aux droits de l'utilisateur ; indicateur d'attente | À la demande |
+| I9 | Verdict expliqué | Pourquoi un quality gate bloque ou est non concluant, en clair, avec la liste ordonnée des actions qui le débloqueraient (corriger, puis selon les fonctions disponibles faire approuver une exception, rafraîchir une base) ; repris dans le statut de commit et la sortie de `scanoria-scan` | Automatique |
+| I10 | Rédaction des exceptions | Pour une demande d'exception (F5) ou une justification VEX (H7) : motif rédigé à partir du contexte, date de fin proposée, et statut VEX suggéré (`not_affected`, `affected`…) dès la 0.8 ; l'opérateur relit et soumet, l'administrateur approuve comme d'habitude | Proposition automatique ; soumission et approbation humaines |
+| I11 | Atteignabilité assistée | Pour une CVE de dépendance : recherche statique des imports et appels de la fonction vulnérable dans le dépôt, puis avis argumenté « appel probable / improbable » avec les emplacements ; alimente la priorité (avec H3) et la rédaction VEX (I10). **Ne lève jamais un blocage seule** | Automatique ; levée humaine |
+| I12 | Générateur de règles | Depuis un résultat, un exemple de code ou une phrase : règle Opengrep/Semgrep, motif gitleaks ou politique Checkov, testée sur un exemple positif et un négatif générés, puis enregistrée dans les jeux de règles gérés (G4) | Enregistrement confirmé |
+| I13 | Évaluation des PR de remédiation | Pour chaque PR de montée de version (H8) : résumé du changement, risques de rupture déduits du diff du lockfile, des notes de version disponibles hors ligne et des API utilisées par le projet ; publié dans la PR | Automatique |
+| I14 | Typage des secrets génériques | Extension de F7 : les candidats à forte entropie sans type connu sont classés (mot de passe, jeton interne, clé privée, faux positif probable) à partir du **contexte seulement** : la valeur est remplacée par sa forme avant envoi ; alimente F7 | Automatique |
+| I15 | Diagnostic des analyses en échec | Extension de G20 : lit le journal d'une analyse en échec (G12, G20) et en donne la cause probable (mémoire, délai, image, entrée invalide) et la correction ; propose d'appliquer un réglage de ressources quand il est sûr | Diagnostic automatique ; changement de réglage confirmé |
+| I16 | Diagnostic de l'appliance | Extension de F19 et de la santé : explique en clair une alerte de santé, un échec de `scanoria-selftest`, de mise à jour ou d'installation de module, et propose l'action correspondante de la console | Diagnostic automatique ; action confirmée |
+| I17 | Traduction des messages des outils | Messages et descriptions de règles des scanners (en anglais) traduits dans la langue de l'utilisateur, mis en cache par règle et par version d'outil ; le texte d'origine reste affiché | Automatique |
+| I18 | Explication des licences | Pour une licence « à revoir » ou inhabituelle d'un SBOM (F8) : obligations principales, compatibilité avec la licence du projet, conditions d'usage à vérifier ; marqué comme aide, pas comme avis juridique | Automatique |
+| I19 | Seuils de quality gate suggérés | À partir de l'historique, propose des seuils et exceptions de départ par projet, passés automatiquement dans le simulateur F9 avec leur effet (« N releases auraient été bloquées ») | Enregistrement confirmé |
+| I20 | Rapport mensuel commenté | Le rapport F10 reçoit une analyse rédigée des tendances : projets qui se dégradent, dette qui vieillit, délais de correction, points d'attention du mois | Automatique |
+| I21 | Assistant « Demander à Scanoria » | Panneau de questions dans la console sur un projet, une analyse, un résultat ou la documentation embarquée ; répond en citant les données sources (liens vers résultats, analyses, pages de doc) ; lecture seule, limité à ce que l'utilisateur a le droit de voir ; réponse affichée au fil de l'eau avec indicateur d'attente | À la demande ; aucune action |
+| I22 | Cartographie de la surface d'attaque | À partir de la détection F1 et du code : frameworks, routes HTTP, points d'entrée et formulaires ; propose des cibles et chemins DAST (section 6.5) et un profil adapté | Proposition automatique ; déclaration d'une cible par un administrateur |
+| I23 | Banc d'essai IA | Extension de F12 aux tâches IA : jeu d'essai de résultats connus (vrais et faux positifs, verdicts, puis correctifs attendus dès la 0.9) rejoué à l'activation et à chaque changement de modèle, puis chaque nuit avec les canaris G14 dès la 0.6 ; mesure par tâche ; une tâche sous son seuil est **désactivée automatiquement** et signalée | Automatique |
+| I24 | Retours et qualité mesurée | 👍/👎 et correction sur chaque sortie IA ; les tris confirmés par des personnes servent d'exemples pour les résultats suivants **du même projet** (contexte local, sans réentraînement) ; taux d'accord IA/humain affiché par tâche et par modèle | Automatique |
+| I25 | Commentaires de PR expliqués | Les nouveaux résultats d'une PR (G18) sont publiés dans le commentaire de forge avec leur explication courte (I2) et, dès la 0.9, le correctif vérifié s'il existe (I4), à côté de la revue des dépendances H6 | Automatique |
+| I26 | Tickets rédigés et dédupliqués | Extension de H9 : les tickets de H9 reçoivent un titre et une description clairs (contexte, risque, correction) ; avant création, un ticket semblable déjà ouvert est cherché par similarité et le résultat y est rattaché plutôt que dupliqué | Automatique |
 
 ## 16. Consignes pour Claude Code dans ce dépôt
 - Session principale : Sonnet 5.5 ; conseiller : Opus 5.5.
