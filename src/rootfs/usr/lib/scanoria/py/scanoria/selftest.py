@@ -158,6 +158,28 @@ def check_services(rep):
         rep.add(cid, "pass" if s == "active" else "fail", "%s %s" % (unit, s))
 
 
+WORKER_HEARTBEAT = common.VARLIB + "/console/worker.json"
+
+
+def check_worker(rep):
+    """worker.alive (0.3) : scanoria-worker actif et signe de vie de moins de 2 minutes."""
+    r = common.run("systemctl", ["is-active", "scanoria-worker.service"], timeout=30)
+    state = (r.text.splitlines() or ["unknown"])[0].strip()
+    beat = _json(WORKER_HEARTBEAT)
+    beat = beat if isinstance(beat, dict) else {}
+    age = None
+    try:
+        age = (common.now() - common.parse_iso(beat.get("at", ""))).total_seconds()
+    except (TypeError, ValueError):
+        pass
+    if state == "active" and age is not None and age <= 120:
+        rep.add("worker.alive", "pass", "scan queue worker alive (%ds ago)" % max(0, int(age)))
+    else:
+        rep.add("worker.alive", "fail", "scanoria-worker.service %s, last heartbeat %s"
+                % (state, "never" if age is None else "%ds ago" % int(age)),
+                {"state": state, "heartbeat_age_s": None if age is None else int(age)})
+
+
 def psql(sql):
     r = common.run("runuser", ["-u", "postgres", "--", common.SYSTEM_CMDS["psql"], "-XAtq",
                                "-d", "scanoria", "-c", sql], timeout=30)
@@ -384,6 +406,7 @@ def run_checks(quick):
     check_perms(rep)
     check_pubkey(rep)
     check_services(rep)
+    check_worker(rep)
     check_db(rep)
     check_console(rep, name, version)
     check_tls(rep, name)

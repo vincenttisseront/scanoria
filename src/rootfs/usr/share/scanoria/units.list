@@ -15,3 +15,4 @@ scanoria-dns-check.timer
 scanoria-dns-check.path
 scanoria-catalog-refresh.timer
 scanoria-runner.service
+scanoria-worker.service

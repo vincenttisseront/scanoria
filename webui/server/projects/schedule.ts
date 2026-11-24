@@ -14,6 +14,7 @@
 // Le cycle ne lève jamais : chaque erreur est comptée et le cycle continue.
 
 import { createHash } from 'node:crypto'
+import type pg from 'pg'
 import type { Queryable } from '../utils/db'
 import type { ScanTrigger } from '#shared/analysis'
 import { ForgeError } from '../forges/http'
@@ -21,13 +22,16 @@ import { discoverForge, dueForges } from './discover'
 import { getProject, projectClient, refreshDetection, type ProjectRow } from './service'
 
 /** Contrat 4 (chantier C) : webui/server/scans/enqueue.ts. */
-export type EnqueueScan = (db: Queryable, input: {
+/** Base passée à enqueueScan : un pool (il ouvre sa propre transaction). */
+export type ScheduleDb = Queryable & Pick<pg.Pool, 'connect'>
+
+export type EnqueueScan = (db: ScheduleDb, input: {
   projectId: string
   ref: string
-  commit?: string
+  commit?: string | null
   trigger: ScanTrigger
-  profileSlug?: string
-  requestedBy?: number
+  profileSlug?: string | null
+  requestedBy?: number | null
 }) => Promise<{ scanId: string, number: number }>
 
 export interface ScheduleResult {
@@ -78,7 +82,7 @@ async function claimPoll(db: Queryable, projectId: string, now: Date): Promise<b
   return (res.rowCount ?? 0) > 0
 }
 
-async function pollOnCommit(db: Queryable, p: ProjectRow, now: Date, enqueue: EnqueueScan): Promise<{ enqueued: number, polled: boolean, failed: number }> {
+async function pollOnCommit(db: ScheduleDb, p: ProjectRow, now: Date, enqueue: EnqueueScan): Promise<{ enqueued: number, polled: boolean, failed: number }> {
   const access = await projectClient(db, p)
   if (!access) return { enqueued: 0, polled: false, failed: 0 }
   if (!(await claimPoll(db, p.id, now))) return { enqueued: 0, polled: true, failed: 0 }
@@ -105,7 +109,7 @@ async function pollOnCommit(db: Queryable, p: ProjectRow, now: Date, enqueue: En
   return { enqueued, polled: true, failed }
 }
 
-async function runDaily(db: Queryable, p: ProjectRow, now: Date, enqueue: EnqueueScan): Promise<number> {
+async function runDaily(db: ScheduleDb, p: ProjectRow, now: Date, enqueue: EnqueueScan): Promise<number> {
   if (!(await claimPoll(db, p.id, now))) return 0
   const slot = currentDailySlot(p.id, now)
   const { rows } = await db.query<{ n: string }>(
@@ -118,7 +122,7 @@ async function runDaily(db: Queryable, p: ProjectRow, now: Date, enqueue: Enqueu
   return refs.length
 }
 
-export async function runProjectSchedules(db: Queryable, now: Date, enqueue: EnqueueScan): Promise<ScheduleResult> {
+export async function runProjectSchedules(db: ScheduleDb, now: Date, enqueue: EnqueueScan): Promise<ScheduleResult> {
   const result: ScheduleResult = { discovered: 0, detected: 0, enqueued: 0, errors: 0 }
 
   for (const forge of await dueForges(db, now).catch(() => [])) {

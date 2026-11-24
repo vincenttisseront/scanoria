@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Vincent Tisseront
+//
+// Boucle de scanoria-worker : passes régulières de ScanWorker, planification
+// des projets (A), signe de vie pour scanoria-selftest (worker.alive) et
+// arrêt propre sur SIGTERM : la passe en cours se termine, rien n'est perdu
+// (l'état est en base et dans la file ; une analyse déposée reprend au
+// redémarrage).
+
+import { constants } from 'node:fs'
+import { mkdir, open, rename } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import type pg from 'pg'
+import type { WorkerConfig } from './config'
+import { enqueueScan } from './enqueue'
+import type { Integrations } from './integrations'
+import { ScanWorker, type WorkerPaths } from './worker'
+
+export interface ServiceOptions {
+  pool: pg.Pool
+  cfg: WorkerConfig
+  paths: WorkerPaths
+  integrations: Integrations
+  version?: string
+  log?: (msg: string) => void
+}
+
+export class WorkerService {
+  readonly worker: ScanWorker
+  private stopping = false
+  private running: Promise<void> | null = null
+  private timer: NodeJS.Timeout | undefined
+  private lastSchedule = 0
+  private lastPurge = 0
+  private wake: (() => void) | null = null
+  private readonly log: (msg: string) => void
+
+  constructor(private readonly opts: ServiceOptions) {
+    this.log = opts.log ?? (msg => console.log(`[worker] ${msg}`))
+    this.worker = new ScanWorker(opts.pool, opts.cfg, opts.paths, opts.integrations, this.log)
+  }
+
+  /** Une itération : relevé, dépôt, planification (au plus une fois par période), signe de vie. */
+  async iterate(now = new Date()): Promise<void> {
+    try {
+      await this.worker.tick(now)
+    }
+    catch (e) {
+      this.log(`tick failed: ${(e as Error).message}`)
+    }
+    if (now.getTime() - this.lastSchedule >= this.opts.cfg.scheduleMs) {
+      this.lastSchedule = now.getTime()
+      try {
+        await this.opts.integrations.runProjectSchedules(this.opts.pool, now, enqueueScan)
+      }
+      catch (e) {
+        this.log(`schedules failed: ${(e as Error).message}`)
+      }
+    }
+    if (now.getTime() - this.lastPurge >= 24 * 3600_000) {
+      this.lastPurge = now.getTime()
+      await this.worker.purgeOrphanLogs().catch(() => 0)
+    }
+    await this.heartbeat(now).catch(e => this.log(`heartbeat failed: ${(e as Error).message}`))
+  }
+
+  async heartbeat(now = new Date()): Promise<void> {
+    const file = this.opts.cfg.heartbeatFile
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 })
+    const tmp = `${file}.${process.pid}.tmp`
+    const fh = await open(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o640)
+    try {
+      await fh.writeFile(JSON.stringify({ pid: process.pid, version: this.opts.version ?? null, at: now.toISOString() }))
+    }
+    finally {
+      await fh.close()
+    }
+    await rename(tmp, file)
+  }
+
+  /** Lance la boucle ; se résout quand stop() a été appelé et la passe en cours terminée. */
+  start(): Promise<void> {
+    this.running = (async () => {
+      while (!this.stopping) {
+        await this.iterate()
+        if (this.stopping) break
+        await new Promise<void>((resolve) => {
+          this.wake = resolve
+          this.timer = setTimeout(resolve, this.opts.cfg.tickMs)
+        })
+        this.wake = null
+      }
+    })()
+    return this.running
+  }
+
+  async stop(): Promise<void> {
+    this.stopping = true
+    if (this.timer) clearTimeout(this.timer)
+    this.wake?.()
+    await this.running
+  }
+}
