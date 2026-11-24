@@ -109,11 +109,11 @@ done
 for id in osv-scanner trivy; do
 	expect "$id : banc d'essai réussi" "$(jq -r --arg id "$id" '.modules[] | select(.id == $id) | .testbed.passed' "$STATE")" true
 done
-expect "osv-db : base téléchargée (npm)" "$(test -s "$FEEDS/osv-db/osv-scalibr/npm/all.zip" && echo oui)" oui
-expect "trivy-db : base téléchargée" "$(test -s "$FEEDS/trivy-db/db/trivy.db" -a -s "$FEEDS/trivy-db/db/metadata.json" && echo oui)" oui
+expect "osv-db : base téléchargée (npm)" "$([[ -s "$FEEDS/osv-db/osv-scalibr/npm/all.zip" ]] && echo oui)" oui
+expect "trivy-db : base téléchargée" "$([[ -s "$FEEDS/trivy-db/db/trivy.db" && -s "$FEEDS/trivy-db/db/metadata.json" ]] && echo oui)" oui
 expect "osv-db : âge publié" "$(fstate osv-db)" ok/true
 expect "trivy-db : âge publié" "$(fstate trivy-db)" ok/true
-expect "bases lisibles par 65534 (0644)" "$(stat -c %a "$FEEDS/trivy-db/db/trivy.db")" 644
+expect "bases lisibles par le groupe 65534 seulement (0640)" "$(stat -c %a:%g "$FEEDS/trivy-db/db/trivy.db")" 640:65534
 expect "aucun conteneur laissé" "$(podman ps -a --format '{{.Names}}' | grep -c '^scanoria-run-' || true)" 0
 jq '.feeds' "$STATE"
 
@@ -121,12 +121,12 @@ before=$(readlink "$FEEDS/trivy-db")
 hx refresh-feeds '{"ids": ["trivy-db"]}'
 expect "refresh-feeds trivy-db" "$(jq -r .code <<< "$R")" OK
 expect "refresh-feeds : bascule vers une nouvelle version" "$([[ "$(readlink "$FEEDS/trivy-db")" != "$before" ]] && echo oui)" oui
-expect "refresh-feeds : version précédente gardée" "$(test -d "$FEEDS/$before" && echo oui)" oui
+expect "refresh-feeds : version précédente gardée" "$([[ -d "$FEEDS/$before" ]] && echo oui)" oui
 
 hx uninstall-module '{"id": "trivy", "keep_data": false}'
 hx uninstall-module '{"id": "trivy-db", "keep_data": false}'
 expect "désinstallation de trivy-db" "$(jq -r .code <<< "$R")" OK
-expect "base trivy-db retirée" "$(test -e "$FEEDS/trivy-db" -o -e "$FEEDS/.store/trivy-db" && echo reste || echo retirée)" retirée
+expect "base trivy-db retirée" "$(if [[ -e "$FEEDS/trivy-db" || -e "$FEEDS/.store/trivy-db" ]]; then echo reste; else echo retirée; fi)" retirée
 
 echo
 echo "b18-live : $PASS réussis, $FAIL échoués"

@@ -108,11 +108,11 @@ mode() { stat -c %a "$1"; }
 mkdir -p "$FEEDS/osv-db"
 refresh "$OSV"
 expect "osv-db : téléchargement" "${R%% *}" OK
-expect "osv-db : disposition OSV-Scanner (npm)" "$(test -f "$FEEDS/osv-db/osv-scalibr/npm/all.zip" && echo oui)" oui
-expect "osv-db : disposition OSV-Scanner (PyPI)" "$(test -f "$FEEDS/osv-db/osv-scalibr/PyPI/all.zip" && echo oui)" oui
-expect "osv-db : ancien répertoire remplacé par un lien" "$(test -L "$FEEDS/osv-db" && echo lien)" lien
-expect "osv-db : fichiers 0644" "$(mode "$FEEDS/osv-db/osv-scalibr/npm/all.zip")" 644
-expect "osv-db : répertoires 0755" "$(mode "$FEEDS/osv-db/osv-scalibr/npm")/$(mode "$FEEDS/osv-db/")" 755/755
+expect "osv-db : disposition OSV-Scanner (npm)" "$([[ -f "$FEEDS/osv-db/osv-scalibr/npm/all.zip" ]] && echo oui)" oui
+expect "osv-db : disposition OSV-Scanner (PyPI)" "$([[ -f "$FEEDS/osv-db/osv-scalibr/PyPI/all.zip" ]] && echo oui)" oui
+expect "osv-db : ancien répertoire remplacé par un lien" "$([[ -L "$FEEDS/osv-db" ]] && echo lien)" lien
+expect "osv-db : fichiers 0640 (groupe des conteneurs seulement)" "$(mode "$FEEDS/osv-db/osv-scalibr/npm/all.zip")" 640
+expect "osv-db : répertoires 0750" "$(mode "$FEEDS/osv-db/osv-scalibr/npm")/$(mode "$FEEDS/osv-db/")" 750/750
 expect "osv-db : état ok" "$(status osv-db status)" ok
 expect "osv-db : aucun répertoire de travail laissé" "$(find "$FEEDS/.store/osv-db" -maxdepth 1 -name '.tmp-*' | wc -l)" 0
 first=$(readlink "$FEEDS/osv-db")
@@ -138,14 +138,14 @@ expect "osv-db : écosystème « .. » refusé" "${R%% *}" E_INVALID_PARAM
 refresh "$OSV" '{"ecosystems": ["Absent"]}'
 expect "osv-db : écosystème inconnu → E_FEED_UNAVAILABLE" "${R%% *}" E_FEED_UNAVAILABLE
 expect "osv-db : message qui dit quoi faire" "$(grep -c "check access to 127.0.0.1" <<< "$R")" 1
-expect "osv-db : base précédente gardée (stale)" "$(status osv-db status)/$(test -f "$FEEDS/osv-db/osv-scalibr/npm/all.zip" && echo présente)" stale/présente
+expect "osv-db : base précédente gardée (stale)" "$(status osv-db status)/$([[ -f "$FEEDS/osv-db/osv-scalibr/npm/all.zip" ]] && echo présente)" stale/présente
 printf 'pas un zip' > "$SRV/osv/PyPI/all.zip"
 refresh "$OSV"
 expect "osv-db : archive qui n'est pas un zip refusée" "${R%% *}/$(grep -c 'not a zip' <<< "$R")" E_FEED_UNAVAILABLE/1
 mkzip "$SRV/osv/PyPI/all.zip" '{"id": "OSV-2"}'
 echo down > "$SRV/mode"
 refresh "$OSV"
-expect "osv-db : serveur en panne → base gardée" "${R%% *}/$(test -f "$FEEDS/osv-db/osv-scalibr/npm/all.zip" && echo présente)" E_FEED_UNAVAILABLE/présente
+expect "osv-db : serveur en panne → base gardée" "${R%% *}/$([[ -f "$FEEDS/osv-db/osv-scalibr/npm/all.zip" ]] && echo présente)" E_FEED_UNAVAILABLE/présente
 rm "$SRV/mode"
 
 # --- trivy-db par registre OCI ------------------------------------------------
@@ -167,7 +167,8 @@ refresh "$TDB"
 expect "trivy-db : jeton anonyme, manifeste, couche" "${R%% *}" OK
 expect "trivy-db : disposition trivy --cache-dir" "$(find "$FEEDS/trivy-db/db/" -mindepth 1 -printf '%f\n' | sort | tr '\n' ' ')" "metadata.json trivy.db "
 expect "trivy-db : DownloadedAt posé" "$(jq -r '.DownloadedAt != null and .Version == 2' "$FEEDS/trivy-db/db/metadata.json")" true
-expect "trivy-db : fichiers 0644" "$(mode "$FEEDS/trivy-db/db/trivy.db")" 644
+expect "trivy-db : fichiers 0640" "$(mode "$FEEDS/trivy-db/db/trivy.db")" 640
+expect "état et magasin réservés à root" "$(mode "$FEEDS/.store/trivy-db/status.json")/$(mode "$FEEDS/.store")" 600/700
 expect "trivy-db : jeton jamais dans l'argv de curl" "$(grep -c 'jeton-anonyme' "$TMP/curl.log" || true)" 0
 expect "trivy-db : jeton supprimé après usage" "$(find "$FEEDS/.store/trivy-db" -name 'auth.header' | wc -l)" 0
 good=$(readlink "$FEEDS/trivy-db")
@@ -195,17 +196,17 @@ expect "trivy-db : nouvelle base après correction" "${R%% *}/$(status trivy-db 
 
 # --- Proxy ----------------------------------------------------------------------
 : > "$TMP/curl.env"
-printf 'PATH="/usr/bin"\nhttps_proxy="http://192.0.2.10:3128"\nno_proxy=localhost,127.0.0.1\n' > "$T/etc/environment"
+printf 'PATH="/usr/bin"\nhttps_proxy="https://192.0.2.10:3128"\nno_proxy=localhost,127.0.0.1\n' > "$T/etc/environment"
 refresh "$OSV" '{"ecosystems": ["npm"]}'
-expect "proxy de /etc/environment transmis à curl" "$(grep -c '^https_proxy=http://192.0.2.10:3128$' "$TMP/curl.env")" 1
-printf 'https_proxy="http://x;rm -rf /"\n' > "$T/etc/environment"
+expect "proxy de /etc/environment transmis à curl" "$(grep -c '^https_proxy=https://192.0.2.10:3128$' "$TMP/curl.env")" 1
+printf 'https_proxy="https://x;rm -rf /"\n' > "$T/etc/environment"
 : > "$TMP/curl.env"
 refresh "$OSV" '{"ecosystems": ["npm"]}'
 expect "proxy invalide ignoré" "$(grep -c 'https_proxy=' "$TMP/curl.env")" 0
 
 # --- Retrait --------------------------------------------------------------------
 python3 -c 'import os, sys; sys.path.insert(0, os.environ["PYLIB"]); from scanoria import feeds; feeds.remove("trivy-db")'
-expect "retrait : lien et versions supprimés" "$(test -e "$FEEDS/trivy-db" -o -e "$FEEDS/.store/trivy-db" && echo reste || echo vide)" vide
+expect "retrait : lien et versions supprimés" "$(if [[ -e "$FEEDS/trivy-db" || -e "$FEEDS/.store/trivy-db" ]]; then echo reste; else echo vide; fi)" vide
 
 echo
 echo "b18 : $PASS réussis, $FAIL échoués"

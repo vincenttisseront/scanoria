@@ -459,6 +459,55 @@ describe('détail d’un module', () => {
     expect(callsTo('POST', '/api/catalog/modules/gitleaks/uninstall')[0]!.body).toEqual({ keep_data: false })
   })
 
+  it('base d’un feed : âge, échec signalé, mise à jour immédiate ; âge dans la liste', async () => {
+    setUser('admin')
+    const feedRow = entry('trivy-db', {
+      type: 'feed',
+      installed: { id: 'trivy-db', version: '2', type: 'feed', status: 'healthy', enabled: true, options: {} },
+      feed: { id: 'trivy-db', updated_at: '2026-11-24T03:00:00Z', size_mb: 1732.8, status: 'stale', error: 'mirror.gcr.io: HTTP 429' },
+    })
+    const absentRow = entry('osv-db', {
+      type: 'feed',
+      installed: { id: 'osv-db', version: '1', type: 'feed', status: 'healthy', enabled: true, options: {} },
+      feed: { id: 'osv-db', updated_at: null, size_mb: null, status: 'missing' },
+    })
+    route('GET', '/api/catalog', () => view({ modules: [feedRow, absentRow], operations: [] }))
+    const list = await mountIn(CatalogPage, { route: '/catalog' })
+    await settle()
+    expect(list.findAll('[data-feed-age]').map(x => x.text())).toEqual([expect.stringContaining('Base du'), 'Base absente'])
+    list.unmount()
+    route('GET', '/api/catalog/modules/trivy-db', () => ({
+      ...DETAIL, module: feedRow, options_schema: null, plan: null, dns: null,
+      installed: feedRow.installed, feed: feedRow.feed,
+    }))
+    helperRoute('/api/catalog/feeds/refresh', 'f1')
+    const w = await mountIn(ModulePage, { route: '/catalog/trivy-db' })
+    await settle()
+    fakeClock()
+    expect(w.find('[data-feed]').text()).toContain('1732.8 Mo')
+    expect(w.find('[data-feed]').text()).toContain('mirror.gcr.io: HTTP 429')
+    await click(button('Mettre à jour maintenant'))
+    await drive()
+    expect(callsTo('POST', '/api/catalog/feeds/refresh')[0]!.body).toEqual({ ids: ['trivy-db'] })
+  })
+
+  it('base d’un feed jamais téléchargée ; lecteur sans bouton', async () => {
+    setUser('viewer')
+    const row = entry('osv-db', {
+      type: 'feed',
+      installed: { id: 'osv-db', version: '1', type: 'feed', status: 'healthy', enabled: true, options: {} },
+    })
+    route('GET', '/api/catalog', () => view({ operations: [] }))
+    route('GET', '/api/catalog/modules/osv-db', () => ({
+      ...DETAIL, module: row, options_schema: null, plan: null, dns: null, installed: row.installed,
+      feed: { id: 'osv-db', updated_at: null, size_mb: null, status: 'missing' },
+    }))
+    const w = await mountIn(ModulePage, { route: '/catalog/osv-db' })
+    await settle()
+    expect(w.find('[data-feed]').text()).toContain('Aucune base téléchargée')
+    expect(w.text()).not.toContain('Mettre à jour maintenant')
+  })
+
   it('module absent du catalogue mais installé ; module introuvable', async () => {
     setUser('viewer')
     route('GET', '/api/catalog', () => view({ operations: [] }))

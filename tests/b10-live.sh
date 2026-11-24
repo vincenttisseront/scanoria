@@ -62,6 +62,9 @@ prepare_feed() { # id
 		python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); from scanoria import feeds
 print(feeds.refresh(json.load(open(sys.argv[2])), None, timeout=1500))' \
 		"$ROOT/src/rootfs/usr/lib/scanoria/py" "$WORK/feed-$1.json"
+	# Podman rootless : 65534 du conteneur n'est pas le groupe 65534 de l'hôte
+	# (sur l'appliance, root:65534 en 0640 suffit) ; lecture ouverte ici seulement.
+	chmod -R a+rX "$FEEDROOT/var/lib/scanoria/feeds"
 }
 
 for id in "${ids[@]}"; do

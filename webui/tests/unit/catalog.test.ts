@@ -327,6 +327,15 @@ describe('vue du catalogue', () => {
     expect(v.index).toEqual({ available: true, version: 7, generated_at: '2026-11-23T06:00:00Z', rejected: 1 })
   })
 
+  it('joint l’âge de la base aux feeds installés seulement', () => {
+    const feed = { id: 'trivy-db', updated_at: '2026-11-24T03:00:00Z', size_mb: 12, status: 'ok' as const, error: null }
+    const v = buildCatalogView({ ...ctx({ installed }), operations: [], feeds: [feed], stateAvailable: true } as CatalogContext)
+    const byId = Object.fromEntries(v.modules.map(m => [m.id, m]))
+    expect(byId['trivy-db']!.feed).toEqual(feed)
+    expect(byId.gitleaks!.feed).toBeNull()
+    expect(byId['osv-db']!.feed).toBeNull()
+  })
+
   it('packs : modules inconnus, installés, restants et plan global', () => {
     const packs = Object.fromEntries(view().packs.map(p => [p.id, p]))
     expect(packs.iac!.unknown_modules).toEqual(['checkov'])

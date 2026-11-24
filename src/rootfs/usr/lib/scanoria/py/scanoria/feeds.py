@@ -25,8 +25,8 @@ rename(2) : une analyse déjà lancée garde la base qu'elle a montée (la versi
 précédente est conservée jusqu'à la bascule suivante), et une base valide n'est
 jamais cassée par un échec. Intégrité : HTTPS avec certificat vérifié et, pour
 trivy-db, empreinte de la couche annoncée par le manifeste ; aucune signature
-de l'éditeur n'existe pour ces bases (les lots hors ligne signés arrivent en 0.6). Fichiers 0644 et répertoires 0755 (root), lus
-en lecture seule par l'utilisateur 65534 des conteneurs.
+de l'éditeur n'existe pour ces bases (les lots hors ligne signés arrivent en 0.6). Fichiers 0640 et répertoires 0750 (root:65534), lus
+en lecture seule par l'utilisateur 65534:65534 des conteneurs, et par lui seul.
 """
 
 import gzip
@@ -213,7 +213,7 @@ def fetch_osv(m, ref, options, work, deadline):
     details = {}
     for eco in ecosystems_of(m, options):
         d = os.path.join(work, "osv-scalibr", eco)
-        os.makedirs(d, mode=0o755, exist_ok=True)
+        os.makedirs(d, mode=0o700, exist_ok=True)
         dest = os.path.join(d, "all.zip")
         url = ref.replace("{ecosystem}", urllib.parse.quote(eco, safe=""))
         try:
@@ -242,6 +242,17 @@ def parse_oci_ref(ref):
     return mm.group("host"), mm.group("repo"), mm.group("digest") or mm.group("tag")
 
 
+def _auth_params(text):
+    """Paramètres clé="valeur" d'un défi d'authentification, sans expression rationnelle."""
+    out = {}
+    for part in text.split(","):
+        key, sep, value = part.strip().partition("=")
+        value = value.strip()
+        if sep and key.isalpha() and len(value) >= 2 and value[0] == value[-1] == '"' and len(value) <= 1026:
+            out[key.lower()] = value[1:-1]
+    return out
+
+
 def _bearer_challenge(header_file):
     """Paramètres du dernier défi « WWW-Authenticate: Bearer » reçu."""
     try:
@@ -253,7 +264,7 @@ def _bearer_challenge(header_file):
     for line in text.splitlines():
         k, sep, v = line.partition(":")
         if sep and k.strip().lower() == "www-authenticate" and v.strip().lower().startswith("bearer "):
-            found = dict(re.findall(r'([A-Za-z]+)="([^"]{0,1024})"', v))
+            found = _auth_params(v.strip()[len("bearer "):])
     return found
 
 
@@ -332,7 +343,7 @@ def _pick_layer(man):
 def extract_trivy(archive, dest):
     """Extrait db.tar.gz dans dest/db : trivy.db et metadata.json, fichiers ordinaires seulement."""
     dbdir = os.path.join(dest, "db")
-    os.makedirs(dbdir, mode=0o755, exist_ok=False)
+    os.makedirs(dbdir, mode=0o700, exist_ok=False)
     seen, total = set(), 0
     try:
         with tarfile.open(archive, "r:gz") as tf:
@@ -351,7 +362,7 @@ def extract_trivy(archive, dest):
                 seen.add(parts[0])
                 src = tf.extractfile(mem)
                 fd = os.open(os.path.join(dbdir, parts[0]), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                             0o644)
+                             0o600)
                 with os.fdopen(fd, "wb") as out, src:
                     shutil.copyfileobj(src, out, 1 << 20)
     except (tarfile.TarError, gzip.BadGzipFile, EOFError, OSError, zlib_error()) as e:
@@ -392,7 +403,7 @@ def fetch_oci(ref, work, deadline):
     if sha256_file(blob) != hexd:
         raise DownloadError("database layer digest mismatch")
     data = os.path.join(work, "data")
-    os.mkdir(data, 0o755)
+    os.mkdir(data, 0o700)
     meta = extract_trivy(blob, data)
     os.unlink(blob)
     for name in ("manifest.json", "manifest.headers", "auth.header"):
@@ -478,22 +489,33 @@ def status_file(mid):
 
 def _dirs():
     for d in (FEEDS, STORE):
-        os.makedirs(d, mode=0o755, exist_ok=True)
-        os.chmod(d, 0o755)
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        os.chmod(d, 0o700)
+
+
+# Groupe des conteneurs scanners (utilisateur 65534:65534, § 6.4) : la base leur
+# est lisible par le groupe seulement, jamais par les autres comptes de l'appliance.
+FEED_GID = 65534
+DIR_MODE = 0o750
+FILE_MODE = 0o640
+
+
+def _give(path):
+    if not common.TEST_ROOT:
+        os.chown(path, 0, FEED_GID, follow_symlinks=False)
 
 
 def _readable(root):
-    """Lecture seule pour tous (65534 dans les conteneurs), propriétaire root."""
+    """Lecture seule pour le groupe des conteneurs (65534), propriétaire root."""
     for base, dirs, files in os.walk(root):
-        os.chmod(base, 0o755)
+        _give(base)
+        os.chmod(base, DIR_MODE)
         for n in files:
             path = os.path.join(base, n)
-            st = os.lstat(path)
             if not os.path.isfile(path) or os.path.islink(path):
                 raise DownloadError("unexpected file type in the new database")
-            if not common.TEST_ROOT and (st.st_uid != 0 or st.st_gid != 0):
-                os.chown(path, 0, 0, follow_symlinks=False)
-            os.chmod(path, 0o644)
+            _give(path)
+            os.chmod(path, FILE_MODE)
 
 
 def _du_mb(root):
@@ -566,8 +588,8 @@ def read_status(mid):
 
 
 def write_status(mid, st):
-    os.makedirs(store_dir(mid), mode=0o755, exist_ok=True)
-    common.write_json(status_file(mid), st, 0o644, group_scanoria=False)
+    os.makedirs(store_dir(mid), mode=0o700, exist_ok=True)
+    common.write_json(status_file(mid), st, 0o600, group_scanoria=False)
 
 
 def public_status(mid):
@@ -612,8 +634,8 @@ def refresh(m, options=None, timeout=DEFAULT_TIMEOUT):
     kind, _ = source_of(m)
     _dirs()
     sd = store_dir(mid)
-    os.makedirs(sd, mode=0o755, exist_ok=True)
-    os.chmod(sd, 0o755)
+    os.makedirs(sd, mode=0o700, exist_ok=True)
+    os.chmod(sd, 0o700)
     need_mb = (m.get("resources") or {}).get("disk_mb")
     if isinstance(need_mb, int) and not isinstance(need_mb, bool):
         vfs = os.statvfs(sd)
