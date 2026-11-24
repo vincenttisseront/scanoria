@@ -106,7 +106,8 @@
                     "apply-update",
                     "rollback-update",
                     "set-update-policy",
-                    "run-selftest"
+                    "run-selftest",
+                    "check-dns"
                   ]
                 },
                 "step": {

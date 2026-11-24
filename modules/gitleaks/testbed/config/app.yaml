@@ -1,0 +1,4 @@
+# Faux secret du banc d'essai Scanoria (généré au hasard, sans valeur).
+service:
+  url: https://api.exemple.test
+  api_key: "60McLboxktoncEph3G7AczJyYLemPOEhVYpu95CG"

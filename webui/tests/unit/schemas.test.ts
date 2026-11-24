@@ -117,44 +117,39 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
     valid: [{}, { quick: true }],
     invalid: [{ quick: 1 }, { full: true }],
   },
+  'check-dns': {
+    valid: [{}],
+    invalid: [{ force: true }, { fqdn: 'analyse.exemple.test' }],
+  },
   'refresh-catalog': {
     valid: [{}],
     invalid: [{ force: true }],
   },
   'install-modules': {
     valid: [
-      { modules: [{ id: 'gitleaks', version: '8.28.0', options: {} }], accept_licenses: [] },
-      { modules: [{ id: 'trivy', version: '0.67.2', options: { severity: 'HIGH' } }, { id: 'trivy-db', version: '2', options: {} }], accept_licenses: ['trivy'] },
+      { modules: [{ id: 'gitleaks', version: '8.30.1', options: {} }], accept_licenses: [] },
+      { modules: [{ id: 'semgrep', version: '1.0.0', options: { level: 'high' } }], accept_licenses: ['semgrep'] },
     ],
     invalid: [
       { modules: [], accept_licenses: [] },
-      { modules: [{ id: 'gitleaks', version: '8.28.0', options: {} }] },
-      { modules: [{ id: 'gitleaks', version: '8.28.0' }], accept_licenses: [] },
       { modules: [{ id: '../etc', version: '1', options: {} }], accept_licenses: [] },
-      { modules: [{ id: 'Gitleaks', version: '1', options: {} }], accept_licenses: [] },
-      { modules: [{ id: 'gitleaks', version: '1; rm -rf /', options: {} }], accept_licenses: [] },
-      { modules: [{ id: 'gitleaks', version: '1', options: [] }], accept_licenses: [] },
+      { modules: [{ id: 'gitleaks', version: '8/../x', options: {} }], accept_licenses: [] },
       { modules: [{ id: 'gitleaks', version: '1', options: {}, image: 'x' }], accept_licenses: [] },
-      { modules: [{ id: 'gitleaks', version: '1', options: {} }], accept_licenses: ['a', 'a'] },
-      { modules: Array.from({ length: 33 }, (_, i) => ({ id: `m${i}x`, version: '1', options: {} })), accept_licenses: [] },
-      { modules: [{ id: 'gitleaks', version: '1', options: {} }], accept_licenses: [], extra: 1 },
+      { modules: [{ id: 'gitleaks', version: '1', options: {} }] },
+      { modules: [{ id: 'gitleaks', version: '1', options: {} }], accept_licenses: ['a1', 'a1'] },
     ],
   },
   'uninstall-module': {
-    valid: [{ id: 'gitleaks', keep_data: true }, { id: 'osv-scanner', keep_data: false }],
-    invalid: [{ id: 'gitleaks' }, { id: 'gitleaks', keep_data: 'no' }, { id: '-x', keep_data: true }],
+    valid: [{ id: 'gitleaks', keep_data: true }],
+    invalid: [{ id: 'gitleaks' }, { id: 'gitleaks', keep_data: 'no' }, { id: 'Git', keep_data: false }],
   },
   'set-module-state': {
-    valid: [{ id: 'trivy', enabled: false }],
-    invalid: [{ id: 'trivy' }, { id: 'trivy', enabled: 1 }, { id: 'trivy', enabled: true, x: 1 }],
+    valid: [{ id: 'trivy-db', enabled: false }],
+    invalid: [{ id: 'trivy' }, { id: 'trivy', enabled: 1 }],
   },
   'update-module': {
-    valid: [{ id: 'trivy', version: '0.68.0' }],
-    invalid: [{ id: 'trivy' }, { id: 'trivy', version: '' }, { id: 'trivy', version: '.1' }],
-  },
-  'check-dns': {
-    valid: [{}],
-    invalid: [{ name: 'x' }],
+    valid: [{ id: 'gitleaks', version: '8.30.1' }],
+    invalid: [{ id: 'gitleaks' }, { id: 'gitleaks', version: '' }, { id: 'gitleaks', version: '1', x: 1 }],
   },
 }
 

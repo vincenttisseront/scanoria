@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Généré par scanoria.routing (module actif) : ne pas modifier.
+# scanoria-route: id=@ID@ mode=proxy host=@HOST@ port=@PORT@ fqdn=@FQDN@
+server {
+	listen 443 ssl http2;
+	listen [::]:443 ssl http2;
+	server_name @HOST@;
+	server_tokens off;
+@TLS@
+	# En-têtes de sécurité de la console ; le cadre reste permis à
+	# l'application elle-même (SAMEORIGIN), et les en-têtes amont sont
+	# masqués pour ne pas être doublés.
+	proxy_hide_header Strict-Transport-Security;
+	proxy_hide_header X-Content-Type-Options;
+	proxy_hide_header X-Frame-Options;
+	proxy_hide_header Referrer-Policy;
+	proxy_hide_header Cross-Origin-Opener-Policy;
+	proxy_hide_header Cross-Origin-Resource-Policy;
+	proxy_hide_header X-Powered-By;
+	add_header X-Frame-Options SAMEORIGIN always;
+	add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+
+	# Rapports d'analyse et SBOM volumineux, transmis sans tampon disque.
+	client_max_body_size 256m;
+	proxy_request_buffering off;
+	proxy_http_version 1.1;
+	proxy_set_header Host $host;
+	proxy_set_header X-Real-IP $remote_addr;
+	proxy_set_header X-Forwarded-For $remote_addr;
+	proxy_set_header X-Forwarded-Proto https;
+	proxy_set_header X-Forwarded-Host $host;
+	proxy_set_header Upgrade $http_upgrade;
+	proxy_set_header Connection $scanoria_connection_upgrade;
+	proxy_read_timeout 300s;
+
+	location / {
+		proxy_pass http://127.0.0.1:@PORT@;
+	}
+}

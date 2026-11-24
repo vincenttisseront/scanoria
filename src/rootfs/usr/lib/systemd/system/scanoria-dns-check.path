@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Nouveau nom de l'appliance (set-hostname réécrit appliance.json) : sites des
+# modules régénérés et DNS vérifié aussitôt.
+[Unit]
+Description=Scanoria appliance name watcher (DNS check)
+
+[Path]
+PathChanged=/etc/scanoria/appliance.json
+Unit=scanoria-dns-check.service
+
+[Install]
+WantedBy=multi-user.target
