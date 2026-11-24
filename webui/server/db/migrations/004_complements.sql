@@ -14,3 +14,12 @@ ALTER TABLE findings
     ADD COLUMN secret_state_by bigint REFERENCES users (id) ON DELETE SET NULL,
     ADD COLUMN secret_state_at timestamptz,
     ADD COLUMN snippet text CHECK (snippet IS NULL OR length(snippet) <= 2000);
+
+-- Chantier A : clé d'hôte SSH relevée à l'ajout et confirmée par l'opérateur
+-- (transmise au runner), dernière archive téléversée (seul fichier de
+-- /var/lib/scanoria/uploads/<upload_id>/ : source.zip, source.tar ou
+-- source.tar.gz, 0600 scanoria), dernière interrogation de la forge.
+ALTER TABLE projects
+    ADD COLUMN ssh_known_hosts text CHECK (ssh_known_hosts IS NULL OR length(ssh_known_hosts) BETWEEN 1 AND 16384),
+    ADD COLUMN upload_id uuid,
+    ADD COLUMN last_polled_at timestamptz;
