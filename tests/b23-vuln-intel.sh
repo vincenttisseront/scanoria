@@ -42,10 +42,13 @@ expect() {
 
 if [[ "${1:-}" == "--live" ]]; then
 	T="$TMP/root"
-	mkdir -p "$T/var/lib/scanoria" "$T/etc"
-	export SCANORIA_TEST_ROOT="$T" PYLIB
+	mkdir -p "$T/var/lib/scanoria" "$T/etc" "$TMP/live-bin"
+	# En mode test, une commande absente de SCANORIA_TEST_BIN est un bouchon : le vrai curl y est placé.
+	ln -s "$(command -v curl)" "$TMP/live-bin/curl"
+	export SCANORIA_TEST_ROOT="$T" SCANORIA_TEST_BIN="$TMP/live-bin" PYLIB
 	for id in epss kev; do
-		R=$(python3 - "$ROOT/modules/$id/module.yaml" <<-'PY' 2>&1 || true
+		# Journal (essais, repli sur le miroir) à part : seul le résultat est comparé.
+		R=$(python3 - "$ROOT/modules/$id/module.yaml" <<-'PY' 2> "$TMP/$id.err" || true
 			import os, sys, yaml
 			sys.path.insert(0, os.environ["PYLIB"])
 			from scanoria import feeds
@@ -58,6 +61,7 @@ if [[ "${1:-}" == "--live" ]]; then
 		PY
 		)
 		expect "$id (vraie source) : téléchargement, validation et export" "$R" "OK ok"
+		[[ "$R" == "OK ok" ]] || cat "$TMP/$id.err" >&2
 		n=$( (gzip -dc "$T/var/lib/scanoria/feeds-export/$id.jsonl.gz" 2> /dev/null || true) | wc -l)
 		if [[ $n -ge 1000 ]]; then ok "$id (vraie source) : $n CVE exportées"; else ko "$id (vraie source) : $n CVE exportées (≥ 1000 attendues)"; fi
 		jq -c '{source, details}' "$T/var/lib/scanoria/feeds/.store/$id/status.json" 2> /dev/null || true
