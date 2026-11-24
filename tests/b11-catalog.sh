@@ -132,7 +132,9 @@ expect_ko "autre clé publique refusée" "signature" python3 "$B" verify "$TMP/s
 
 fresh() { rm -rf "$TMP/w" && cp -a "$TMP/signed" "$TMP/w"; }
 fresh
-printf '\x00' | dd of="$TMP/w/SHA256SUMS.sig" bs=1 seek=10 conv=notrunc 2> /dev/null
+# Inverse l'octet 10 (XOR 0xff) : l'écraser par une valeur fixe laisserait la
+# signature intacte une fois sur 256.
+python3 -c 'import sys; p = sys.argv[1]; b = bytearray(open(p, "rb").read()); b[10] ^= 0xFF; open(p, "wb").write(b)' "$TMP/w/SHA256SUMS.sig"
 expect_ko "signature altérée refusée" "signature" python3 "$B" verify "$TMP/w" --pubkey "$K/test.pub"
 fresh
 head -c 63 "$TMP/signed/SHA256SUMS.sig" > "$TMP/w/SHA256SUMS.sig"

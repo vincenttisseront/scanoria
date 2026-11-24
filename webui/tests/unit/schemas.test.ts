@@ -129,6 +129,10 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
     valid: [{}, { ids: ['trivy-db'] }, { ids: ['osv-db', 'trivy-db'] }],
     invalid: [{ ids: [] }, { ids: ['../x'] }, { ids: ['osv-db', 'osv-db'] }, { force: true }],
   },
+  'package-dates': {
+    valid: [{ purls: ['pkg:npm/minimist@1.2.5'] }, { purls: ['pkg:npm/%40scope/nom@1.0.0', 'pkg:pypi/requests@2.31.0'] }],
+    invalid: [{}, { purls: [] }, { purls: ['npm/minimist@1.2.5'] }, { purls: ['pkg:npm/a b@1'] }, { purls: ['pkg:npm/x@1', 'pkg:npm/x@1'] }, { purls: ['pkg:npm/x@1'], force: true }],
+  },
   'install-modules': {
     valid: [
       { modules: [{ id: 'gitleaks', version: '8.30.1', options: {} }], accept_licenses: [] },
