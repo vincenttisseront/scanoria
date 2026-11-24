@@ -72,6 +72,8 @@ if a[:1] == ["inspect"]:
     fmt = a[a.index("--format") + 1]
     print("/fake.scope" if "Cgroup" in fmt else ("true" if scen == "scan-oom-flag" else "false"))
     sys.exit(0)
+if a[:1] == ["ps"]:
+    print("0123456789ab" if scen == "orphans" else ""); sys.exit(0)
 if a[:1] in (["rm"], ["unshare"], ["kill"]):
     sys.exit(0)
 if a[:1] != ["run"]:
@@ -123,12 +125,12 @@ sys.exit(0)
 EOF
 cat > "$STUBS/nft" <<EOF
 #!/usr/bin/env python3
-import json, sys
+import json, os, sys
 a = sys.argv[1:]
 data = sys.stdin.read() if a[:2] == ["-f", "-"] else ""
 with open("$TMP/nft.log", "a") as f:
     f.write(json.dumps(a + ([data] if data else [])) + "\n")
-sys.exit(1 if a[:1] == ["list"] else 0)
+sys.exit(1 if a[:1] == ["list"] and not os.path.exists("$TMP/nft-table") else 0)
 EOF
 chmod 0755 "$STUBS/podman" "$STUBS/nft"
 
@@ -326,6 +328,11 @@ expect "clone refusé : modules sautés" "$(jq -r '.modules[0].status' <<< "$R")
 [[ -f "$SCANS/results/$id/fetch.log" ]] && ok "clone refusé : journal du clone publié" || ko "clone refusé : fetch.log absent"
 if grep -qF -- "$TOKEN" "$SCANS/results/$id/fetch.log"; then ko "clone refusé : jeton dans fetch.log"; else ok "clone refusé : jeton masqué dans fetch.log"; fi
 grep -q '"delete", "element"' "$TMP/nft.log" && ok "clone refusé : règle retirée" || ko "clone refusé : règle laissée"
+# Jeton très court : masqué lui aussi.
+id=$(uuid)
+drop "$id" "$(job "$id" '{"kind": "git", "url": "https://forge.exemple.test/a.git", "ref": "main", "history": "shallow", "credential": {"kind": "token", "token": "q7z"}}')"
+run_runner
+if grep -qF -- "q7z" "$SCANS/results/$id/fetch.log"; then ko "jeton de 3 caractères : présent dans fetch.log"; else ok "jeton de 3 caractères : masqué dans fetch.log"; fi
 echo ok > "$SCEN"
 addr_case() { # hôte code
 	local id; id=$(uuid)
@@ -337,6 +344,56 @@ addr_case boucle.exemple.test E_SOURCE_ADDRESS/input
 addr_case meta.exemple.test E_SOURCE_ADDRESS/input
 addr_case 10.89.250.7 E_SOURCE_ADDRESS/input
 addr_case inconnu.exemple.test E_SOURCE_RESOLVE/infra
+# Forge sur l'appliance elle-même : seul le proxy inverse (443) est joignable.
+export SCANORIA_TEST_LOCAL_ADDRS=192.0.2.10
+addr_case forge.exemple.test:8443 E_SOURCE_ADDRESS/input
+id=$(uuid); drop "$id" "$(job "$id")"; run_runner
+expect "forge sur l'appliance, port 443 : acceptée" "$(res "$id" | jq -r .status)" ok
+unset SCANORIA_TEST_LOCAL_ADDRS
+# Espace disque insuffisant : refus à l'admission, sans clone.
+: > "$TMP/podman.log"
+id=$(uuid); drop "$id" "$(job "$id")"; SCANORIA_TEST_FREE_MB=100 run_runner
+expect "disque plein : E_DISK_FULL (infra)" "$(res "$id" | jq -r '.error.code + "/" + .error.class')" "E_DISK_FULL/infra"
+grep -q 'scanoria-fetch-' "$TMP/podman.log" && ko "disque plein : clone lancé" || ok "disque plein : aucun clone"
+# Bornes de stockage d'une récupération en cours.
+python3 -I -B - "$PYLIB" "$TMP/ws" <<'PY' && ok "stockage : dépôt trop gros et disque plein arrêtent la récupération" || ko "stockage : bornes non appliquées"
+import os, sys
+sys.path.insert(0, sys.argv[1])
+from scanoria import fetch
+os.makedirs(sys.argv[2] + "/git")
+with open(sys.argv[2] + "/git/pack", "wb") as f:
+    f.write(b"x" * 65536)
+assert fetch.storage_check(sys.argv[2]) is None
+fetch.MAX_CLONE_BYTES = 1024
+assert fetch.storage_check(sys.argv[2]).code == "E_SOURCE_TOO_LARGE"
+os.environ["SCANORIA_TEST_FREE_MB"] = "1"
+assert fetch.storage_check(sys.argv[2]).code == "E_DISK_FULL"
+PY
+# Doublon d'une tâche en cours : écarté sans toucher à l'original ni publier.
+id=$(uuid)
+printf '{"id": "%s"}' "$id" > "$SCANS/jobs/work/$id.running"
+mkdir -p "$SCANS/workspaces/$id"
+python3 -I -B - "$PYLIB" "$id" "$(job "$id")" <<'PY' && ok "doublon en cours : écarté, original intact, aucun résultat" || ko "doublon en cours : mal traité"
+import os, sys
+sys.path.insert(0, sys.argv[1])
+from scanoria import runner
+p = os.path.join(runner.INCOMING, sys.argv[2] + ".json")
+fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+os.write(fd, sys.argv[3].encode()); os.close(fd)
+r = runner.Runner(); r.slots = 4
+assert r.tick([]) == 0
+assert not os.path.exists(p)
+assert os.path.exists(runner.marker_path(sys.argv[2]))
+assert os.path.isdir(os.path.join(runner.WORKSPACES, sys.argv[2]))
+assert not os.path.exists(os.path.join(runner.RESULTS, sys.argv[2]))
+PY
+rm -rf "$SCANS/jobs/work/$id.running" "$SCANS/workspaces/$id"
+# Doublon d'une tâche terminée : écarté, résultat inchangé.
+id=$(uuid); drop "$id" "$(job "$id")"; run_runner
+before=$(sha256sum < "$SCANS/results/$id/result.json")
+drop "$id" "$(job "$id" "" '[{"id": "inconnu", "version": "1.0.0"}]')"; run_runner
+expect "doublon terminé : résultat inchangé" "$(sha256sum < "$SCANS/results/$id/result.json")" "$before"
+[[ -e "$SCANS/jobs/incoming/$id.json" ]] && ko "doublon terminé : fichier laissé" || ok "doublon terminé : fichier supprimé"
 mv "$T/var/lib/scanoria/modules/installed.json" "$TMP/reg.json"
 jq '.modules["git-fetch"].enabled = false' "$TMP/reg.json" > "$T/var/lib/scanoria/modules/installed.json"
 id=$(uuid); drop "$id" "$(job "$id")"; run_runner
@@ -396,12 +453,24 @@ expect "archive absente → E_ARCHIVE_MISSING" "$(arch_job "$(uuid)" | jq -r .er
 up=$(uuid)
 mkarch "$up" 'import os, sys; os.symlink("/etc/passwd", sys.argv[1] + "/source.tar")'
 expect "archive en lien symbolique → refusée" "$(arch_job "$up" | jq -r .error.code)" E_ARCHIVE_INVALID
+# Répertoire du téléversement remplacé par un lien : jamais suivi.
+up=$(uuid)
+mkarch "$(uuid)" 'import sys, tarfile, io
+t = tarfile.open(sys.argv[1] + "/source.tar", "w"); i = tarfile.TarInfo("a.txt"); i.size = 1
+t.addfile(i, io.BytesIO(b"a")); t.close()'
+mkdir -p "$TMP/ailleurs" && cp "$(find "$T/var/lib/scanoria/uploads" -name source.tar | head -1)" "$TMP/ailleurs/"
+ln -s "$TMP/ailleurs" "$T/var/lib/scanoria/uploads/$up"
+expect "répertoire de téléversement en lien → E_ARCHIVE_MISSING" "$(arch_job "$up" | jq -r .error.code)" E_ARCHIVE_MISSING
 
 # --- 8. Redémarrage, capacité, purge -------------------------------------------------------
 id=$(uuid); sid=$(uuid)
 printf '{"id": "%s", "scan_id": "%s", "source_kind": "git"}' "$id" "$sid" > "$SCANS/jobs/work/$id.running"
 mkdir -p "$SCANS/workspaces/$id/src" && echo reste > "$SCANS/workspaces/$id/src/f"
+touch "$TMP/nft-table"; : > "$TMP/nft.log"; : > "$TMP/podman.log"; echo orphans > "$SCEN"
 run_runner
+echo ok > "$SCEN"; rm -f "$TMP/nft-table"
+grep -q '"flush", "set", "inet", "scanoria_fetch", "allow4"' "$TMP/nft.log" && ok "redémarrage : autorisations nftables héritées vidées" || ko "redémarrage : ensemble allow4 non vidé"
+grep -q '"rm", "--force", "--ignore", "--time", "0", "0123456789ab"' "$TMP/podman.log" && ok "redémarrage : conteneur orphelin retiré" || ko "redémarrage : conteneur orphelin laissé"
 expect "redémarrage : E_RUNNER_RESTARTED (infra)" "$(res "$id" | jq -r '.error.code + "/" + .error.class + "/" + .scan_id')" "E_RUNNER_RESTARTED/infra/$sid"
 expect "redémarrage : espace de travail orphelin supprimé" "$(find "$SCANS/workspaces" -mindepth 1 | wc -l)" 0
 valid "$id" > /dev/null && ok "redémarrage : résultat conforme" || ko "redémarrage : résultat non conforme"

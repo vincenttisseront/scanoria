@@ -193,15 +193,23 @@ Classes d'erreur (G12) :
 
 | Classe | Codes |
 |---|---|
-| `infra` (relancée par le worker) | `E_MODULE_TIMEOUT`, `E_MODULE_OOM`, `E_IMAGE_MISSING`, `E_PODMAN`, `E_RUNNER_RESTARTED`, `E_RUNNER_INTERNAL`, `E_SOURCE_NETWORK`, `E_SOURCE_TIMEOUT`, `E_SOURCE_RESOLVE`, `E_FETCH_NETWORK` |
+| `infra` (relancée par le worker) | `E_MODULE_TIMEOUT`, `E_MODULE_OOM`, `E_IMAGE_MISSING`, `E_PODMAN`, `E_RUNNER_RESTARTED`, `E_RUNNER_INTERNAL`, `E_SOURCE_NETWORK`, `E_SOURCE_TIMEOUT`, `E_SOURCE_RESOLVE`, `E_FETCH_NETWORK`, `E_DISK_FULL` |
 | `tool` | `E_TOOL_EXIT`, `E_INVALID_OUTPUT` |
-| `input` | `E_JOB_INVALID`, `E_MODULE_MISSING`, `E_MODULE_INVALID`, `E_OPTIONS_INVALID`, `E_INPUT_UNSUPPORTED`, `E_NETWORK_UNSUPPORTED`, `E_SOURCE_URL`, `E_SOURCE_REF`, `E_SOURCE_ADDRESS`, `E_SOURCE_AUTH`, `E_SOURCE_HOSTKEY`, `E_SOURCE_NOT_FOUND`, `E_SOURCE_FETCH`, `E_FETCH_MODULE_MISSING`, `E_ARCHIVE_MISSING`, `E_ARCHIVE_INVALID`, `E_ARCHIVE_UNSAFE` |
+| `input` | `E_JOB_INVALID`, `E_MODULE_MISSING`, `E_MODULE_INVALID`, `E_OPTIONS_INVALID`, `E_INPUT_UNSUPPORTED`, `E_NETWORK_UNSUPPORTED`, `E_SOURCE_URL`, `E_SOURCE_REF`, `E_SOURCE_ADDRESS`, `E_SOURCE_AUTH`, `E_SOURCE_HOSTKEY`, `E_SOURCE_NOT_FOUND`, `E_SOURCE_FETCH`, `E_SOURCE_TOO_LARGE`, `E_FETCH_MODULE_MISSING`, `E_ARCHIVE_MISSING`, `E_ARCHIVE_INVALID`, `E_ARCHIVE_UNSAFE` |
 
 Capacité : `/run/scanoria/runner.json` `{slots, busy, updated_at}`, avec
 `slots` = (RAM − 3 Go réservés − services permanents) ÷ max(limite du plus gros
 scanner actif, 1 Go du clone), borné à 1…8 et au nombre de CPU. Au démarrage,
 une tâche interrompue est publiée en `E_RUNNER_RESTARTED` ; les résultats sont
 purgés après 24 h. `scanoria-selftest` contrôle `runner.alive`.
+
+Bornes et reprise : une tâche n'est admise que s'il reste 2 Gio libres ; un
+clone (`/git` et `/src` réunis) est arrêté au-delà de 8 Gio ou si l'espace libre
+passe sous 2 Gio. Une forge qui résout vers l'appliance n'est joignable que
+sur le port 443 (proxy inverse, forge installée comme module). Une tâche dont
+l'identifiant est déjà en cours ou déjà publié est écartée sans résultat. Au
+démarrage, l'ensemble nftables `allow4` est vidé et les conteneurs
+`scanoria-fetch-*` / `scanoria-scan-*` orphelins sont retirés.
 
 ## 5. Banc d'essai (F12)
 

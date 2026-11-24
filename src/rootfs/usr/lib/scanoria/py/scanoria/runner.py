@@ -254,6 +254,10 @@ def claim(name):
         _discard(src)
         raise ValueError("invalid job file name")
     job_id = m.group(1)
+    if os.path.lexists(marker_path(job_id)) or os.path.lexists(os.path.join(result_dir(job_id), "result.json")):
+        # Tâche déjà en cours ou déjà terminée : le doublon est écarté sans toucher à l'original.
+        _discard(src)
+        raise ValueError("duplicate of job %s, already running or done" % job_id)
     dst = os.path.join(WORK, name)
     try:
         os.rename(src, dst)
@@ -336,6 +340,7 @@ def recover():
     for n in os.listdir(WORKSPACES) if os.path.isdir(WORKSPACES) else []:
         shutil.rmtree(os.path.join(WORKSPACES, n), ignore_errors=True)
     shutil.rmtree(fetch.CRED_DIR, ignore_errors=True)
+    fetch.reset_network()
 
 
 # --------------------------------------------------------------------------
@@ -473,8 +478,13 @@ class Sampler(threading.Thread):
             delay = min(1.0, delay * 1.5)
 
 
-def _out_name(declared):
-    return os.path.basename(declared)
+def _out_name(kind, declared, used):
+    """Nom de la copie (nom de base de la sortie, préfixé par son type s'il est déjà pris)."""
+    name = os.path.basename(declared)
+    if name in used:
+        name = "%s-%s" % (kind, name)
+    used.add(name)
+    return name
 
 
 def _copy_output(out_dir, declared, kind, version, dest):
@@ -572,7 +582,7 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
                                     % (mid, rc)), rc)
     if rc not in (scan.get("exit_codes_ok") or testbed.SCANNER_OK_RC):
         return finish("error", _err("E_TOOL_EXIT", "tool", "module %s exited with code %d" % (mid, rc)), rc)
-    outputs = {}
+    outputs, used = {}, set()
     try:
         decl = m.get("outputs")
         if not isinstance(decl, dict) or not decl:
@@ -580,7 +590,7 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
         for kind, d in sorted(decl.items()):
             if not isinstance(d, dict):
                 raise Fail("E_TESTBED", "malformed output declaration")
-            fname = _out_name(d.get("path") or "")
+            fname = _out_name(kind, d.get("path") or "", used)
             _copy_output(out, d.get("path"), kind, d.get("version"), os.path.join(mdir, fname))
             outputs[kind] = "%s/%s" % (mid, fname)
     except Fail as f:
@@ -613,9 +623,13 @@ def execute(job):
     if not runnable:
         result["finished_at"] = common.iso(common.now())
         return result
+    if fetch.disk_free(SCANS) < fetch.MIN_FREE_BYTES:
+        return error_result(job["id"], job["scan_id"], _err("E_DISK_FULL", "infra",
+                                                            "not enough free space left on the appliance"),
+                            started, src["kind"])
     ws = os.path.join(WORKSPACES, job["id"])
     rdir = result_dir(job["id"])
-    os.mkdir(ws, 0o700)
+    os.mkdir(ws, 0o700)          # échoue si l'espace existe déjà : il n'est alors jamais supprimé ici
     try:
         os.mkdir(os.path.join(ws, "logs"), 0o700)
         try:
@@ -658,11 +672,13 @@ def handle(job):
             result = execute(job)
         except Exception as e:  # noqa: BLE001
             common.log("runner: job %s failed: %r" % (job["id"], e))
-            shutil.rmtree(os.path.join(WORKSPACES, job["id"]), ignore_errors=True)
             result = error_result(job["id"], job["scan_id"], _err("E_RUNNER_INTERNAL", "infra",
                                                                   "internal runner error"),
                                   source_kind=job["source"]["kind"])
-        publish(result)
+        try:
+            publish(result)
+        except Exception as e:  # noqa: BLE001 — le worker constatera l'absence de résultat à son délai
+            common.log("runner: cannot publish the result of job %s: %r" % (job["id"], e))
     finally:
         try:
             os.unlink(marker_path(job["id"]))

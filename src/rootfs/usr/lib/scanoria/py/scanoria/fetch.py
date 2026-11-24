@@ -54,6 +54,9 @@ MAX_UPLOAD = 600 << 20           # la console borne à 512 Mio
 MAX_DECLARED = 16 << 30          # somme des tailles déclarées, fichiers écartés compris
 EXTRACT_BUDGET_S = 900
 MAX_LOG = 1 << 20
+MAX_CLONE_BYTES = 8 << 30        # dépôt Git (/git) et arbre extrait (/src) réunis
+MIN_FREE_BYTES = 2 << 30         # espace libre minimal gardé sur /var/lib/scanoria
+WATCH_EVERY_S = 5
 
 HOST_RE = re.compile(r"[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\Z")
 SHA_RE = re.compile(r"[0-9a-f]{40}([0-9a-f]{24})?\Z")
@@ -85,7 +88,7 @@ def secret_values(credential):
     user = credential.get("username") or "oauth2"
     vals = {tok, urllib.parse.quote(tok, safe=""),
             base64.b64encode(("%s:%s" % (user, tok)).encode()).decode()}
-    return sorted((v for v in vals if len(v) >= 4), key=len, reverse=True)
+    return sorted((v for v in vals if v), key=len, reverse=True)
 
 
 def redact(text, values):
@@ -121,6 +124,28 @@ def _forbidden(ip):
             or ip.is_reserved or ip in SUBNET or ip == ipaddress.ip_address("255.255.255.255"))
 
 
+# Seul port des adresses de l'appliance joignable par une récupération : le proxy
+# inverse (forge installée comme module, servie par <libellé>.<appliance>).
+APPLIANCE_PORT = 443
+
+
+def local_addresses():
+    """Adresses IPv4 des interfaces de l'appliance."""
+    if common.TEST_ROOT and "SCANORIA_TEST_LOCAL_ADDRS" in os.environ:
+        return set(a for a in os.environ["SCANORIA_TEST_LOCAL_ADDRS"].split(",") if a)
+    try:
+        r = common.run("ip", ["-j", "-4", "addr", "show"], timeout=10)
+        links = json.loads(r.stdout or b"[]")
+    except (Fail, ValueError):
+        return set()
+    out = set()
+    for link in links if isinstance(links, list) else []:
+        for a in (link.get("addr_info") or []) if isinstance(link, dict) else []:
+            if isinstance(a, dict) and isinstance(a.get("local"), str):
+                out.add(a["local"])
+    return out
+
+
 def _test_resolution(host):
     """Mode test seulement : SCANORIA_TEST_RESOLVE="hôte=ip;hôte=ip"."""
     for part in os.environ.get("SCANORIA_TEST_RESOLVE", "").split(";"):
@@ -147,6 +172,7 @@ def resolve(host, port):
                 raise SourceError("E_SOURCE_RESOLVE", "infra", "cannot resolve the forge host %s" % host)
             addrs = [i[4][0] for i in infos]
     out = []
+    local = local_addresses()
     for a in addrs:
         try:
             ip = ipaddress.ip_address(a)
@@ -157,6 +183,9 @@ def resolve(host, port):
         if _forbidden(ip):
             raise SourceError("E_SOURCE_ADDRESS", "input",
                               "forge host %s resolves to a forbidden address (%s)" % (host, ip))
+        if str(ip) in local and port != APPLIANCE_PORT:
+            raise SourceError("E_SOURCE_ADDRESS", "input",
+                              "forge host %s is this appliance: only port %d is allowed" % (host, APPLIANCE_PORT))
         if str(ip) not in out:
             out.append(str(ip))
     if not out:
@@ -221,6 +250,16 @@ def allow(src_ip, addrs, port):
 
 def revoke(src_ip, addrs, port):
     _nft(["delete", "element", "inet", NFT_TABLE, "allow4", _elements(src_ip, addrs, port)])
+
+
+def reset_network():
+    """Au démarrage du runner : aucune autorisation ni aucun conteneur de récupération hérités."""
+    if _nft(["list", "table", "inet", NFT_TABLE]):
+        _nft(["flush", "set", "inet", NFT_TABLE, "allow4"])
+    r = common.run("podman", ["ps", "--all", "--quiet", "--filter", "name=^scanoria-(fetch|scan)-"], timeout=60)
+    ids = [i for i in r.text.split() if re.fullmatch(r"[0-9a-f]{12,64}", i)]
+    if ids:
+        common.run("podman", ["rm", "--force", "--ignore", "--time", "0"] + ids, timeout=120)
 
 
 # --------------------------------------------------------------------------
@@ -391,15 +430,21 @@ def fetch_git(job, ws, registry_modules, history, log_path, secrets):
     depth = "1" if history == "shallow" else ""
     args += ["--entrypoint", '["/bin/sh"]', m["image"], "-c", FETCH_SCRIPT, "git-fetch",
              src["url"], src["ref"], want, depth]
-    allow(ip, addrs, port)
+    allowed = False
     try:
-        rc, out, timed_out = run_logged(args, log_path, FETCH_TIMEOUT + 60, secret_env, secrets)
+        allow(ip, addrs, port)
+        allowed = True
+        rc, out, timed_out = run_logged(args, log_path, FETCH_TIMEOUT + 60, secret_env, secrets,
+                                        watch=lambda: storage_check(ws))
     finally:
-        revoke(ip, addrs, port)
+        if allowed:
+            revoke(ip, addrs, port)
         _free_ip(ip)
         common.run("podman", ["rm", "--force", "--ignore", "--time", "0", name], timeout=120)
         if cred_dir:
             shutil.rmtree(cred_dir, ignore_errors=True)
+    if isinstance(timed_out, SourceError):
+        raise timed_out
     if timed_out:
         raise SourceError("E_SOURCE_TIMEOUT", "infra", "fetching the repository timed out")
     if rc in (125, 126, 127):
@@ -407,12 +452,42 @@ def fetch_git(job, ws, registry_modules, history, log_path, secrets):
     if rc != 0:
         code, cls, msg = _classify(_read_log(log_path))
         raise SourceError(code, cls, msg)
-    mm = re.search(r"^commit=([0-9a-f]{40,64})$", out, re.M)
-    if not mm:
+    # Dernière ligne « commit= » : le script l'écrit en dernier, après toute sortie de git.
+    found = re.findall(r"^commit=([0-9a-f]{40,64})$", out, re.M)
+    if not found:
         raise SourceError("E_SOURCE_FETCH", "input", "fetched commit unknown")
-    if want and mm.group(1) != want:
+    if want and found[-1] != want:
         raise SourceError("E_SOURCE_NOT_FOUND", "input", "requested commit not found")
-    return mm.group(1)
+    return found[-1]
+
+
+def disk_free(path):
+    if common.TEST_ROOT and "SCANORIA_TEST_FREE_MB" in os.environ:
+        return int(os.environ["SCANORIA_TEST_FREE_MB"]) << 20
+    st = os.statvfs(path)
+    return st.f_bavail * st.f_frsize
+
+
+def tree_usage(root):
+    """Octets occupés sous root, sans suivre de lien."""
+    total = 0
+    for d, _dirs, names in os.walk(root, followlinks=False):
+        for n in names:
+            try:
+                total += os.lstat(os.path.join(d, n)).st_blocks * 512
+            except OSError:
+                pass
+    return total
+
+
+def storage_check(ws):
+    """Borne le stockage d'une récupération en cours ; SourceError si elle doit s'arrêter."""
+    if disk_free(ws) < MIN_FREE_BYTES:
+        return SourceError("E_DISK_FULL", "infra", "not enough free space left on the appliance")
+    if tree_usage(ws) > MAX_CLONE_BYTES:
+        return SourceError("E_SOURCE_TOO_LARGE", "input",
+                           "repository exceeds %d GiB" % (MAX_CLONE_BYTES >> 30))
+    return None
 
 
 def _read_log(path):
@@ -423,8 +498,11 @@ def _read_log(path):
         return ""
 
 
-def run_logged(args, log_path, timeout, env=None, secrets=()):
-    """Lance podman ; journal (stdout+stderr) borné à MAX_LOG et masqué ; (rc, stdout, délai dépassé)."""
+def run_logged(args, log_path, timeout, env=None, secrets=(), watch=None):
+    """Lance podman ; journal (stdout+stderr) borné à MAX_LOG et masqué ; (rc, stdout, délai dépassé).
+
+    watch : appelée toutes les WATCH_EVERY_S secondes ; une valeur non nulle arrête
+    le conteneur et est rendue à la place de « délai dépassé »."""
     exe = common.resolve("podman")
     if exe is None:
         with open(common.p("/test-commands.log"), "a", encoding="utf-8") as f:
@@ -446,11 +524,19 @@ def run_logged(args, log_path, timeout, env=None, secrets=()):
     t = threading.Thread(target=pump, daemon=True)
     t.start()
     timed_out = False
-    try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        common.kill_group(proc)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            proc.wait(timeout=max(0.1, min(WATCH_EVERY_S, deadline - time.monotonic())))
+            break
+        except subprocess.TimeoutExpired:
+            if time.monotonic() >= deadline:
+                timed_out = True
+            elif watch is not None:
+                timed_out = watch() or False
+            if timed_out:
+                common.kill_group(proc)
+                break
     t.join(10)
     text = redact(b"".join(chunks).decode("utf-8", "replace"), secrets)
     if len(text.encode()) > MAX_LOG:
@@ -468,28 +554,51 @@ def run_logged(args, log_path, timeout, env=None, secrets=()):
 UPLOAD_NAMES = ("source.zip", "source.tar", "source.tar.gz")
 
 
+def _open_dir(name, dir_fd=None):
+    fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
+    st = os.fstat(fd)
+    if (st.st_uid != _upload_owner() or stat.S_IMODE(st.st_mode) & 0o022) and not common.TEST_ROOT:
+        os.close(fd)
+        raise OSError("unexpected owner or mode")
+    return fd
+
+
+def _upload_owner():
+    return common.scanoria_ids()[0]
+
+
 def _open_upload(upload_id):
+    """Ouvre l'archive par descripteurs de répertoire : aucun lien suivi, à aucun niveau."""
     if not common.UUID4_RE.match(upload_id or ""):
         raise SourceError("E_ARCHIVE_MISSING", "input", "invalid upload id")
-    d = os.path.join(common.VARLIB, "uploads", upload_id)
+    top = d = None
     try:
-        st = os.lstat(d)
-    except OSError:
-        raise SourceError("E_ARCHIVE_MISSING", "input", "uploaded archive not found")
-    if not stat.S_ISDIR(st.st_mode):
-        raise SourceError("E_ARCHIVE_MISSING", "input", "uploaded archive not found")
-    names = [n for n in os.listdir(d) if n in UPLOAD_NAMES]
-    if len(names) != 1:
-        raise SourceError("E_ARCHIVE_MISSING", "input", "uploaded archive not found")
-    try:
-        fd = os.open(os.path.join(d, names[0]), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY)
-    except OSError:
-        raise SourceError("E_ARCHIVE_INVALID", "input", "uploaded archive is not a regular file")
+        try:
+            top = _open_dir(os.path.join(common.VARLIB, "uploads"))
+            d = _open_dir(upload_id, dir_fd=top)
+        except OSError:
+            raise SourceError("E_ARCHIVE_MISSING", "input", "uploaded archive not found")
+        names = [n for n in os.listdir(d) if n in UPLOAD_NAMES]
+        if len(names) != 1:
+            raise SourceError("E_ARCHIVE_MISSING", "input", "uploaded archive not found")
+        try:
+            fd = os.open(names[0], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC,
+                         dir_fd=d)
+        except OSError:
+            raise SourceError("E_ARCHIVE_INVALID", "input", "uploaded archive is not a regular file")
+    finally:
+        for x in (d, top):
+            if x is not None:
+                os.close(x)
     f = os.fdopen(fd, "rb")
     st = os.fstat(f.fileno())
-    if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_UPLOAD:
+    ok = stat.S_ISREG(st.st_mode) and st.st_size <= MAX_UPLOAD and st.st_nlink == 1
+    if ok and not common.TEST_ROOT:
+        ok = st.st_uid == _upload_owner() and not stat.S_IMODE(st.st_mode) & 0o022
+    if not ok:
         f.close()
-        raise SourceError("E_ARCHIVE_INVALID", "input", "uploaded archive is not a regular file or is too large")
+        raise SourceError("E_ARCHIVE_INVALID", "input",
+                          "uploaded archive is not a regular private file of scanoria or is too large")
     os.set_blocking(f.fileno(), True)
     return f
 
