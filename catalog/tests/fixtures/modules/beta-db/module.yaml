@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Base fictive (jeu d'essai du catalogue).
+id: beta-db
+name: Beta DB
+type: feed
+categories: [sca]
+license: { spdx: CC-BY-4.0, restrictions: none }
+version: "2026.11.1"
