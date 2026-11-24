@@ -36,6 +36,7 @@ Hors périmètre initial : la haute disponibilité (un seul nœud), le multi-ten
    - toute action un peu longue affiche un **indicateur d'attente** ;
    - toutes les **boîtes de dialogue sont des modales de la console**, jamais `alert`/`confirm` ;
    - la console est en **français et anglais** dès le départ.
+8. **Automatique par défaut, configuration minimale.** Tout ce qui peut être déduit l'est : dépôts découverts dans la forge, profils et modules proposés selon le contenu détecté, bases mises à jour, analyses planifiées, tickets et PR de remédiation créés sans intervention. Chaque fonctionnalité arrive **activée avec des défauts sûrs** ; un réglage n'existe que si aucun défaut ne convient, et la console montre toujours ce qui a été décidé automatiquement et pourquoi. Seules les actions irréversibles ou à risque (installation d'un module, DAST actif, suppression, exception) demandent une confirmation.
 
 ## 3. Architecture
 
@@ -304,20 +305,20 @@ docs/                    # ARCHITECTURE, MODULES, SECURITE, TESTING, RELEASING, 
 - **Dépôt public, mais non annoncé** : rien dans le dépôt ne doit trahir une infrastructure réelle (principe 3), et aucun secret n'y entre jamais ; gitleaks bloque la CI au moindre doute.
 
 ## 13. Itérations
-Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20) est rattachée à une itération.
+Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10) est rattachée à une itération.
 
 | Version | Contenu |
 |---|---|
 | 0.1 | **Socle** : ISO (console seule), assistant de premier démarrage, console (auth locale, rôles, audit, À propos et licence), PostgreSQL, pare-feu, nom de l'appliance, AC interne et certificat `<nom>` / `*.<nom>`. **Mise à jour en ligne par les releases GitHub (F18)**, `scanoria-selftest`, chaîne de publication (CI, version candidate, validation, promotion) |
 | 0.2 | **Moteur de modules** : manifeste, catalogue signé publié en release, service root, Quadlet, aiguillage par nom et vérification DNS. **Banc d'essai à l'installation (F12)**, **packs (F11)**, **dépendances et conflits de modules (G1)**, **paramètres de module typés (G3)**. Premiers scanners : gitleaks, OSV-Scanner, Trivy |
-| 0.3 | **Analyses** : projets Git avec **assistant d'ajout (F1)**, file d'analyses, confinement, résultats SARIF unifiés, tri, quality gate, API et client CI. **Suivi des secrets jusqu'à révocation (F7)**. Profils : **profils par couverture (G7)**. Catalogue : **contrat de sortie vérifié (G2)**, **normalisation des gravités (G5)**. Fiabilité : **analyses reproductibles (G11)**, **relances distinguées (G12)**, **échec par défaut (G13)**, **couverture d'analyse (G15)**, **ordonnancement (G17)**, **empreintes stables (G19)** |
+| 0.3 | **Analyses** : projets Git avec **assistant d'ajout (F1)**, file d'analyses, confinement, résultats SARIF unifiés, tri, quality gate, API et client CI. **Suivi des secrets jusqu'à révocation (F7)**, **paquets malveillants bloquants (H4)**. Profils : **profils par couverture (G7)**. Catalogue : **contrat de sortie vérifié (G2)**, **normalisation des gravités (G5)**. Fiabilité : **analyses reproductibles (G11)**, **relances distinguées (G12)**, **échec par défaut (G13)**, **couverture d'analyse (G15)**, **ordonnancement (G17)**, **empreintes stables (G19)** |
 | 0.4 | **SonarQube Community Build** (PostgreSQL, sysctl, proxy, sauvegarde, mise à jour à la demande). **Consommation réelle par module (F14)**, **santé des analyses (G20)** |
-| 0.5 | **SBOM** : Syft → Dependency-Track. **Politique de licences (F8)**, **recherche transverse CVE / composant avec re-corrélation (F3)**, **recoupement entre outils (F16)** |
+| 0.5 | **SBOM** : Syft → Dependency-Track. **Politique de licences (F8)**, **recherche transverse CVE / composant avec re-corrélation (F3)**, **recoupement entre outils (F16)**, **priorisation EPSS + KEV (H3)**, **quarantaine des nouvelles versions (H5)** |
 | 0.6 | **Hors ligne et vigilance** : modules `feed`, lots signés, âge des bases. **Appliance miroir (F17)**, **mise à jour d'outil à l'essai (F13)**, **alertes sur l'appliance elle-même (F19)**, **canaris nocturnes (G14)**, **fraîcheur obligatoire (G16)**, **version de module figée par projet (G6)** |
-| 0.7 | **SAST/IaC étendus** (Semgrep/Opengrep, Checkov, KICS, Bandit), profils personnalisés, webhooks et statuts de commit. **Tri en masse (F4)**, **exceptions soumises à approbation (F5)**, **affectation `CODEOWNERS` (F6)**, **analyse incrémentale des PR (G18)**, **jeux de règles gérés dans la console (G4)**, **héritage et verrouillage des profils (G8)**, **profil par déclencheur (G9)**, **aperçu d'un profil (G10)** |
-| 0.8 | **Gate de release** : profil `release`, modes tiré et poussé, rapport de release signé, `scanoria-verify`. **Comparaison entre releases (F2)**, **simulateur de quality gate (F9)**. Branchement sur Ipnoria |
-| 0.9 | **Runners CI** (Forgejo Actions, runner GitHub pour dépôts privés). **Notifications et rapport mensuel (F10)**, **kit développeur (F20)** |
-| 0.10 | **DAST** (ZAP, Nuclei) avec cibles autorisées ; DefectDojo optionnel. **Catalogue privé et SDK de scanner (F15)** |
+| 0.7 | **SAST/IaC étendus** (Semgrep/Opengrep, Checkov, KICS, Bandit), profils personnalisés, webhooks et statuts de commit. **Tri en masse (F4)**, **exceptions soumises à approbation (F5)**, **affectation `CODEOWNERS` (F6)**, **analyse incrémentale des PR (G18)**, **jeux de règles gérés dans la console (G4)**, **héritage et verrouillage des profils (G8)**, **profil par déclencheur (G9)**, **aperçu d'un profil (G10)**, **audit des workflows CI (H1)**, **posture des dépôts (H2)**, **revue des dépendances en PR (H6)** |
+| 0.8 | **Gate de release** : profil `release`, modes tiré et poussé, rapport de release signé, `scanoria-verify`. **Comparaison entre releases (F2)**, **simulateur de quality gate (F9)**, **VEX (H7)**. Branchement sur Ipnoria |
+| 0.9 | **Runners CI** (Forgejo Actions, runner GitHub pour dépôts privés). **Notifications et rapport mensuel (F10)**, **kit développeur (F20)**, **remédiation automatique (H8)**, **tickets synchronisés (H9)** |
+| 0.10 | **DAST** (ZAP, Nuclei) avec cibles autorisées ; DefectDojo optionnel. **Catalogue privé et SDK de scanner (F15)**, **surveillance du registre interne (H10)** |
 | 1.0 | LDAP/AD, OIDC et connexion unique aux modules, sauvegardes distantes, durcissement, documentation complète |
 
 ## 14. Décisions
@@ -325,7 +326,7 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20) est rattach
 - **Accès aux applications par nom** : `<libellé>.<nom de l'appliance>`, avec un DNS générique et un certificat générique (section 3.4).
 - **Installation de base = console seule** : tout outil s'ajoute par le catalogue, et aucune image n'est embarquée dans l'ISO (section 5.3).
 - **Releases passées par tous les outils** installés, via la CI de chaque dépôt (section 7).
-- **Fonctionnalités F1 à F20 et G1 à G20 retenues** (section 15), réparties dans les itérations (section 13).
+- **Fonctionnalités F1 à F20, G1 à G20 et H1 à H10 retenues** (section 15), réparties dans les itérations (section 13).
 - **Dépôt GitHub public, sans aucune communication** (« non publié ») : CI, CodeQL, SonarQube Cloud, protection de `main` et environments gratuits ; mises à jour des appliances sans jeton. Conséquences : sections 10 et 12.
 - **Claude gère tout le cycle Git** : branches, commits, push, PR, merges, versions et suivi des publications, selon les règles de la section 16.
 - **Mises à jour de la console par les releases GitHub** dès la 0.1 (section 10, F18).
@@ -338,12 +339,13 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20) est rattach
 
 - **D4 — Forge intégrée en premier : Forgejo** (gratuit, tout on-prem). L'appliance sait d'abord analyser les dépôts d'une forge Forgejo ; GitHub, puis GitLab suivent. Le développement de Scanoria lui-même reste sur GitHub (section 12).
 - **D6 — Planchers matériels** : console seule **2 vCPU / 4 Go / 40 Go**, installation refusée en dessous (section 11). Pour chaque module, son manifeste fait foi.
+- **Automatique par défaut, configuration minimale** (principe 8, 2026-11-24) : exigence de Vincent en retenant H1–H10, applicable à toutes les fonctionnalités.
 - **Signature des mises à jour : clé Ed25519**, clé publique versionnée dans `update-pubkey.pem` à la racine, épinglée dans l'appliance. La clé privée vit hors ligne et dans le secret `UPDATE_SIGNING_KEY` de l'environment `release` (limité à `main`) ; Claude ne la voit jamais.
 
 **Ouvertes**
 - Aucune à ce jour.
 
-## 15. Fonctionnalités retenues (F1–F20, G1–G20)
+## 15. Fonctionnalités retenues (F1–F20, G1–G20, H1–H10)
 
 ### Console
 | # | Fonctionnalité | Ce qu'elle doit faire |
@@ -409,6 +411,22 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20) est rattach
 | G8 | Héritage et verrouillage | Profil d'entreprise → profil d'équipe → profil de projet ; l'administrateur verrouille des exigences (ex. secrets obligatoire, seuil minimal) qu'un niveau inférieur ne peut pas assouplir |
 | G9 | Profil par déclencheur | Pour chaque projet : profil PR (rapide), profil nocturne (complet), profil release (tous les modules + DAST si cible) ; configuré une fois, choisi selon l'événement |
 | G10 | Aperçu d'un profil | Avant d'enregistrer : modules résolus, modules manquants à installer, durée et ressources estimées, couverture obtenue sur le dépôt (détection de F1) |
+
+### Chaîne d'approvisionnement et automatisation (H1–H10)
+Licences à revérifier à l'intégration (section 5). Toutes **actives par défaut**, sans réglage requis (principe 8).
+
+| # | Fonctionnalité | Ce qu'elle doit faire |
+|---|---|---|
+| H1 | Audit des workflows CI | Module zizmor (MIT) : injection de script, `pull_request_target`, actions non épinglées, droits trop larges. Lancé automatiquement dès qu'un dépôt contient des workflows (détection F1) |
+| H2 | Posture des dépôts | Module OpenSSF Scorecard (Apache-2.0) : protection de branche, revue, signatures, mainteneurs actifs ; score par projet calculé chaque semaine sans réglage, seuil par défaut dans le quality gate |
+| H3 | Priorisation EPSS + KEV | Probabilité d'exploitation (EPSS, FIRST) et drapeau « exploitée activement » (catalogue CISA KEV) attachés à chaque CVE par un module `feed` hors ligne ; quality gate par défaut : bloquant si KEV ou EPSS au-dessus du seuil, même sous le seuil CVSS |
+| H4 | Paquets malveillants bloquants | Avis `MAL-` d'OSV : release toujours bloquée, sans exception possible ; alerte immédiate sur tous les projets touchés (re-corrélation F3) |
+| H5 | Quarantaine des nouvelles versions | Dépendance publiée depuis moins de N jours (défaut 7) : signalée en PR, bloquante en release ; levée automatique à l'échéance |
+| H6 | Revue des dépendances en PR | Diff de SBOM base → PR : nouvelles dépendances, licence (F8), Scorecard (H2), âge (H5), scripts d'installation ; publié automatiquement en commentaire de PR dans la forge |
+| H7 | VEX | Export et import OpenVEX / CycloneDX VEX générés depuis les exceptions motivées ; joints automatiquement au rapport de release signé (section 7.3) |
+| H8 | Remédiation automatique | Module Renovate Community Edition (AGPL-3.0, on-prem) : PR de montée de version ouvertes automatiquement pour les dépendances vulnérables, priorisées par H3, chacune analysée par l'appliance |
+| H9 | Tickets synchronisés | Résultat confirmé → ticket Forgejo, GitHub, GitLab ou Jira, créé automatiquement ; statut synchronisé dans les deux sens (ticket fermé → analyse de vérification) |
+| H10 | Surveillance du registre interne | Images d'un registre d'entreprise (Harbor, Forgejo, registre OCI) découvertes et analysées en continu, réanalysées à chaque mise à jour des bases |
 
 ## 16. Consignes pour Claude Code dans ce dépôt
 - Session principale : Sonnet 5.5 ; conseiller : Opus 5.5.

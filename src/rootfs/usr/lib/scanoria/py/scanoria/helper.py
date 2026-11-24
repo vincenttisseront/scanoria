@@ -28,6 +28,7 @@ import time
 import uuid
 
 from . import common, modules, netutil, schema
+from . import dns as dnscheck
 from .common import Fail
 
 MAX_SIZE = 128 * 1024
@@ -36,6 +37,7 @@ TIMEOUTS = {
     "set-hostname": 300, "set-admin-networks": 60, "issue-certificate": 120,
     "import-certificate": 120, "check-update": 120, "apply-update": 3300,
     "rollback-update": 3300, "set-update-policy": 30, "run-selftest": 300,
+    "check-dns": 180,
     "refresh-catalog": 300, "install-modules": 3300, "uninstall-module": 900,
     "set-module-state": 1200, "update-module": 3300,
 }
@@ -476,6 +478,7 @@ ACTIONS = {
     "rollback-update": act_rollback_update,
     "set-update-policy": act_set_update_policy,
     "run-selftest": act_run_selftest,
+    "check-dns": dnscheck.act_check_dns,
     "refresh-catalog": modules.act_refresh_catalog,
     "install-modules": modules.act_install_modules,
     "uninstall-module": modules.act_uninstall_module,

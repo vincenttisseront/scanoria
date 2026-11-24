@@ -49,6 +49,7 @@
             "rollback-update",
             "set-update-policy",
             "run-selftest",
+            "check-dns",
             "refresh-catalog",
             "install-modules",
             "uninstall-module",

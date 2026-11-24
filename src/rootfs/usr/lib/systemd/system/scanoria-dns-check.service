@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Vérification DNS (demande check-dns) : toutes les heures, après chaque
+# changement de nom de l'appliance et après chaque changement de routage.
+[Unit]
+Description=Scanoria DNS check of the appliance and module names
+After=network-online.target nginx.service
+Wants=network-online.target
+ConditionPathExists=/etc/scanoria/appliance.json
+
+[Service]
+Type=oneshot
+# Attente possible du verrou du helper (TIMEOUTS check-dns + 60 s) puis contrôle.
+TimeoutStartSec=300
+ExecStart=/usr/sbin/scanoria-helper exec --origin timer --type check-dns --params {}
+UMask=0027
+PrivateTmp=yes
+ProtectHome=read-only

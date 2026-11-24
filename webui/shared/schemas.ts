@@ -31,6 +31,7 @@ export const REQUEST_TYPES = [
   'rollback-update',
   'set-update-policy',
   'run-selftest',
+  'check-dns',
   'refresh-catalog',
   'install-modules',
   'uninstall-module',
@@ -105,6 +106,7 @@ export const requestParamSchemas = {
       path: ['maintenance_window'],
     }),
   'run-selftest': z.strictObject({ quick: z.boolean().optional() }),
+  'check-dns': z.strictObject({}),
   'refresh-catalog': z.strictObject({}),
   'install-modules': z.strictObject({
     modules: z.array(z.strictObject({

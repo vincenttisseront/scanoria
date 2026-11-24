@@ -111,6 +111,10 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
     valid: [{}, { quick: true }],
     invalid: [{ quick: 1 }, { full: true }],
   },
+  'check-dns': {
+    valid: [{}],
+    invalid: [{ force: true }, { fqdn: 'analyse.exemple.test' }],
+  },
   'refresh-catalog': {
     valid: [{}],
     invalid: [{ force: true }],

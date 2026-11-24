@@ -326,6 +326,13 @@ def check_dns(rep, name):
             "not resolved: " + ", ".join(bad) if bad else "%s and *.%s resolve" % (name, name))
 
 
+def check_routing(rep):
+    """routing.sites : sites nginx des modules cohérents avec modules/state.json."""
+    from . import routing
+    st, msg, details = routing.sites_status()
+    rep.add("routing.sites", st, msg, details)
+
+
 def check_time(rep):
     r = common.run("timedatectl", ["show", "--property=NTPSynchronized", "--value"], timeout=30)
     ok = r.text.strip() == "yes"
@@ -359,6 +366,7 @@ def run_checks(quick):
     check_firewall(rep)
     check_queue(rep)
     check_disk(rep)
+    check_routing(rep)
     if not quick:
         check_dns(rep, name)
         check_time(rep)
