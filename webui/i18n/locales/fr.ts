@@ -1144,6 +1144,7 @@ export default {
       api: 'API (CI)',
       release: 'Release',
       replay: 'Rejeu',
+      external: 'Résultats externes',
     },
     errorClass: {
       infra: 'Erreur d’infrastructure (relancée automatiquement)',
@@ -1417,6 +1418,7 @@ export default {
       shell: 'scripts shell présents',
       python: 'code Python présent',
       category: 'couvre une catégorie utile au dépôt',
+      models: 'fichiers de modèles d’IA présents',
     },
     errors: {
       E_PROJECT_EXISTS: 'Ce dépôt est déjà un projet.',
@@ -1932,5 +1934,11 @@ export default {
     decision: { allowed: 'Autorisée', review: 'À revoir', denied: 'Interdite' },
     col: { decision: 'Décision', actions: 'Actions' },
     source: { project: 'décision du projet', global: 'décision globale', default: 'défaut de l’appliance', unknown: 'licence absente ou illisible' },
+  },
+  external: {
+    badge: 'externe',
+    badgeHelp: 'Résultat téléversé : {tool} {version}, format {format}. Il compte dans le quality gate comme les autres.',
+    badgeHelpShort: 'Résultat téléversé depuis un outil externe ; il compte dans le quality gate comme les autres.',
+    origin: { label: 'Origine', module: 'Modules de l’appliance', external: 'Outils externes' },
   },
 }

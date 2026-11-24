@@ -21,6 +21,8 @@ export interface ScanSummary {
   attempt: number
   error: { code?: string, class?: string, message?: string, retry_at?: string } | null
   replay_of: string | null
+  /** J6 (0.6) : source d'une analyse de résultats externes. */
+  external_source?: { tool: string, version: string | null, format: string, uploaded_via: string } | null
   queued_at: string
   started_at: string | null
   finished_at: string | null

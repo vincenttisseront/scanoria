@@ -34,6 +34,8 @@ export interface IngestInput {
   resultDir: string
   /** Chemins relatifs à resultDir (scan-result.schema.json, modules[].outputs). */
   outputs: { sarif?: string | null, cyclonedx?: string | null }
+  /** J6 (0.6) : catégories d'un outil externe, qui n'a pas de manifeste. */
+  categories?: string[]
 }
 
 export interface IngestError {
@@ -208,7 +210,7 @@ export async function ingestModuleOutputs(db: Db, input: IngestInput): Promise<I
   const errors: IngestError[] = []
   const scan = await loadScan(db, input.scanId)
   const hints = await readModuleHints(input.moduleId, await moduleVersion(db, input.scanId, input.moduleId))
-  const ctx = { moduleId: input.moduleId, moduleCategories: hints.categories.filter(c => (CATEGORIES as readonly string[]).includes(c)) }
+  const ctx = { moduleId: input.moduleId, moduleCategories: (input.categories ?? hints.categories).filter(c => (CATEGORIES as readonly string[]).includes(c)) }
 
   const parsed: ParsedFinding[] = []
   for (const kind of ['sarif', 'cyclonedx'] as const) {
@@ -266,11 +268,16 @@ export interface FinalizeOutcome {
 export async function finalizeScanFindings(db: Db, scanId: string, opts: { complete: boolean }): Promise<FinalizeOutcome> {
   return inTransaction(db, async (q) => {
     const scan = await loadScan(q, scanId)
+    // J6 (0.6) : une analyse externe se compare seulement à la précédente du même
+    // outil externe, et une analyse de l'appliance jamais à une analyse externe ;
+    // sinon un téléversement rendrait « nouveaux » tous les résultats suivants.
     const prev = await q.query<{ id: string }>(
-      `SELECT id FROM scans
-        WHERE project_id = $1 AND ref = $2 AND id <> $3 AND status = 'done'
-          AND queued_at <= (SELECT queued_at FROM scans WHERE id = $3)
-        ORDER BY finished_at DESC NULLS LAST, queued_at DESC LIMIT 1`,
+      `SELECT s.id FROM scans s, (SELECT queued_at, trigger, external_source->>'tool' AS ext_tool FROM scans WHERE id = $3) cur
+        WHERE s.project_id = $1 AND s.ref = $2 AND s.id <> $3 AND s.status = 'done'
+          AND s.queued_at <= cur.queued_at
+          AND (s.trigger = 'external') = (cur.trigger = 'external')
+          AND (cur.trigger <> 'external' OR s.external_source->>'tool' = cur.ext_tool)
+        ORDER BY s.finished_at DESC NULLS LAST, s.queued_at DESC LIMIT 1`,
       [scan.project_id, scan.ref, scan.id],
     )
     const prevId = prev.rows[0]?.id ?? null

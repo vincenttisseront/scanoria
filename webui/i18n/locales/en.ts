@@ -1144,6 +1144,7 @@ export default {
       api: 'API (CI)',
       release: 'Release',
       replay: 'Replay',
+      external: 'External results',
     },
     errorClass: {
       infra: 'Infrastructure error (retried automatically)',
@@ -1417,6 +1418,7 @@ export default {
       shell: 'shell scripts present',
       python: 'Python code present',
       category: 'covers a category useful to the repository',
+      models: 'AI model files present',
     },
     errors: {
       E_PROJECT_EXISTS: 'This repository is already a project.',
@@ -1932,5 +1934,11 @@ export default {
     decision: { allowed: 'Allowed', review: 'To review', denied: 'Denied' },
     col: { decision: 'Decision', actions: 'Actions' },
     source: { project: 'project decision', global: 'global decision', default: 'appliance default', unknown: 'missing or unreadable license' },
+  },
+  external: {
+    badge: 'external',
+    badgeHelp: 'Uploaded result: {tool} {version}, {format} format. It counts in the quality gate like any other.',
+    badgeHelpShort: 'Result uploaded from an external tool; it counts in the quality gate like any other.',
+    origin: { label: 'Origin', module: 'Appliance modules', external: 'External tools' },
   },
 }

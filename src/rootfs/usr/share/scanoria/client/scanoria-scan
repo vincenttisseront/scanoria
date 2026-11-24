@@ -10,6 +10,13 @@
 #       --project <id> --ref <branche|tag|commit> [--profile <profil>] \
 #       [--wait] [--timeout <s>] [--cacert <ac.pem>]
 #   SCANORIA_TOKEN=scn_… scanoria-scan --url … --scan <id> --wait
+#   SCANORIA_TOKEN=scn_… scanoria-scan upload <résultats.sarif|sbom.cdx.json> --url … \
+#       --project <id> [--ref <réf>] [--commit <sha>] [--tool <nom>] [--tool-version <v>] \
+#       [--category <catégorie>]
+#
+# « upload » (0.6, J6) téléverse des résultats produits ailleurs (SARIF 2.1.0 ou
+# CycloneDX 1.5/1.6, 32 Mo au plus) : la console les valide, crée une analyse
+# « externe », évalue le quality gate et le client en affiche le verdict.
 #
 # Le jeton est lu dans SCANORIA_TOKEN, jamais en argument (il apparaîtrait
 # dans la liste des processus et dans les journaux de CI). Les options ont
@@ -33,6 +40,11 @@ CACERT=${SCANORIA_CACERT:-}
 TIMEOUT=${SCANORIA_TIMEOUT:-3600}
 SCAN=
 WAIT=0
+UPLOAD=
+COMMIT=
+TOOL=
+TOOL_VERSION=
+CATEGORY=
 QUIET=0
 case ${SCANORIA_LANG:-${LC_ALL:-${LANG:-}}} in
   en*) L=en ;;
@@ -58,6 +70,8 @@ usage() {
   cat <<'EOF'
 scanoria-scan --url URL (--project ID --ref REF [--profile P] | --scan ID)
               [--wait] [--timeout S] [--cacert FILE] [--quiet]
+scanoria-scan upload FILE --url URL --project ID [--ref REF] [--commit SHA]
+              [--tool NAME] [--tool-version V] [--category C] [--cacert FILE] [--quiet]
 Token: SCANORIA_TOKEN environment variable (never an argument).
 Exit codes: 0 passed, 1 failed, 2 inconclusive, 3 usage/access error.
 EOF
@@ -67,8 +81,18 @@ need_value() {
   [ $# -ge 2 ] && [ -n "$2" ] || die 3 "valeur manquante pour $1" "missing value for $1"
 }
 
+if [ "${1:-}" = upload ]; then
+  [ $# -ge 2 ] && [ -n "$2" ] || die 3 "upload : fichier manquant" "upload: missing file"
+  UPLOAD=$2
+  shift 2
+fi
+
 while [ $# -gt 0 ]; do
   case $1 in
+    --commit) need_value "$@"; COMMIT=$2; shift 2 ;;
+    --tool) need_value "$@"; TOOL=$2; shift 2 ;;
+    --tool-version) need_value "$@"; TOOL_VERSION=$2; shift 2 ;;
+    --category) need_value "$@"; CATEGORY=$2; shift 2 ;;
     --url) need_value "$@"; URL=$2; shift 2 ;;
     --project) need_value "$@"; PROJECT=$2; shift 2 ;;
     --ref) need_value "$@"; REF=$2; shift 2 ;;
@@ -101,7 +125,12 @@ case $URL in
   *) die 3 "--url requis (https://nom-de-l-appliance)" "--url is required (https://appliance-name)" ;;
 esac
 UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-if [ -n "$SCAN" ]; then
+if [ -n "$UPLOAD" ]; then
+  [ -z "$SCAN" ] || die 3 "upload et --scan sont incompatibles" "upload and --scan cannot be combined"
+  [ -f "$UPLOAD" ] && [ -r "$UPLOAD" ] || die 3 "fichier illisible : $UPLOAD" "unreadable file: $UPLOAD"
+  printf '%s' "$PROJECT" | grep -Eq "$UUID_RE" || die 3 "--project doit être l'identifiant du projet (page Intégration CI)" "--project must be the project id (CI integration page)"
+  [ -z "$COMMIT" ] || printf '%s' "$COMMIT" | grep -Eq '^[0-9a-f]{40,64}$' || die 3 "--commit attend une empreinte de commit complète" "--commit expects a full commit hash"
+elif [ -n "$SCAN" ]; then
   printf '%s' "$SCAN" | grep -Eq "$UUID_RE" || die 3 "--scan doit être un identifiant d'analyse" "--scan must be a scan id"
   WAIT=1
 else
@@ -153,7 +182,30 @@ api_error() {
   esac
 }
 
-if [ -z "$SCAN" ]; then
+if [ -n "$UPLOAD" ]; then
+  # Paramètres encodés par jq (@uri) ; corps lu par curl depuis le fichier.
+  qs=$(jq -rn --arg ref "$REF" --arg commit "$COMMIT" --arg tool "$TOOL" --arg version "$TOOL_VERSION" --arg category "$CATEGORY" \
+    '[{ref: $ref, commit: $commit, tool: $tool, version: $version, category: $category} | to_entries[]
+      | select(.value != "") | "\(.key)=\(.value | @uri)"] | join("&")')
+  set -- -sS --max-time 300 -X POST -H @"$TMP/auth" -H 'Accept: application/json' -H 'Content-Type: application/json' \
+    --data-binary @"$UPLOAD" -o "$TMP/body" -w '%{http_code}'
+  if [ -n "$CACERT" ]; then set -- "$@" --cacert "$CACERT"; fi
+  status=$(curl "$@" "$URL/api/projects/$PROJECT/results${qs:+?$qs}" 2>"$TMP/err") || status=000
+  case $status in
+    201) ;;
+    413|415|422)
+      say "scanoria-scan: document refusé ($(jq -r '.data.code // empty' "$TMP/body" 2>/dev/null))" \
+        "scanoria-scan: document refused ($(jq -r '.data.code // empty' "$TMP/body" 2>/dev/null))" >&2
+      jq -r '(.data.issues // [])[:20][] | "  - \(.path) \(.code)\(if .detail then " (\(.detail))" else "" end)"' "$TMP/body" >&2 2>/dev/null || :
+      exit 3 ;;
+    *) api_error "$status"; exit 3 ;;
+  esac
+  SCAN=$(jq -r '.scan_id // empty' "$TMP/body")
+  printf '%s' "$SCAN" | grep -Eq "$UUID_RE" || die 3 "réponse inattendue de la console" "unexpected console response"
+  info "scanoria-scan: $(jq -r '.results' "$TMP/body") résultats externes ($(jq -r '.source.tool' "$TMP/body")) : analyse n° $(jq -r '.number' "$TMP/body")" \
+    "scanoria-scan: $(jq -r '.results' "$TMP/body") external results ($(jq -r '.source.tool' "$TMP/body")): scan #$(jq -r '.number' "$TMP/body")"
+  printf '%s\n' "$SCAN"
+elif [ -z "$SCAN" ]; then
   body=$(jq -cn --arg ref "$REF" --arg profile "$PROFILE" '{ref: $ref} + (if $profile == "" then {} else {profile: $profile} end)')
   status=$(api POST "/api/projects/$PROJECT/scans" "$body")
   if [ "$status" != 202 ]; then
