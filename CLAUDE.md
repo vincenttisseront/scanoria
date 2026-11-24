@@ -331,7 +331,7 @@ docs/                    # ARCHITECTURE, MODULES, SECURITE, TESTING, RELEASING, 
 - **Dépôt public, mais non annoncé** : rien dans le dépôt ne doit trahir une infrastructure réelle (principe 3), et aucun secret n'y entre jamais ; gitleaks bloque la CI au moindre doute.
 
 ## 13. Itérations
-Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I1–I26) est rattachée à une itération.
+Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I1–I26, J1–J10) est rattachée à une itération.
 
 | Version | Contenu |
 |---|---|
@@ -340,19 +340,19 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I
 | 0.3 | **Analyses** : projets Git avec **assistant d'ajout (F1)**, file d'analyses, confinement, résultats SARIF unifiés, tri, quality gate, API et client CI. **Suivi des secrets jusqu'à révocation (F7)**, **paquets malveillants bloquants (H4)**. Profils : **profils par couverture (G7)**. Catalogue : **contrat de sortie vérifié (G2)**, **normalisation des gravités (G5)**. Fiabilité : **analyses reproductibles (G11)**, **relances distinguées (G12)**, **échec par défaut (G13)**, **couverture d'analyse (G15)**, **ordonnancement (G17)**, **empreintes stables (G19)**. IA : **connecteur Ollama externe (I1)**, **explication d'un résultat (I2)**, **verdict expliqué (I9)**, **banc d'essai IA (I23)** |
 | 0.4 | **SonarQube Community Build** (PostgreSQL, sysctl, proxy, sauvegarde, mise à jour à la demande). **Consommation réelle par module (F14)**, **santé des analyses (G20)**. IA : **pré-tri assisté (I3)**, **résumé d'analyse (I5)**, **typage des secrets génériques (I14)**, **diagnostic des analyses en échec (I15)**, **traduction des messages des outils (I17)**, **retours et qualité mesurée (I24)** |
 | 0.5 | **SBOM** : Syft → Dependency-Track. **Politique de licences (F8)**, **recherche transverse CVE / composant avec re-corrélation (F3)**, **recoupement entre outils (F16)**, **priorisation EPSS + KEV (H3)**, **quarantaine des nouvelles versions (H5)**. IA : **regroupement sémantique (I7)**, **atteignabilité assistée (I11)**, **explication des licences (I18)** |
-| 0.6 | **Hors ligne et vigilance** : modules `feed`, lots signés, âge des bases. **Appliance miroir (F17)**, **mise à jour d'outil à l'essai (F13)**, **alertes sur l'appliance elle-même (F19)**, **canaris nocturnes (G14)**, **fraîcheur obligatoire (G16)**, **version de module figée par projet (G6)**. IA : **diagnostic de l'appliance (I16)** |
-| 0.7 | **SAST/IaC étendus** (Semgrep/Opengrep, Checkov, KICS, Bandit), profils personnalisés, webhooks et statuts de commit. **Tri en masse (F4)**, **exceptions soumises à approbation (F5)**, **affectation `CODEOWNERS` (F6)**, **analyse incrémentale des PR (G18)**, **jeux de règles gérés dans la console (G4)**, **héritage et verrouillage des profils (G8)**, **profil par déclencheur (G9)**, **aperçu d'un profil (G10)**, **audit des workflows CI (H1)**, **posture des dépôts (H2)**, **revue des dépendances en PR (H6)**. IA : **recherche en langage naturel (I8)**, **rédaction des exceptions (I10)**, **générateur de règles (I12)**, **commentaires de PR expliqués (I25)** |
-| 0.8 | **Gate de release** : profil `release`, modes tiré et poussé, rapport de release signé, `scanoria-verify`. **Comparaison entre releases (F2)**, **simulateur de quality gate (F9)**, **VEX (H7)**. Branchement sur Ipnoria. IA : **notes de sécurité de release (I6)**, **seuils de quality gate suggérés (I19)** |
+| 0.6 | **Hors ligne et vigilance** : modules `feed`, lots signés, âge des bases. **Appliance miroir (F17)**, **mise à jour d'outil à l'essai (F13)**, **alertes sur l'appliance elle-même (F19)**, **canaris nocturnes (G14)**, **fraîcheur obligatoire (G16)**, **version de module figée par projet (G6)**. IA : **diagnostic de l'appliance (I16)**. **Résultats externes acceptés (J6)** |
+| 0.7 | **SAST/IaC étendus** (Semgrep/Opengrep, Checkov, KICS, Bandit), profils personnalisés, webhooks et statuts de commit. **Tri en masse (F4)**, **exceptions soumises à approbation (F5)**, **affectation `CODEOWNERS` (F6)**, **analyse incrémentale des PR (G18)**, **jeux de règles gérés dans la console (G4)**, **héritage et verrouillage des profils (G8)**, **profil par déclencheur (G9)**, **aperçu d'un profil (G10)**, **audit des workflows CI (H1)**, **posture des dépôts (H2)**, **revue des dépendances en PR (H6)**. IA : **recherche en langage naturel (I8)**, **rédaction des exceptions (I10)**, **générateur de règles (I12)**, **commentaires de PR expliqués (I25)**. Intégration : **application de forge en un clic (J1)**, **reprise de l'existant (J5)**, **annotations ligne à ligne dans la PR (J7)**, **configuration en code (J8)** |
+| 0.8 | **Gate de release** : profil `release`, modes tiré et poussé, rapport de release signé, `scanoria-verify`. **Comparaison entre releases (F2)**, **simulateur de quality gate (F9)**, **VEX (H7)**. Branchement sur Ipnoria. IA : **notes de sécurité de release (I6)**, **seuils de quality gate suggérés (I19)**. Intégration : **PR d'intégration automatique (J2)**, **modèles CI officiels (J3)**, **CI sans secret par OIDC (J4)**, **attestations pour le déploiement (J9)** |
 | 0.9 | **Runners CI** (Forgejo Actions, runner GitHub pour dépôts privés). **Notifications et rapport mensuel (F10)**, **kit développeur (F20)**, **remédiation automatique (H8)**, **tickets synchronisés (H9)**. IA : **correctif proposé et vérifié (I4)**, **évaluation des PR de remédiation (I13)**, **rapport mensuel commenté (I20)**, **assistant « Demander à Scanoria » (I21)**, **tickets rédigés et dédupliqués (I26)** |
 | 0.10 | **DAST** (ZAP, Nuclei) avec cibles autorisées ; DefectDojo optionnel. **Catalogue privé et SDK de scanner (F15)**, **surveillance du registre interne (H10)**. IA : **cartographie de la surface d'attaque (I22)** |
-| 1.0 | LDAP/AD, OIDC et connexion unique aux modules, sauvegardes distantes, durcissement, documentation complète |
+| 1.0 | LDAP/AD, OIDC et connexion unique aux modules, sauvegardes distantes, durcissement, documentation complète. **Raccordement à la supervision (J10)** |
 
 ## 14. Décisions
 **Prises**
 - **Accès aux applications par nom** : `<libellé>.<nom de l'appliance>`, avec un DNS générique et un certificat générique (section 3.4).
 - **Installation de base = console seule** : tout outil s'ajoute par le catalogue, et aucune image n'est embarquée dans l'ISO (section 5.3).
 - **Releases passées par tous les outils** installés, via la CI de chaque dépôt (section 7).
-- **Fonctionnalités F1 à F20, G1 à G20, H1 à H10 et I1 à I26 retenues** (section 15), réparties dans les itérations (section 13).
+- **Fonctionnalités F1 à F20, G1 à G20, H1 à H10, I1 à I26 et J1 à J10 retenues** (section 15), réparties dans les itérations (section 13).
 - **Dépôt GitHub public, sans aucune communication** (« non publié ») : CI, CodeQL, SonarQube Cloud, protection de `main` et environments gratuits ; mises à jour des appliances sans jeton. Conséquences : sections 10 et 12.
 - **Claude gère tout le cycle Git** : branches, commits, push, PR, merges, versions et suivi des publications, selon les règles de la section 16.
 - **Mises à jour de la console par les releases GitHub** dès la 0.1 (section 10, F18).
@@ -372,7 +372,7 @@ Chaque fonctionnalité retenue de la section 15 (F1–F20, G1–G20, H1–H10, I
 **Ouvertes**
 - Aucune à ce jour.
 
-## 15. Fonctionnalités retenues (F1–F20, G1–G20, H1–H10, I1–I26)
+## 15. Fonctionnalités retenues (F1–F20, G1–G20, H1–H10, I1–I26, J1–J10)
 
 ### Console
 | # | Fonctionnalité | Ce qu'elle doit faire |
@@ -486,6 +486,22 @@ Toutes passent par le connecteur de la section 3.5 et en respectent les garde-fo
 | I24 | Retours et qualité mesurée | 👍/👎 et correction sur chaque sortie IA ; les tris confirmés par des personnes servent d'exemples pour les résultats suivants **du même projet** (contexte local, sans réentraînement) ; taux d'accord IA/humain affiché par tâche et par modèle | Automatique |
 | I25 | Commentaires de PR expliqués | Les nouveaux résultats d'une PR (G18) sont publiés dans le commentaire de forge avec leur explication courte (I2) et, dès la 0.9, le correctif vérifié s'il existe (I4), à côté de la revue des dépendances H6 | Automatique |
 | I26 | Tickets rédigés et dédupliqués | Extension de H9 : les tickets de H9 reçoivent un titre et une description clairs (contexte, risque, correction) ; avant création, un ticket semblable déjà ouvert est cherché par similarité et le résultat y est rattaché plutôt que dupliqué | Automatique |
+
+### Intégration aux forges, CI et outils existants (J1–J10)
+Retenues le 2026-11-24 (demande de Vincent). Même principe que H1–H10 : **actives par défaut**, réglage minimal (principe 8) ; toute écriture dans une forge ou un réglage de dépôt reste soumise aux règles habituelles (confirmation pour ce qui est à risque).
+
+| # | Fonctionnalité | Ce qu'elle doit faire |
+|---|---|---|
+| J1 | Application de forge en un clic | « Connecter GitHub / Forgejo / GitLab » : l'appliance crée elle-même son application (manifeste GitHub App, application OAuth Forgejo ou GitLab) avec les droits minimaux, webhooks et statuts de commit compris ; aucun jeton à copier. Les dépôts de l'organisation sont enrôlés automatiquement, nouveaux dépôts compris, avec le profil proposé par F1 ; un dépôt archivé est suspendu. En mode tiré (section 7.2), l'interrogation remplace les webhooks |
+| J2 | PR d'intégration automatique | Pour chaque dépôt enrôlé, une PR ajoute l'étape Scanoria à la CI détectée (modèles J3) ; la règle de protection de branche exigeant `scanoria/release-gate` est **proposée**, appliquée seulement après confirmation d'un administrateur. Aucune PR n'est fusionnée par l'appliance |
+| J3 | Modèles CI officiels | Action GitHub, action Forgejo, composant GitLab CI, *shared library* Jenkins, tâche Tekton : une ligne chacun, qui enveloppe `scanoria-scan` (verdict, SARIF, rapport) ; versionnés et épinglés par empreinte, testés en CI |
+| J4 | CI sans secret par OIDC | En mode poussé, la CI présente son jeton OIDC (GitHub, GitLab, Forgejo) ; l'appliance vérifie la signature auprès de l'émetteur déclaré, l'audience et les revendications (dépôt, branche ou tag), puis rattache l'appel au projet. Plus de jeton d'API statique à créer ni à faire tourner ; le jeton par projet reste possible |
+| J5 | Reprise de l'existant | Configurations présentes dans le dépôt (`.gitleaks.toml`, `.trivyignore`, `osv-scanner.toml`, `.semgrepignore`, `# nosec`, `sonar-project.properties`…) importées en exceptions avec le motif « importé » et une date de fin par défaut ; statuts de tri d'une instance SonarQube, Dependency-Track ou DefectDojo existante repris de même. Effet affiché avant application, tracé dans l'audit |
+| J6 | Résultats externes acceptés | SARIF 2.1.0 et CycloneDX produits ailleurs (outil interne, outil commercial lancé en CI) téléversés par l'API ; validés contre le schéma (G2), normalisés (G5), marqués « externe » avec leur source, et pris en compte par le quality gate |
+| J7 | Annotations ligne à ligne dans la PR | Les nouveaux résultats d'une PR (G18) sont posés sur les lignes du diff (annotations de check run GitHub, revue Forgejo ou GitLab), en complément du commentaire de synthèse (H6, I25) ; nombre borné, le reste renvoie à la console |
+| J8 | Configuration en code | Fichier `.scanoria.yml` facultatif dans le dépôt : profil, exceptions (motif et date de fin obligatoires), chemins ignorés, dans les limites des verrous (G8) ; et export / import de toute la configuration de l'appliance (projets, profils, gates, jeux de règles) en YAML versionné, avec aperçu des écarts avant application. Les secrets n'y figurent jamais |
+| J9 | Attestations pour le déploiement | Le verdict favorable est attaché à l'image OCI ou à l'artefact dans le registre comme **attestation signée** (in-toto, compatible cosign), avec l'empreinte du commit et le rapport de release ; une politique d'admission Kubernetes d'exemple (Kyverno) refuse toute image sans attestation valide ; `scanoria-verify` vérifie aussi les attestations |
+| J10 | Raccordement à la supervision | Point `/metrics` Prometheus (santé, file d'analyses, âge des bases, verdicts), journal d'audit et alertes en **syslog RFC 5424** vers un SIEM, notifications natives Mattermost, Microsoft Teams et Matrix en plus du webhook signé de F10 |
 
 ## 16. Consignes pour Claude Code dans ce dépôt
 - Session principale : Sonnet 5.5 ; conseiller : Opus 5.5.
