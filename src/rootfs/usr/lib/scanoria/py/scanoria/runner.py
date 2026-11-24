@@ -754,6 +754,9 @@ def write_sbom(purls, ws):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
     with os.fdopen(fd, "wb") as f:
         f.write(data)
+    # Comme une archive (fetch) : l'arbre appartient à l'utilisateur du
+    # conteneur ; le masque du runner (077) rendrait sinon le fichier illisible.
+    testbed._give_to_container(src)
     return 1, len(data), []
 
 
