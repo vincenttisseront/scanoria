@@ -15,6 +15,7 @@ import { readPublishedState } from './appliance'
 import { purgeSessions } from './sessions'
 import { syncIntel } from '../intel/import'
 import { backfillCorrelationKeys } from '../findings/correlation'
+import { packageDatesTick } from '../sbom/dates'
 import { UUID_V4_RE } from '#shared/schemas'
 
 let readyResolve: () => void
@@ -59,6 +60,8 @@ export async function ingestNow(): Promise<void> {
     const helper = published.state?.helper as { current?: { id?: string } | null } | undefined
     await markRunning(pool, helper?.current?.id)
     await ingestResults(pool, cfg.requestsDir, memory)
+    // 0.5 (B, H5) : dates de publication des composants, par le helper.
+    await packageDatesTick(pool, cfg.requestsDir)
     ticks += 1
     // H3 (0.5) : exports EPSS et KEV du helper importés environ chaque minute.
     if (ticks % 12 === 1) await syncIntelNow(pool, cfg.modulesStateFile)

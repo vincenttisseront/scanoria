@@ -27,7 +27,7 @@ import tempfile
 import time
 import uuid
 
-from . import aiendpoint, common, modules, netutil, provision, schema
+from . import aiendpoint, common, modules, netutil, pkgdates, provision, schema
 from . import dns as dnscheck
 from .common import Fail
 
@@ -43,6 +43,7 @@ TIMEOUTS = {
     "set-ai-endpoint": 120, "refresh-feeds": 3300,
     "backup-module": 3300, "restore-module": 3300,
     "reset-service-admin": 360,
+    "package-dates": 360,
 }
 # Marge laissée entre l'échéance passée à scanoria-selfupdate et l'arrêt forcé
 # du helper : selfupdate ne franchit le point de non-retour (arrêt de la
@@ -492,6 +493,7 @@ ACTIONS = {
     "backup-module": modules.act_backup_module,
     "restore-module": modules.act_restore_module,
     "reset-service-admin": provision.act_reset_service_admin,
+    "package-dates": pkgdates.act_package_dates,
 }
 
 

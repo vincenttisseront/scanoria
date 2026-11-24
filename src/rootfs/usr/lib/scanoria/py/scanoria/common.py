@@ -67,6 +67,7 @@ REQUEST_TYPES = (
     "set-ai-endpoint", "refresh-feeds",
     "backup-module", "restore-module",
     "reset-service-admin",
+    "package-dates",
 )
 REJECT_CODES = frozenset((
     "E_INVALID_NAME", "E_NOT_REGULAR_FILE", "E_BAD_OWNER", "E_TOO_LARGE", "E_INVALID_JSON",

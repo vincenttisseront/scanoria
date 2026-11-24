@@ -49,6 +49,10 @@ scan:
   # (<répertoire>/osv-scalibr/<écosystème>/all.zip) sans la télécharger.
   command: ["/osv-scanner", "scan", "source", "--recursive", "--offline-vulnerabilities",
             "--format", "sarif", "--output-file", "/out/result.sarif", "/src"]
+  # Re-corrélation (0.5, contrat 16) : SBOM CycloneDX écrit par le runner ; le
+  # nom en *.cdx.json est celui qu'OSV-Scanner reconnaît avec -L.
+  sbom_command: ["/osv-scanner", "scan", "source", "--offline-vulnerabilities",
+                 "--format", "sarif", "--output-file", "/out/result.sarif", "-L", "/src/sbom.cdx.json"]
   env:
     OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY: /feeds/osv-db
   timeout_s: 900

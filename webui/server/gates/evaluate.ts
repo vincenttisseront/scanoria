@@ -23,6 +23,7 @@ import {
 } from '#shared/analysis'
 import { collapseCorrelated } from '../findings/correlation'
 import { intelJoin } from '../intel/lookup'
+import { decideComponent, loadPolicy } from '../licenses/policy'
 
 type Reason = z.infer<typeof VerdictDetails>['reasons'][number]
 type Action = Reason['actions'][number]
@@ -87,6 +88,18 @@ export interface GateInput {
   evaluatedAt: string
   /** F16 (0.5) : regrouper les résultats recoupés (faux pour le rejeu d'un plan d'avant la 0.5, G11). */
   correlate?: boolean
+  /** 0.5 (B) : déclencheur de l'analyse ; la quarantaine (H5) ne bloque qu'une release. */
+  trigger?: string
+  /** 0.5 (B) : composants du SBOM de l'analyse, avec leur décision de licence (F8). */
+  components?: GateComponent[]
+}
+
+/** Composant du SBOM vu par le gate (F8, H5). */
+export interface GateComponent {
+  purl: string
+  decision: 'allowed' | 'review' | 'denied'
+  /** Date de publication de la version (H5), ISO 8601 ; null si inconnue. */
+  published_at: string | null
 }
 
 const MAX_IDS = 50
@@ -295,6 +308,11 @@ export function computeVerdict(input: GateInput): VerdictDetails {
   blockingReasons.push(...severityReasons.filter(r => r.blocking).sort(bySeverityDesc))
   infoReasons.push(...severityReasons.filter(r => !r.blocking).sort(bySeverityDesc))
 
+  // 4 bis. F8 et H5 (0.5, chantier B) : licences et quarantaine des composants.
+  const comp = componentReasons(input, rules)
+  blockingReasons.push(...comp.blocking)
+  infoReasons.push(...comp.info)
+
   // 5. G13 : modules du plan en échec ou absents.
   const moduleReasons: Reason[] = []
   if (input.modules.length === 0) {
@@ -361,6 +379,51 @@ export function intelReasons(vulns: GateFinding[], rules: GateRules): { reasons:
   return { reasons, consumed: new Set([...kev, ...epss].map(f => f.id)) }
 }
 
+/**
+ * F8 et H5 (contrat 15) : raisons tirées des composants du SBOM.
+ * - licence « interdite » : bloquante si license_denied_blocks, sinon signalée ;
+ * - licence « à revoir » : toujours informative ;
+ * - version publiée depuis moins de quarantine_days (0 = désactivé) : bloquante
+ *   pour une release, signalée sinon ; recalculée à chaque évaluation, donc
+ *   levée d'elle-même à l'échéance. Une date inconnue ne compte pas (G15).
+ */
+export function componentReasons(input: GateInput, rules: GateRules): { blocking: Reason[], info: Reason[] } {
+  const blocking: Reason[] = []
+  const info: Reason[] = []
+  const list = input.components ?? []
+  if (!list.length) return { blocking, info }
+  const make = (code: Reason['code'], isBlocking: boolean, count: number, actions: Action[]): Reason =>
+    ({ code, blocking: isBlocking, count, severity: null, module: null, finding_ids: [], actions })
+
+  const denied = list.filter(c => c.decision === 'denied').length
+  if (denied) (rules.license_denied_blocks ? blocking : info).push(make('license-denied', rules.license_denied_blocks, denied, rules.license_denied_blocks ? ['fix'] : []))
+  const review = list.filter(c => c.decision === 'review').length
+  if (review) info.push(make('license-review', false, review, []))
+
+  if (rules.quarantine_days > 0) {
+    const limit = Date.parse(input.evaluatedAt) - rules.quarantine_days * 86_400_000
+    const recent = list.filter((c) => {
+      const t = c.published_at ? Date.parse(c.published_at) : Number.NaN
+      return Number.isFinite(t) && t > limit
+    }).length
+    if (recent) {
+      const isBlocking = input.trigger === 'release'
+      ;(isBlocking ? blocking : info).push(make('quarantine', isBlocking, recent, ['wait']))
+    }
+  }
+  return { blocking, info }
+}
+
+/** Composants du SBOM de l'analyse (ou de sa source pour une re-corrélation) et leur décision de licence. */
+async function loadGateComponents(db: Queryable, scanId: string, sbomSource: string | null, projectId: string): Promise<GateComponent[]> {
+  const r = await db.query<{ purl: string, licenses: string[], published_at: string | null }>(
+    `SELECT purl, licenses, to_char(published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS published_at
+       FROM sbom_components WHERE scan_id = $1 LIMIT 50000`, [sbomSource ?? scanId])
+  if (!r.rows.length) return []
+  const policy = await loadPolicy(db, projectId)
+  return r.rows.map(c => ({ purl: c.purl, decision: decideComponent(policy, c.licenses).decision, published_at: c.published_at }))
+}
+
 function maxSeverity(list: GateFinding[]): Severity {
   return list.reduce<Severity>((m, f) => (SEVERITY_RANK[f.severity] > SEVERITY_RANK[m] ? f.severity : m), 'info')
 }
@@ -419,8 +482,8 @@ export function planCompanionIds(plan: unknown): string[] {
 
 /** Contrat 6 : évalue le quality gate d'une analyse (sans l'enregistrer : C le fait). */
 export async function evaluateGate(db: Queryable, scanId: string, now = new Date()): Promise<VerdictDetails> {
-  const scan = await db.query<{ project_id: string, gate_id: string, plan: unknown, coverage: unknown, gate_rules: unknown, today: string }>(
-    `SELECT s.project_id, s.gate_id, s.plan, s.coverage, g.rules AS gate_rules,
+  const scan = await db.query<{ project_id: string, gate_id: string, plan: unknown, coverage: unknown, gate_rules: unknown, today: string, trigger: string, sbom_source: string | null }>(
+    `SELECT s.project_id, s.gate_id, s.plan, s.coverage, g.rules AS gate_rules, s.trigger, s.sbom_source::text AS sbom_source,
             to_char(($2::timestamptz AT TIME ZONE current_setting('TimeZone'))::date, 'YYYY-MM-DD') AS today
        FROM scans s JOIN gates g ON g.id = s.gate_id
       WHERE s.id = $1`,
@@ -462,5 +525,7 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
     correlate: !planIsPre05(row.plan),
     today: row.today,
     evaluatedAt: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    trigger: row.trigger,
+    components: await loadGateComponents(db, scanId, row.sbom_source, row.project_id),
   })
 }

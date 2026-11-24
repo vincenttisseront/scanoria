@@ -45,6 +45,7 @@ export const REQUEST_TYPES = [
   'backup-module',
   'restore-module',
   'reset-service-admin',
+  'package-dates',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -131,6 +132,11 @@ export const requestParamSchemas = {
   'refresh-feeds': z.strictObject({
     ids: z.array(z.string().regex(MODULE_ID_RE)).min(1).max(50)
       .refine(a => new Set(a).size === a.length, 'duplicate ids').optional(),
+  }),
+  // 0.5 (B, H5) : dates de publication d'un lot de purl, cherchées par le helper.
+  'package-dates': z.strictObject({
+    purls: z.array(z.string().min(5).max(1024).regex(/^pkg:[a-z][a-z0-9.+-]{0,31}\/\S+$/)).min(1).max(2000)
+      .refine(a => new Set(a).size === a.length, 'duplicate purls'),
   }),
   'install-modules': z.strictObject({
     modules: z.array(z.strictObject({

@@ -73,11 +73,18 @@ jq --arg ip "$HOST_IP" --arg port "$PORT" '.id = "sonde" | .categories = ["lint"
 	| .scan = {inputs: ["repo", "archive"], network: "none", timeout_s: 60, exit_codes_ok: [0],
 	           command: ["/bin/sh", "-c", ("if wget -q -T 5 -O /dev/null --no-check-certificate https://" + $ip + ":" + $port + "/ 2>/tmp/e || grep -q \"401\\|403\" /tmp/e; then exit 0; else exit 3; fi"), "sonde", "/out/result.sarif"],
 	           env: {}}' "$TMP/git-fetch.json" > "$TMP/sonde.json"
+# Lecteur de SBOM (0.5, re-corrélation) : vérifie que /src/sbom.cdx.json est un
+# CycloneDX reconstruit par le runner, puis écrit un SARIF vide.
+jq '.id = "lecteur" | .categories = ["sca"] | .requires.modules = []
+	| .scan = {inputs: ["sbom"], network: "none", timeout_s: 60, exit_codes_ok: [0], env: {},
+	           command: ["/bin/sh", "-c", "exit 4"],
+	           sbom_command: ["/bin/sh", "-c", "grep -q \"pkg:npm/minimist@1.2.5\" \"$1\" && grep -q CycloneDX \"$1\" && [ ! -e /src/.git ] && printf %s \"{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[{\\\"tool\\\":{\\\"driver\\\":{\\\"name\\\":\\\"lecteur\\\"}},\\\"results\\\":[]}]}\" > /out/result.sarif", "lecteur", "/src/sbom.cdx.json"]}' \
+	"$TMP/git-fetch.json" > "$TMP/lecteur.json"
 python3 - "$T/var/lib/scanoria/modules/installed.json" "$TMP" <<'EOF'
 import json, sys
 path, tmp = sys.argv[1:3]
 reg = {"modules": {}, "operations": []}
-for mid in ("git-fetch", "gitleaks", "sonde"):
+for mid in ("git-fetch", "gitleaks", "sonde", "lecteur"):
     m = json.load(open("%s/%s.json" % (tmp, mid)))
     opts = {k: p["default"] for k, p in (m.get("options") or {}).get("properties", {}).items()}
     reg["modules"][mid] = {"manifest": m, "status": "healthy", "enabled": True, "options": opts}
@@ -244,6 +251,16 @@ SARIF="$SCANS/results/$id/$(jq -r '.modules[0].outputs.sarif' <<< "$R")"
 jq -e '[.runs[].results[] | select(.ruleId == "aws-access-token")] | length >= 1' "$SARIF" > /dev/null 2>&1 \
 	&& ok "archive : faux secret trouvé" || ko "archive : faux secret non trouvé"
 expect "archive : espace de travail supprimé" "$(find "$SCANS/workspaces" -mindepth 1 | wc -l)" 0
+
+# --- 6. SBOM (re-corrélation, 0.5) : aucun clone, fichier CycloneDX reconstruit ----------------
+id=$(uuid)
+SB=$(jq -cn --arg s "$(uuid)" '{kind: "sbom", scan_id: $s, components: ["pkg:npm/minimist@1.2.5", "pkg:pypi/requests@2.31.0"]}')
+drop "$id" "$(job "$id" "$SB" "[$(jq -c '{id: .id, version: .version}' "$TMP/lecteur.json")]")"
+run_runner
+R=$(res "$id")
+echo "$R" | jq -c '{status, error, source, modules: [.modules[] | {id, status, error}]}'
+expect "sbom : lecteur ok (CycloneDX lu dans /src, pas de dépôt)" "$(jq -r '.status + "/" + .modules[0].status' <<< "$R")" ok/ok
+expect "sbom : espace de travail supprimé" "$(find "$SCANS/workspaces" -mindepth 1 | wc -l)" 0
 
 echo
 echo "b14-live : $PASS réussis, $FAIL échoués"
