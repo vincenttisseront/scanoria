@@ -150,6 +150,41 @@ check("graphe : m1 attend la fin de m0", spans["m1"][0] >= spans["m0"][1])
 peak, spans, _ = simulate(items[:2], {"m0": {"m1"}, "m1": {"m0"}}, 4096, 4, 0.05)
 check("graphe : cycle → on avance quand même, dans l'ordre", set(spans) == {"m0", "m1"})
 # Deux tâches : la seconde a toujours sa place garantie.
+# Outil d'appliance monté (scan.tool) : son contenu entre dans la clé (une mise à jour l'invalide).
+tool = os.path.join(sys.argv[2], "tool")
+os.makedirs(tool, exist_ok=True)
+with open(os.path.join(tool, "t.py"), "w") as f:
+    f.write("v1")
+h1 = rc.tree_sha256(tool)
+with open(os.path.join(tool, "t.py"), "w") as f:
+    f.write("v2")
+h2 = rc.tree_sha256(tool)
+check("outil : empreinte de l'arbre sensible au contenu", h1 and h2 and h1 != h2)
+check("outil : empreinte dans options_sha256", rc.options_sha256({}, ["x"], {}, h1) != rc.options_sha256({}, ["x"], {}, h2))
+check("outil : sans outil, options_sha256 inchangé (clés antérieures)", rc.options_sha256({}, ["x"], {}) == rc.sha256_hex(rc.canonical({"options": {}, "command": ["x"], "env": {}})))
+os.symlink("/etc/hostname", os.path.join(tool, "lien"))
+check("outil : lien dans l'arbre → jamais réutilisable", rc.tree_sha256(tool) is None)
+
+# Thread impossible à démarrer : réservation rendue, module en erreur, les autres continuent.
+class NoThread(threading.Thread):
+    def start(self):
+        if self.name == "mod-b":
+            raise RuntimeError("can't start new thread")
+        super().start()
+real, sc.threading.Thread = sc.threading.Thread, NoThread
+bud = sc.Budget()
+bud.configure(4096, 2)
+ran, failed = [], []
+try:
+    sc.run_all("J", [({"id": "a"}, {"manifest": {}}), ({"id": "b"}, {"manifest": {}}), ({"id": "c"}, {"manifest": {}})],
+               {"c": {"b"}}, lambda e, s: ran.append(e["id"]), budget=bud,
+               on_start_error=lambda e, exc: failed.append(e["id"]))
+finally:
+    sc.threading.Thread = real
+check("ordonnancement : échec de démarrage signalé", failed == ["b"])
+check("ordonnancement : autres modules lancés (dépendant compris)", sorted(ran) == ["a", "c"])
+check("ordonnancement : budget entièrement rendu", bud.mem_used == 0 and bud.cpu_used == 0 and not bud.per_job)
+
 b = sc.Budget()
 b.configure(600, 4)
 with b.cv:
@@ -286,6 +321,9 @@ KEY=$(mod "$R" simple | jq -r .cache_key)
 [[ "$KEY" =~ ^[0-9a-f]{64}$ ]] && ok "V4 : clé publiée pour un module ok" || ko "V4 : clé absente"
 expect "V4 : module qui lit l'historique jamais réutilisable" "$(mod "$R" histo | jq -r '.cache_key // "aucune"')" aucune
 expect "V3 : entrée lue notée" "$(mod "$R" simple | jq -r .input)" src
+expect "V4 : attestation du runner pour la sortie neuve" \
+	"$(jq -r '.sha256.sarif' "$T/var/lib/scanoria/scans/cache-attest/$KEY.json" 2> /dev/null)" \
+	"$(sha256sum < "$SCANS/results/$(jq -r .id <<< "$R")/simple/result.sarif" | cut -c1-64)"
 expect "V4 : clé recalculée identique (même contenu)" "$(python3 -I - "$PYLIB" "$TREE" "$IMG" <<'EOF'
 import sys
 sys.path.insert(0, sys.argv[1])
@@ -300,6 +338,13 @@ put() { # clé module fichier-sarif [méta]
 	mkdir -p "$CACHE/$1"
 	printf '%s' "${4:-$(jq -cn --arg k "$1" --arg m "$2" '{v: 1, key: $k, module_id: $m, image_digest: "x", outputs: {sarif: "sarif.json"}}')}" > "$CACHE/$1/meta.json"
 	printf '%s' "$3" > "$CACHE/$1/sarif.json"
+	attest "$1" "$2" "$3"
+}
+ATTEST="$T/var/lib/scanoria/scans/cache-attest"
+attest() { # clé module contenu : attestation que le runner aurait écrite pour cette sortie
+	mkdir -p "$ATTEST"
+	jq -cn --arg k "$1" --arg m "$2" --arg h "$(printf '%s' "$3" | sha256sum | cut -c1-64)" \
+		'{v: 1, key: $k, module_id: $m, sha256: {sarif: $h}}' > "$ATTEST/$1.json"
 }
 CACHED='{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"simple"}},"results":[{"ruleId":"r","message":{"text":"du cache"}}]}]}'
 put "$KEY" simple "$CACHED"
@@ -335,6 +380,9 @@ trap_case "nom de fichier hors liste" 'put "$KEY" simple "$CACHED" "$(jq -cn --a
 trap_case "sortie en lien symbolique" 'put "$KEY" simple "$CACHED"; rm "$CACHE/$KEY/sarif.json"; ln -s /etc/hostname "$CACHE/$KEY/sarif.json"'
 trap_case "sortie à deux liens" 'put "$KEY" simple "$CACHED"; ln "$CACHE/$KEY/sarif.json" "$TMP/second-lien"'
 trap_case "entrée en lien symbolique" 'mkdir -p "$TMP/ailleurs"; put ailleurs-x simple "$CACHED"; ln -s "$CACHE/ailleurs-x" "$CACHE/$KEY"'
+trap_case "sortie modifiée après attestation (console non fiable)" 'put "$KEY" simple "$CACHED"; attest "$KEY" simple "autre contenu"'
+trap_case "attestation absente" 'put "$KEY" simple "$CACHED"; rm -f "$ATTEST/$KEY.json"'
+trap_case "attestation d'un autre module" 'put "$KEY" simple "$CACHED"; attest "$KEY" autre "$CACHED"'
 trap_case "méta JSON à clé dupliquée" 'put "$KEY" simple "$CACHED" "{\"v\":1,\"v\":1}"'
 rm -rf "${CACHE:?}/$KEY" "$CACHE/ailleurs-x"
 

@@ -672,6 +672,12 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
     except Fail as f:
         return finish("invalid-output", _err("E_INVALID_OUTPUT", "tool", f.message), rc)
     entry["outputs"] = outputs
+    if entry.get("cache_key"):
+        # V4 : attestation root des sorties validées ; seule base de confiance d'une reprise.
+        try:
+            resultcache.attest(entry["cache_key"], mid, {k: os.path.join(rdir, v) for k, v in outputs.items()})
+        except OSError:
+            entry.pop("cache_key", None)     # sans attestation, la console ne range rien
     if "cyclonedx" in outputs and not sbom.consumes(m):
         # Premier SBOM de l'analyse : offert aux modules suivants qui lisent l'entrée « sbom ».
         sbom.offer(ws, os.path.join(rdir, outputs["cyclonedx"]))
@@ -752,7 +758,10 @@ def run_modules(job, runnable, ws, rdir, reg, secrets):
         except Exception as e:  # noqa: BLE001 — une erreur d'un module n'arrête pas les autres
             common.log("runner: module %s failed: %r" % (ent["id"], e))
             ent.update(status="error", error=_err("E_RUNNER_INTERNAL", "infra", "internal runner error"))
-    schedule.run_all(job["id"], runnable, schedule.dependencies(job, runnable), one)
+    def not_started(ent, e):
+        common.log("runner: module %s not started: %r" % (ent["id"], e))
+        ent.update(status="error", error=_err("E_RUNNER_INTERNAL", "infra", "module could not be started"))
+    schedule.run_all(job["id"], runnable, schedule.dependencies(job, runnable), one, on_start_error=not_started)
 
 
 # --------------------------------------------------------------------------
@@ -969,6 +978,7 @@ class Runner:
         if now - self.last_purge >= PURGE_EVERY_S:
             self.last_purge = now
             purge_results()
+            resultcache.prune_attest()
         self.refresh_capacity()
 
 

@@ -19,6 +19,7 @@ l'analyse (supprimé à la fin) et donnée à l'utilisateur des conteneurs.
 import os
 import re
 import shutil
+import threading
 
 from . import testbed
 from .common import Fail
@@ -75,8 +76,18 @@ def available(ws):
     return None
 
 
+_OFFER_LOCK = threading.Lock()
+
+
 def offer(ws, published):
-    """Dépose une copie du premier SBOM produit (déjà validé par le runner) ; sans effet ensuite."""
+    """Dépose une copie du premier SBOM produit (déjà validé par le runner) ; sans effet ensuite.
+
+    Modules exécutés en parallèle (V5) : un seul dépôt à la fois."""
+    with _OFFER_LOCK:
+        return _offer(ws, published)
+
+
+def _offer(ws, published):
     d = sbom_dir(ws)
     if os.path.lexists(d):
         return False

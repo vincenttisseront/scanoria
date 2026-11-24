@@ -116,7 +116,7 @@ def dependencies(job, runnable):
     return deps
 
 
-def run_all(job_id, runnable, deps, run_one, budget=None, max_parallel=None):
+def run_all(job_id, runnable, deps, run_one, budget=None, max_parallel=None, on_start_error=None):
     """Lance run_one(entry, spec) pour chaque module, graphe et budget respectés ; attend la fin.
 
     run_one ne doit pas lever (le runner attrape déjà les erreurs d'un module)."""
@@ -150,8 +150,18 @@ def run_all(job_id, runnable, deps, run_one, budget=None, max_parallel=None):
                 running.add(it[0]["id"])
                 th = threading.Thread(target=worker, args=(it[0], it[1], mem, cpu),
                                       name="mod-%s" % it[0]["id"], daemon=True)
+                try:
+                    th.start()
+                except RuntimeError as e:
+                    # Plus de thread disponible : réservation rendue, module en erreur d'infrastructure (G12).
+                    budget.release(job_id, mem, cpu)
+                    running.discard(it[0]["id"])
+                    done.add(it[0]["id"])
+                    if on_start_error is not None:
+                        on_start_error(it[0], e)
+                    started = True
+                    continue
                 threads.append(th)
-                th.start()
                 started = True
             if not started:
                 budget.cv.wait(1.0)
