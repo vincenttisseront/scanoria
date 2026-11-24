@@ -377,6 +377,9 @@ describe('vue du catalogue', () => {
     expect(variantPending(waiting, latest([variant]))).toBe(true)
     expect(updateAvailable(waiting, latest([variant]))).toBe('26.11.0.134175')
     expect(variantPending(waiting, latest([]))).toBe(false)
+    expect(variantPending(waiting, latest([null, 'x', variant]))).toBe(true)
+    expect(variantPending(waiting, { id: 'sonarqube', version: '26.11.0.134175' } as never)).toBe(false)
+    expect(variantPending(waiting, { ...latest([variant]), version: '26.12.0.1' } as never)).toBe(false)
     expect(updateAvailable(waiting, latest([]))).toBeNull()
     // Plugin d'une autre version, image construite sur un autre SonarQube : rien.
     expect(variantPending(waiting, latest([{ ...variant, version: '26.10.0' }]))).toBe(false)
