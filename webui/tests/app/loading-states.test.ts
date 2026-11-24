@@ -79,7 +79,7 @@ describe('erreurs de chargement affichées dans la page', () => {
     expect(bodyText()).toContain('Une erreur est survenue. Réessayez.')
     clearBody()
 
-    route('GET', '/api/findings/summary', () => ({ items: [] }))
+    route('GET', '/api/findings/summary', () => ({ projects: [] }))
     route('GET', '/api/exceptions', () => apiFail(500, 'E_INTERNAL'))
     await mountIn(ExceptionsPage, { route: `/findings/exceptions?project_id=${ID}` })
     await settle()
