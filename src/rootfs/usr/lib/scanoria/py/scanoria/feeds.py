@@ -501,7 +501,9 @@ FILE_MODE = 0o640
 
 
 def _give(path):
-    if not common.TEST_ROOT:
+    # En root, toujours (y compris en mode test, b18-live) ; un test sans root
+    # ne peut pas changer de groupe.
+    if os.geteuid() == 0:
         os.chown(path, 0, FEED_GID, follow_symlinks=False)
 
 
