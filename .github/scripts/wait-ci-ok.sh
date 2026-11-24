@@ -6,6 +6,9 @@
 # $GITHUB_SHA (CLAUDE.md § 16 : jamais de publication sans CI verte).
 #   wait-ci-ok.sh [MINUTES]   (défaut : 170)
 # Échec immédiat si ci-ok échoue, échec au délai s'il reste absent ou en cours.
+# Un contrôle qui a une date de fin et une conclusion est terminé, même si
+# l'API le dit encore « in_progress » (incohérence vue le 2026-11-24, qui a
+# bloqué la publication du catalogue pendant le délai complet).
 # Variables : GH_TOKEN (droit checks: read), GITHUB_REPOSITORY, GITHUB_SHA.
 set -euo pipefail
 
@@ -15,7 +18,7 @@ minutes=${1:-170}
 end=$(( $(date +%s) + minutes * 60 ))
 while :; do
 	state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=ci-ok&filter=latest" \
-		--jq '(.check_runs | sort_by(.started_at) | last) // {} | "\(.status // "absent")/\(.conclusion // "none")"')
+		--jq '(.check_runs | sort_by(.started_at) | last) // {} | "\(if .completed_at != null and .conclusion != null then "completed" else (.status // "absent") end)/\(.conclusion // "none")"')
 	case "$state" in
 		completed/success)
 			echo "ci-ok réussi sur $GITHUB_SHA"; exit 0 ;;

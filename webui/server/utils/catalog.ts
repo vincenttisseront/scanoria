@@ -281,4 +281,4 @@ export function satisfiesAppliance(constraint: string | undefined, version: stri
 }
 
 /** Modules recommandés au premier accès (CLAUDE.md § 5.3) : légers, sans service permanent. */
-export const RECOMMENDED_IDS = ['gitleaks', 'osv-scanner', 'trivy', 'syft', 'grype', 'shellcheck', 'actionlint', 'checkov'] as const
+export const RECOMMENDED_IDS = ['gitleaks', 'osv-scanner', 'trivy', 'syft', 'grype', 'shellcheck', 'actionlint', 'checkov', 'epss', 'kev'] as const

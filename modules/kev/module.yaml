@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Catalogue KEV de la CISA : vulnérabilités exploitées activement (module feed,
+# 0.5, H3). Le helper télécharge chaque jour le catalogue JSON, le valide (CVE
+# et date d'ajout de chaque entrée, nombre annoncé) et le publie pour la
+# console (feed.export, contrat 17). Une CVE du catalogue est bloquante dans le
+# quality gate quelle que soit sa gravité (kev_blocks). Une CVE retirée du
+# catalogue redevient non KEV au prochain import. Licence relevée le
+# 2026-11-24 sur github.com/cisagov/kev-data (fichier LICENSE).
+id: kev
+name: CISA KEV
+description:
+  fr: Catalogue des vulnérabilités exploitées activement (CISA KEV), mis à jour chaque jour.
+  en: Catalog of known exploited vulnerabilities (CISA KEV), updated daily.
+type: feed
+categories: [sca]
+license:
+  spdx: CC0-1.0
+  url: https://github.com/cisagov/kev-data/blob/main/LICENSE
+  restrictions: none
+  verified_at: "2026-11-24"
+  notes: Domaine public (CC0 1.0), identique à la licence publiée par la CISA ; les liens tiers cités par les entrées gardent leurs propres conditions. Le logo de la CISA et le sceau du DHS ne sont pas utilisés.
+upstream:
+  homepage: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+  source: https://github.com/cisagov/kev-data
+version: "1"
+resources: { min_ram_mb: 64, min_cpu: 0.1, disk_mb: 50 }
+hostname: null
+requires: { modules: [], feeds: [], appliance: ">=0.5.0" }
+conflicts: []
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+feed:
+  format: kev-json
+  mount: /feeds/kev
+  max_age_days: 7
+  source:
+    kind: https
+    ref: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    mirrors: ["https://raw.githubusercontent.com/cisagov/kev-data/main/known_exploited_vulnerabilities.json"]
+  schedule: daily
+  export: { format: jsonl.gz }

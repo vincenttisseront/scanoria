@@ -132,7 +132,7 @@ describe('catalogue', () => {
     const w = await mountIn(CatalogPage)
     await settle()
     const text = w.text()
-    expect(text).toContain('Catalogue n° 7')
+    expect(text).not.toContain('Catalogue n°')
     expect(text).toContain('1 entrée(s) mal formée(s) écartée(s)')
     expect(text).toContain('Sélection conseillée')
     expect(text).toContain('1 base(s) de vulnérabilités nécessaire(s) seront ajoutées automatiquement.')
@@ -151,16 +151,45 @@ describe('catalogue', () => {
     expect(text).toContain('en échec')
     expect(text).toContain('désactivé')
     expect(text).toContain('installation')
+    // Seule l'opération en cours est affichée ; l'historique reste au journal
+    // d'audit, et un échec ancien ne déclenche pas de notification.
+    expect(text).not.toContain('Opérations')
     expect(text).toContain('Installation : shellcheck')
     expect(text).toContain('récupération de l’image')
-    expect(text).toContain('échec, retour arrière effectué')
-    expect(text).toContain('banc d’essai : 0 résultat')
+    expect(text).not.toContain('banc d’essai : 0 résultat')
+    expect(toastAdd).not.toHaveBeenCalled()
     expect(text).toContain('Modules installés absents du catalogue')
     expect(text).toContain('base TRIVY-DB')
     expect(text).toContain('incompatible avec opengrep')
     expect(text).toContain('requiert osv-db')
     expect(buttons('Actualiser le catalogue')).toHaveLength(0)
     expect(buttons('Installer la sélection conseillée')).toHaveLength(0)
+  })
+
+  it('échec d’opération : notification récente à l’ouverture, puis à la fin d’une opération suivie', async () => {
+    setUser('admin')
+    const recent = new Date(Date.now() - 60_000).toISOString()
+    let ops: CatalogView['operations'] = [
+      { id: 'f1', kind: 'install', module: 'trivy', step: 'rollback', started_at: recent, finished_at: recent, result: 'failed', message: 'banc d’essai : 0 résultat' },
+      { id: 'r1', kind: 'update', module: 'gitleaks', step: 'pull', progress: 20, started_at: recent, finished_at: null },
+    ]
+    route('GET', '/api/catalog', () => view({ operations: ops }))
+    helperRoute('/api/catalog/refresh', 'rf1')
+    const w = await mountIn(CatalogPage)
+    await settle()
+    expect(toastAdd).toHaveBeenCalledTimes(1)
+    expect(toastAdd).toHaveBeenLastCalledWith(expect.objectContaining({
+      title: 'Installation : trivy', description: 'échec, retour arrière effectué · banc d’essai : 0 résultat', color: 'error',
+    }))
+    expect(document.body.querySelector('[data-running-operations]')!.textContent).toContain('Mise à jour : gitleaks')
+    ops = [ops[0]!, { ...ops[1]!, finished_at: new Date().toISOString(), result: 'failed', message: null }]
+    fakeClock()
+    void (w.vm as unknown as { refreshCatalog: () => Promise<void> }).refreshCatalog()
+    await drive()
+    const errors = toastAdd.mock.calls.filter(([o]) => (o as { color?: string }).color === 'error')
+    expect(errors).toHaveLength(2)
+    expect(toastAdd).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Mise à jour : gitleaks', description: 'échec, retour arrière effectué' }))
+    expect(document.body.querySelector('[data-running-operations]')).toBeNull()
   })
 
   it('filtres par texte et par type', async () => {

@@ -366,6 +366,9 @@ jobs:
       # Machine jetable : le helper tourne en root avec le vrai podman (§ 6.4).
       - name: tests/b18-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b18-live.sh
+      # EPSS et KEV (0.5, H3) depuis leurs vraies sources, racine vide.
+      - name: tests/b23-vuln-intel.sh --live
+        run: bash tests/b23-vuln-intel.sh --live
 
   services-live:
     name: services-live (podman, systemd, PostgreSQL réels, b16-live)
