@@ -8,6 +8,8 @@ export interface ProjectDetection {
   version: number
   analyzed_at: string
   error?: string
+  /** Code système de la cause réseau d'une erreur de détection (ENOTFOUND, EPERM…). */
+  detail?: string
   ref?: string | null
   commit?: string | null
   truncated?: boolean
@@ -91,7 +93,12 @@ export function useProjects() {
 
   function message(err: unknown): string {
     const code = errorCode(err)
-    if (code && te(`projects.errors.${code}`)) return t(`projects.errors.${code}`)
+    if (code && te(`projects.errors.${code}`)) {
+      const e = err as { data?: { data?: { forge_detail?: unknown }, forge_detail?: unknown } }
+      const detail = e?.data?.data?.forge_detail ?? e?.data?.forge_detail
+      const text = t(`projects.errors.${code}`)
+      return typeof detail === 'string' && /^[A-Z0-9_]{2,40}$/.test(detail) ? `${text} ${t('projects.detection.errorDetail', { detail })}` : text
+    }
     return errorMessage(err)
   }
 

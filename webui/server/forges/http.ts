@@ -6,33 +6,38 @@
 // redirections suivies seulement vers le même hôte. Le jeton ne figure jamais
 // dans une erreur : les messages ne portent qu'un code et un statut HTTP.
 
+import { lookup as dnsLookup, type LookupAddress } from 'node:dns'
+import { request as httpsRequest } from 'node:https'
+import { Readable } from 'node:stream'
 import { trimEnd } from '../utils/text'
 
 export const FORGE_ERROR_CODES = [
-  'E_FORGE_URL', 'E_FORGE_UNREACHABLE', 'E_FORGE_TIMEOUT', 'E_FORGE_AUTH', 'E_FORGE_NOT_FOUND',
+  'E_FORGE_URL', 'E_FORGE_UNREACHABLE', 'E_FORGE_DNS', 'E_FORGE_BLOCKED', 'E_FORGE_TLS', 'E_FORGE_TIMEOUT', 'E_FORGE_AUTH', 'E_FORGE_NOT_FOUND',
   'E_FORGE_RATE_LIMITED', 'E_FORGE_TOO_LARGE', 'E_FORGE_REDIRECT', 'E_FORGE_RESPONSE',
   'E_FORGE_UNSUPPORTED', 'E_FORGE_INPUT',
 ] as const
 export type ForgeErrorCode = (typeof FORGE_ERROR_CODES)[number]
 
 export class ForgeError extends Error {
-  constructor(public readonly code: ForgeErrorCode, public readonly status: number | null = null) {
-    super(status ? `${code} (HTTP ${status})` : code)
+  /**
+   * `detail` : code système de la cause réseau (ENOTFOUND, EPERM,
+   * CERT_HAS_EXPIRED…), jamais un texte libre : il est affiché tel quel.
+   */
+  constructor(public readonly code: ForgeErrorCode, public readonly status: number | null = null, public readonly detail: string | null = null) {
+    super(status ? `${code} (HTTP ${status})` : detail ? `${code} (${detail})` : code)
     this.name = 'ForgeError'
   }
 }
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>
 
-let transport: FetchLike = (url, init) => fetch(url, init)
-
 /**
  * Remplace le transport HTTP (tests seulement : faux serveurs de forge servis
  * en clair sur 127.0.0.1). Les contrôles d'URL s'appliquent avant, sur l'URL
- * logique en HTTPS. Sans argument, rétablit fetch.
+ * logique en HTTPS. Sans argument, rétablit le transport HTTPS par défaut.
  */
 export function setForgeTransport(fn?: FetchLike): void {
-  transport = fn ?? ((url, init) => fetch(url, init))
+  transport = fn ?? httpsTransport
 }
 
 const LOOPBACK_HOST_RE = /^(localhost|.+\.localhost|localhost\.localdomain|ip6-localhost|ip6-loopback)$/i
@@ -52,6 +57,84 @@ function forbiddenAddress(host: string): boolean {
   if (h === '::' || h === '::1' || /^fe[89ab][0-9a-f]:/.test(h) || /^::ffff:(127|0|169\.254)\./.test(h)) return true
   return false
 }
+
+/** Adresse résolue à refuser : celles de forbiddenAddress, plus la multidiffusion. */
+export function forbiddenResolvedAddress(address: string): boolean {
+  const a = address.toLowerCase()
+  return forbiddenAddress(a) || /^(22[4-9]|23\d)\./.test(a) || /^ff[0-9a-f]{2}:/.test(a)
+}
+
+class LookupRefused extends Error {
+  readonly code = 'E_FORGE_RESOLVED_LOCAL'
+}
+
+type LookupCb = (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void
+type LookupFn = (hostname: string, options: { all?: boolean, family?: number | string }, cb: LookupCb) => void
+
+/**
+ * Résolution DNS contrôlée : un nom qui résout vers une adresse refusée
+ * (bouclage, lien local, multidiffusion) est refusé au moment même de la
+ * connexion, sans second appel DNS qui pourrait répondre autre chose.
+ */
+function guardedLookup(refuse: (address: string) => boolean): LookupFn {
+  return (hostname, options, cb) => {
+    const f = options.family === 'IPv4' ? 4 : options.family === 'IPv6' ? 6 : Number(options.family) || 0
+    dnsLookup(hostname, { family: f as 0 | 4 | 6, all: true }, (err, addresses) => {
+      if (err) return cb(err, '')
+      const list = addresses as LookupAddress[]
+      if (!list.length || list.some(a => refuse(a.address))) return cb(new LookupRefused(hostname), '')
+      if (options.all) cb(null, list)
+      else cb(null, list[0]!.address, list[0]!.family)
+    })
+  }
+}
+
+export interface HttpsTransportOptions {
+  /** Adresses résolues refusées (défaut : forbiddenResolvedAddress). */
+  refuseAddress?: (address: string) => boolean
+  /** AC supplémentaire (tests seulement). */
+  ca?: string
+}
+
+/**
+ * Transport HTTPS par node:https, avec la résolution contrôlée ci-dessus
+ * (fetch ne permet pas de contrôler l'adresse résolue). Corps non compressé.
+ */
+export function createHttpsTransport(opts: HttpsTransportOptions = {}): FetchLike {
+  const lookup = guardedLookup(opts.refuseAddress ?? forbiddenResolvedAddress)
+  return (url, init) => new Promise<Response>((resolve, reject) => {
+    const target = new URL(url)
+    if (target.protocol !== 'https:') return reject(new ForgeError('E_FORGE_URL'))
+    const headers: Record<string, string> = { 'accept-encoding': 'identity', ...(init.headers as Record<string, string> | undefined) }
+    const req = httpsRequest(target, {
+      method: init.method ?? 'GET',
+      headers,
+      lookup: lookup as never,
+      signal: init.signal ?? undefined,
+      ...(opts.ca ? { ca: opts.ca } : {}),
+    }, (res) => {
+      const status = res.statusCode ?? 0
+      if (status < 200 || status > 599) {
+        res.destroy()
+        return reject(new ForgeError('E_FORGE_RESPONSE', status || null))
+      }
+      const h = new Headers()
+      for (const [k, v] of Object.entries(res.headers)) {
+        if (v === undefined) continue
+        for (const x of Array.isArray(v) ? v : [v]) h.append(k, x)
+      }
+      const noBody = status === 204 || status === 205 || status === 304 || init.method === 'HEAD'
+      if (noBody) res.resume()
+      resolve(new Response(noBody ? null : Readable.toWeb(res) as ReadableStream, { status, headers: h }))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+export const httpsTransport: FetchLike = createHttpsTransport()
+
+let transport: FetchLike = httpsTransport
 
 /**
  * Valide l'URL de base d'une forge et la normalise (sans « / » final).
@@ -117,6 +200,30 @@ async function readBounded(res: Response, maxBytes: number): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
+const DNS_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'EAI_NONAME', 'EAI_FAIL', 'EAI_NODATA', 'ENODATA'])
+const BLOCKED_CODES = new Set(['EPERM', 'EACCES'])
+const TIMEOUT_CODES = new Set(['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'])
+const TLS_CODE_RE = /^(CERT_|UNABLE_TO_|SELF_SIGNED_|DEPTH_ZERO_|ERR_TLS_|ERR_SSL_|ERR_CERT_)|^HOSTNAME_MISMATCH$|_CERT_|^EPROTO$/
+
+/**
+ * Traduit une erreur réseau en cause précise : DNS, sortie refusée sur
+ * l'appliance (EPERM/EACCES : pare-feu local ou service sans droit réseau),
+ * TLS, délai, ou forge injoignable (refus, aucune route). Le code système est
+ * gardé en détail ; le message d'origine (qui peut contenir l'URL) jamais.
+ */
+export function classifyNetworkError(err: unknown): ForgeError {
+  if (err instanceof ForgeError) return err
+  const e = err as { name?: string, code?: unknown, cause?: { code?: unknown, name?: string } } | null
+  const raw = typeof e?.code === 'string' ? e.code : typeof e?.cause?.code === 'string' ? e.cause.code : null
+  const code = raw && /^[A-Z0-9_]{2,40}$/.test(raw) ? raw : null
+  if (e?.name === 'TimeoutError' || e?.name === 'AbortError' || e?.cause?.name === 'TimeoutError' || (code && TIMEOUT_CODES.has(code))) return new ForgeError('E_FORGE_TIMEOUT', null, code)
+  if (code === 'E_FORGE_RESOLVED_LOCAL') return new ForgeError('E_FORGE_URL', null, 'RESOLVED_LOCAL')
+  if (code && DNS_CODES.has(code)) return new ForgeError('E_FORGE_DNS', null, code)
+  if (code && BLOCKED_CODES.has(code)) return new ForgeError('E_FORGE_BLOCKED', null, code)
+  if (code && TLS_CODE_RE.test(code)) return new ForgeError('E_FORGE_TLS', null, code)
+  return new ForgeError('E_FORGE_UNREACHABLE', null, code)
+}
+
 function rateLimited(res: Response): boolean {
   return res.status === 429 || (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0')
 }
@@ -147,8 +254,7 @@ export async function forgeGet(url: string, req: ForgeRequest, opts: { allowNotF
       })
     }
     catch (err) {
-      const name = (err as Error)?.name
-      throw new ForgeError(name === 'TimeoutError' || name === 'AbortError' ? 'E_FORGE_TIMEOUT' : 'E_FORGE_UNREACHABLE')
+      throw classifyNetworkError(err)
     }
     if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
       await res.body?.cancel().catch(() => {})
@@ -180,7 +286,13 @@ export async function forgeGet(url: string, req: ForgeRequest, opts: { allowNotF
       await res.body?.cancel().catch(() => {})
       throw new ForgeError('E_FORGE_RESPONSE', res.status)
     }
-    const body = await readBounded(res, req.maxBytes ?? DEFAULT_MAX_BYTES)
+    let body: Buffer
+    try {
+      body = await readBounded(res, req.maxBytes ?? DEFAULT_MAX_BYTES)
+    }
+    catch (err) {
+      throw classifyNetworkError(err)
+    }
     return { status: res.status, headers: res.headers, body }
   }
 }

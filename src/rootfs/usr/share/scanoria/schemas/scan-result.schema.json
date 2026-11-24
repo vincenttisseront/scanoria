@@ -90,7 +90,8 @@
         "kind": {
           "enum": [
             "git",
-            "archive"
+            "archive",
+            "sbom"
           ]
         },
         "commit": {

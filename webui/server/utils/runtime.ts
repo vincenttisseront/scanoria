@@ -13,6 +13,7 @@ import { consumeBootstrapAdmin } from './bootstrap'
 import { IngestMemory, ingestResults, markRunning } from './ingest'
 import { readPublishedState } from './appliance'
 import { purgeSessions } from './sessions'
+import { packageDatesTick } from '../sbom/dates'
 import { UUID_V4_RE } from '#shared/schemas'
 
 let readyResolve: () => void
@@ -57,6 +58,8 @@ export async function ingestNow(): Promise<void> {
     const helper = published.state?.helper as { current?: { id?: string } | null } | undefined
     await markRunning(pool, helper?.current?.id)
     await ingestResults(pool, cfg.requestsDir, memory)
+    // 0.5 (B, H5) : dates de publication des composants, par le helper.
+    await packageDatesTick(pool, cfg.requestsDir)
     ticks += 1
     if (ticks % 720 === 1) {
       await purgeSessions(pool)

@@ -85,7 +85,7 @@ watch(() => route.path, (to, from) => {
 const sections = computed<NavigationMenuItem[][]>(() => {
   // Entrée active selon le chemin, sous-pages comprises (/scans/42 → Analyses).
   const under = (p: string) => route.path === p || route.path.startsWith(`${p}/`)
-  const systemPages = ['/system/tls', '/system/users', '/system/ai', '/system/audit', '/system/about']
+  const systemPages = ['/system/tls', '/system/users', '/system/ai', '/system/audit', '/system/about', '/system/licenses']
   const section = (label: string, items: (NavigationMenuItem | false)[]): NavigationMenuItem[] =>
     [{ label, type: 'label' }, ...items.filter((i): i is NavigationMenuItem => !!i)]
 
@@ -95,7 +95,9 @@ const sections = computed<NavigationMenuItem[][]>(() => {
       { label: t('projects.nav'), icon: 'i-lucide-folder-git-2', to: '/projects', active: under('/projects') },
       { label: t('scans.nav'), icon: 'i-lucide-scan-search', to: '/scans', active: under('/scans') && !under('/scans/health') },
       { label: t('nav.findings'), icon: 'i-lucide-list-checks', to: '/findings', active: under('/findings') },
+      { label: t('components.nav'), icon: 'i-lucide-boxes', to: '/components', active: under('/components') },
       { label: t('gates.nav'), icon: 'i-lucide-gauge', to: '/gates', active: under('/gates') },
+      { label: t('licenses.nav'), icon: 'i-lucide-scale', to: '/system/licenses', active: under('/system/licenses') },
       { label: t('nav.short.health'), icon: 'i-lucide-activity', to: '/scans/health', active: under('/scans/health') },
     ]),
     section(t('nav.groups.modules'), [

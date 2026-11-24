@@ -13,6 +13,7 @@ import { dirname } from 'node:path'
 import type pg from 'pg'
 import type { WorkerConfig } from './config'
 import { enqueueScan } from './enqueue'
+import { runRecorrelation } from './recorrelate'
 import type { Integrations } from './integrations'
 import { ScanWorker, type WorkerPaths } from './worker'
 import { UsageTask } from '../usage/samples'
@@ -61,6 +62,9 @@ export class WorkerService {
       catch (e) {
         this.log(`schedules failed: ${(e as Error).message}`)
       }
+      // 0.5 (B, contrat 16) : bases plus récentes → re-corrélations en file.
+      await runRecorrelation(this.opts.pool, this.opts.paths, now, this.log)
+        .catch((e: unknown) => this.log(`recorrelation failed: ${(e as Error).message}`))
     }
     if (now.getTime() - this.lastPurge >= 24 * 3600_000) {
       this.lastPurge = now.getTime()
