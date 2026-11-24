@@ -10,7 +10,40 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.4.0 — non publiée
+## 0.4.1 — non publiée
+
+Correctif : la console et le worker joignent de nouveau les forges.
+
+### Corrigé
+- Les appels aux API des forges (détection à l'ajout d'un dépôt,
+  découverte, commits) échouaient tous, avec le message « Forge
+  injoignable » : les services de la console et du worker interdisaient
+  toute sortie réseau. Ils n'interdisent plus que les adresses de lien
+  local et de multidiffusion. Le transport des forges résout lui-même les
+  noms et refuse le bouclage et le lien local. Une cause précise est
+  maintenant affichée : DNS (`E_FORGE_DNS`), adresse refusée
+  (`E_FORGE_BLOCKED`) ou certificat (`E_FORGE_TLS`).
+- Un test de signature du catalogue pouvait échouer à tort une fois sur 256.
+
+### Ajouté (avance de la 0.5, actif avec le connecteur IA)
+- **Résultats semblables** regroupés par embeddings dans un même projet. Le
+  tri commun reste confirmé par une personne (I7).
+- **Atteignabilité assistée** des vulnérabilités de dépendances : avis
+  appuyé sur un index des imports et des appels relevé sans rien exécuter
+  par le nouveau module d'appoint `reach-index`. L'avis ne lève jamais un
+  blocage (I11).
+- Schéma de la 0.5 en base (SBOM, licences, EPSS et KEV, recoupement) et
+  nouvelles règles du quality gate. Les règles restent sans effet tant
+  qu'aucun module ne les alimente. Un plan figé avant cette version les
+  garde désactivées quand il est rejoué.
+- Catalogue n° 7.
+
+### Après la mise à jour
+- Si vous aviez posé le contournement
+  `/etc/systemd/system/scanoria-{console,worker}.service.d/forges.conf`,
+  supprimez ces deux fichiers, puis lancez `systemctl daemon-reload`.
+
+## 0.4.0 — 2026-11-24
 
 Applications permanentes : SonarQube s'installe depuis le catalogue. La
 consommation, la santé des analyses et les fonctions IA de la 0.4 sont
