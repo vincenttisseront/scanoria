@@ -5,8 +5,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { completionScore, contextFor, modelInfo, parseParameterSize, selectModels, type ModelInfo } from '../../server/ai/models'
-import { SUITES, scoreCase, summarize } from '../../server/ai/testbed'
-import { TASK_KINDS, explainFinding, explainVerdict } from '../../server/ai/tasks'
+import { EMBED_SUITE, SUITES, scoreCase, summarize } from '../../server/ai/testbed'
+import { COMPLETION_KINDS, EMBED_KINDS, TASK_KINDS, explainFinding, explainVerdict } from '../../server/ai/tasks'
 
 const m = (name: string, p: number | null, ctx: number | null, caps = ['completion']): ModelInfo =>
   ({ name, digest: name.padEnd(12, '0'), capabilities: caps, context: ctx, parameters_b: p, family: null })
@@ -55,7 +55,10 @@ describe('modèles', () => {
 
 describe('banc d\'essai', () => {
   it('charge un jeu par tâche', () => {
-    expect(Object.keys(SUITES).sort()).toEqual([...TASK_KINDS].sort())
+    // Les tâches de rédaction ont un jeu de cas ; l'embedding (I7) a son jeu de paires (EMBED_SUITE).
+    expect(Object.keys(SUITES).sort()).toEqual([...COMPLETION_KINDS].sort())
+    expect(EMBED_SUITE.kind).toBe('embed-finding')
+    expect([...TASK_KINDS].sort()).toEqual([...COMPLETION_KINDS, ...EMBED_KINDS].sort())
     for (const s of Object.values(SUITES)) {
       expect(s.cases.length).toBeGreaterThanOrEqual(3)
       for (const c of s.cases) {

@@ -580,6 +580,10 @@
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]{0,40}$",
           "description": "Outil de l'appliance monté en lecture seule sur /scanoria : /usr/lib/scanoria/scan-tools/<tool> (convertisseur, orchestration). Livré et signé avec l'appliance, jamais avec le catalogue."
+        },
+        "companion": {
+          "enum": ["quality", "sast", "secrets", "sca", "iac", "container", "sbom", "dast", "lint", "licenses", "vuln-management", "ci"],
+          "description": "Module d'appoint (0.5) : planifié seulement quand un autre module du plan couvre cette catégorie (reach-index avec sca, pour I11) ; jamais compté dans la couverture (G15), et son échec ne rend pas le verdict non concluant (G13). Il ne produit aucun résultat d'analyse."
         }
       }
     },

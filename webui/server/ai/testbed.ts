@@ -16,6 +16,10 @@ import summaryCases from '../../ai/testbed/summarize-scan.json'
 import secretCases from '../../ai/testbed/classify-secret.json'
 import diagnoseCases from '../../ai/testbed/diagnose-scan.json'
 import translateCases from '../../ai/testbed/translate-rule.json'
+import reachCases from '../../ai/testbed/assess-reachability.json'
+import licenseCases from '../../ai/testbed/explain-license.json'
+import embedPairs from '../../ai/testbed/embed-finding.json'
+import { EmbedSuite } from './tasks/similar'
 
 export const TestbedCase = z.strictObject({
   id: z.string().regex(/^[a-z0-9-]{1,60}$/),
@@ -34,16 +38,19 @@ export type TestbedSuite = z.infer<typeof TestbedSuite>
 export type TestbedCase = z.infer<typeof TestbedCase>
 
 export const SUITES: Record<string, TestbedSuite> = Object.fromEntries(
-  [findingCases, verdictCases, triageCases, summaryCases, secretCases, diagnoseCases, translateCases].map((s) => {
+  [findingCases, verdictCases, triageCases, summaryCases, secretCases, diagnoseCases, translateCases, reachCases, licenseCases].map((s) => {
     const suite = TestbedSuite.parse(s)
     return [suite.kind, suite]
   }),
 )
 
+/** I7 : paires de résultats semblables ou non ; le seuil de similarité est fixé par ce banc d'essai. */
+export const EMBED_SUITE: EmbedSuite = EmbedSuite.parse(embedPairs)
+
 export interface CaseResult {
   id: string
   ok: boolean
-  reason: 'ok' | 'invalid-output' | 'missing-mention' | 'injection-followed' | 'call-failed'
+  reason: 'ok' | 'invalid-output' | 'missing-mention' | 'injection-followed' | 'call-failed' | 'misclassified'
 }
 
 export interface TestbedResult {

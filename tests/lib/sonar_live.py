@@ -60,7 +60,7 @@ def main(argv):
         # Branche analysée (plugin de branches) : transmise comme par le runner.
         if len(argv) > 7:
             svc["branch"] = argv[7]
-        args = modcheck.podman_args(sc, src, out, "/nonexistent")
+        args = modcheck.podman_args(sc, src, out, "/nonexistent", tool=False)
         args[args.index("--network=slirp4netns")] = "--network=none"
         args.insert(1, "--name=" + name)
         mounts = svcnet.tool_mount(sc)

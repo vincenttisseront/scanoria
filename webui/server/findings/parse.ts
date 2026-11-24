@@ -139,6 +139,14 @@ function finish(ctx: ParseContext, d: Draft): ParsedFinding {
   }
 }
 
+/**
+ * Valeurs de result.kind qui ne décrivent pas un problème (SARIF 2.1.0 § 3.27.9),
+ * écartées seulement pour les modules dont toute la sortie est un index (reach-index,
+ * I11) : pour les autres scanners, rien n'est écarté sans trace.
+ */
+const NOT_A_PROBLEM = new Set(['pass', 'notApplicable', 'informational'])
+const INDEX_MODULES = new Set(['reach-index'])
+
 /** SARIF 2.1.0 → résultats. */
 export function parseSarif(doc: unknown, ctx: ParseContext): ParseOutput {
   const issues: ParseIssue[] = []
@@ -166,6 +174,8 @@ export function parseSarif(doc: unknown, ctx: ParseContext): ParseOutput {
     for (const r of rules) if (typeof r.id === 'string') byId.set(r.id, r)
     const bases = isObj(run.originalUriBaseIds) ? run.originalUriBaseIds : {}
     for (const res of arr(run.results)) {
+      // Index reach-index (I11) : ses entrées « informational » ne sont pas des résultats.
+      if (INDEX_MODULES.has(ctx.moduleId) && isObj(res) && typeof res.kind === 'string' && NOT_A_PROBLEM.has(res.kind)) continue
       total++
       if (drafts.length >= MAX_RESULTS) continue
       if (!isObj(res)) {
