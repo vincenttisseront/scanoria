@@ -1,6 +1,6 @@
 {
   "name": "scanoria-console",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "description": "Scanoria appliance web console",
   "license": "AGPL-3.0-or-later",

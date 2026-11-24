@@ -41,6 +41,7 @@ TIMEOUTS = {
     "refresh-catalog": 300, "install-modules": 3300, "uninstall-module": 900,
     "set-module-state": 1200, "update-module": 3300,
     "set-ai-endpoint": 120, "refresh-feeds": 3300,
+    "backup-module": 3300, "restore-module": 3300,
     "reset-service-admin": 360,
 }
 # Marge laissée entre l'échéance passée à scanoria-selfupdate et l'arrêt forcé
@@ -488,6 +489,8 @@ ACTIONS = {
     "update-module": modules.act_update_module,
     "set-ai-endpoint": aiendpoint.act_set_ai_endpoint,
     "refresh-feeds": modules.act_refresh_feeds,
+    "backup-module": modules.act_backup_module,
+    "restore-module": modules.act_restore_module,
     "reset-service-admin": provision.act_reset_service_admin,
 }
 

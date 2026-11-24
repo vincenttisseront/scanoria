@@ -65,6 +65,7 @@ REQUEST_TYPES = (
     "check-dns",
     "refresh-catalog", "install-modules", "uninstall-module", "set-module-state", "update-module",
     "set-ai-endpoint", "refresh-feeds",
+    "backup-module", "restore-module",
     "reset-service-admin",
 )
 REJECT_CODES = frozenset((
@@ -79,6 +80,7 @@ ERROR_CODES = frozenset((
     "E_RESOURCES", "E_DEPENDENCY", "E_CONFLICT", "E_LICENSE", "E_TESTBED",
     "E_AI_URL", "E_AI_UNRESOLVED", "E_AI_FORBIDDEN_ADDRESS", "E_AI_CA",
     "E_FEED_UNAVAILABLE",
+    "E_SERVICE_RESOURCES", "E_BACKUP_FAILED", "E_BACKUP_NOT_FOUND", "E_BACKUP_INVALID",
     "E_SONAR_UNAVAILABLE", "E_SONAR_ADMIN", "E_SONAR_API",
 ))
 ALL_CODES = frozenset(("OK",)) | REJECT_CODES | ERROR_CODES

@@ -59,6 +59,8 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/catalog/modules/{id}/state': { post: { summary: 'Request set-module-state (enable or disable)', role: 'admin', body: 'ModuleState', status: 202 } },
   '/api/catalog/modules/{id}/update': { post: { summary: 'Request update-module (latest version by default)', role: 'admin', body: 'ModuleUpdate', status: 202 } },
   '/api/catalog/modules/{id}/uninstall': { post: { summary: 'Request uninstall-module (409 E_DEPENDENTS when another module needs it)', role: 'admin', body: 'ModuleUninstall', status: 202 } },
+  '/api/catalog/modules/{id}/backup': { post: { summary: 'Request backup-module: database and volumes of a service or runner module (409 E_NOT_PERMANENT otherwise)', role: 'admin', body: 'ModuleBackup', status: 202 } },
+  '/api/catalog/modules/{id}/restore': { post: { summary: 'Request restore-module from a listed backup of the installed version (404 E_BACKUP_NOT_FOUND, 409 E_BACKUP_INVALID)', role: 'admin', body: 'ModuleRestore', status: 202 } },
   '/api/catalog/modules/{id}/admin-password': { post: { summary: 'Request reset-service-admin: new random admin password of a service set up by the appliance (SonarQube)', role: 'admin', status: 202 } },
   '/api/catalog/modules/{id}/admin-password/reveal': { post: { summary: 'Admin password of a finished reset-service-admin, returned once to its requester (410 E_GONE afterwards)', role: 'admin', body: 'AdminPasswordReveal' } },
   '/api/ai/status': { get: { summary: 'AI connector (external Ollama): pinned address, models chosen per task and why, testbed, circuit breaker, latency', role: 'operator' } },
@@ -292,6 +294,8 @@ export default defineEventHandler(async () => {
         ModuleState: { type: 'object', additionalProperties: false, required: ['enabled'], properties: { enabled: { type: 'boolean' } } },
         ModuleUpdate: { type: 'object', additionalProperties: false, properties: { version: { type: 'string' } } },
         ModuleUninstall: { type: 'object', additionalProperties: false, required: ['keep_data'], properties: { keep_data: { type: 'boolean' } } },
+        ModuleBackup: { type: 'object', additionalProperties: false, properties: {} },
+        ModuleRestore: { type: 'object', additionalProperties: false, required: ['backup'], properties: { backup: { type: 'string', pattern: '^[0-9]{8}T[0-9]{6}Z(-[0-9])?$' } } },
         AdminPasswordReveal: { type: 'object', additionalProperties: false, required: ['request_id'], properties: { request_id: { type: 'string', format: 'uuid' } } },
         GateCreate: {
           type: 'object', additionalProperties: false, required: ['slug'],

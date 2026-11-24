@@ -57,6 +57,8 @@
             "update-module",
             "set-ai-endpoint",
             "refresh-feeds",
+            "backup-module",
+            "restore-module",
             "reset-service-admin"
           ]
         }
@@ -119,6 +121,10 @@
         "E_AI_FORBIDDEN_ADDRESS",
         "E_AI_CA",
         "E_FEED_UNAVAILABLE",
+        "E_SERVICE_RESOURCES",
+        "E_BACKUP_FAILED",
+        "E_BACKUP_NOT_FOUND",
+        "E_BACKUP_INVALID",
         "E_SONAR_UNAVAILABLE",
         "E_SONAR_ADMIN",
         "E_SONAR_API"

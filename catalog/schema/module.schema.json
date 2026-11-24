@@ -702,6 +702,83 @@
           "items": {
             "type": "object"
           }
+        },
+        "volumes": {
+          "description": "Volumes Podman nommés du service (0.4, contrat 10).",
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "path"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,30}$"
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^/[A-Za-z0-9._/-]{1,200}$"
+              }
+            }
+          }
+        },
+        "env": {
+          "description": "Variables d'environnement NON secrètes. Gabarits : {db_host} {db_port} {db_name} {db_user} {db_url_jdbc} {hostname} {host_port} {opt.<nom>}. Un secret passe par service.secrets. Noms de variables : ^[A-Z][A-Z0-9_]{0,63}$, hors LD_*, PATH et HOME (contrôlé par le helper).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024,
+            "not": {
+              "pattern": "\\{db_password\\}"
+            }
+          }
+        },
+        "backup": {
+          "description": "Volumes (noms de service.volumes) inclus dans la sauvegarde du module ; la base est sauvegardée d'office si needs.postgres. Absent : tous les volumes.",
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,30}$"
+          }
+        },
+        "secrets": {
+          "description": "Secrets générés par le helper (jamais par la console), fichiers root 0600 transmis par secret Podman : monté en /run/secrets/<nom>, ou injecté dans la variable env. « db-password » est réservé aux modules needs.postgres et créé d'office.",
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,40}$"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,40}$"
+                  },
+                  "env": {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+                    "not": {
+                      "pattern": "^(LD_|PATH$|HOME$)"
+                    }
+                  }
+                }
+              }
+            ]
+          }
         }
       }
     },

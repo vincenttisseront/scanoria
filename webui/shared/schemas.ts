@@ -42,6 +42,8 @@ export const REQUEST_TYPES = [
   'update-module',
   'set-ai-endpoint',
   'refresh-feeds',
+  'backup-module',
+  'restore-module',
   'reset-service-admin',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
@@ -57,6 +59,7 @@ export const RESULT_CODES = [
   'E_RESOURCES', 'E_DEPENDENCY', 'E_CONFLICT', 'E_LICENSE', 'E_TESTBED',
   'E_AI_URL', 'E_AI_UNRESOLVED', 'E_AI_FORBIDDEN_ADDRESS', 'E_AI_CA',
   'E_FEED_UNAVAILABLE',
+  'E_SERVICE_RESOURCES', 'E_BACKUP_FAILED', 'E_BACKUP_NOT_FOUND', 'E_BACKUP_INVALID',
   'E_SONAR_UNAVAILABLE', 'E_SONAR_ADMIN', 'E_SONAR_API',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
@@ -70,6 +73,8 @@ export const WEEK_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as co
 /** Modules (chantier 0.2-moteur) : mêmes motifs que les schémas de demandes. */
 export const MODULE_ID_RE = /^[a-z0-9][a-z0-9-]{1,40}$/
 export const MODULE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/
+/** Identifiant d'une sauvegarde de module (0.4, chantier A) : horodatage UTC. */
+export const BACKUP_ID_RE = /^[0-9]{8}T[0-9]{6}Z(-[0-9])?$/
 
 const unique = (items: readonly unknown[]) => new Set(items).size === items.length
 
@@ -147,6 +152,8 @@ export const requestParamSchemas = {
     }),
     z.strictObject({ enabled: z.literal(false) }),
   ]),
+  'backup-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE) }),
+  'restore-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE), backup: z.string().regex(BACKUP_ID_RE) }),
   'reset-service-admin': z.strictObject({ id: z.string().regex(MODULE_ID_RE) }),
 } satisfies Record<RequestType, z.ZodType>
 
@@ -280,3 +287,6 @@ export const moduleUpdateBodySchema = z.strictObject({
   accept_licenses: z.array(moduleIdSchema).max(32).default([]),
 })
 export const moduleUninstallBodySchema = z.strictObject({ keep_data: z.boolean() })
+/** Sauvegarde et restauration d'un module permanent (0.4, chantier A). */
+export const moduleBackupBodySchema = z.strictObject({})
+export const moduleRestoreBodySchema = z.strictObject({ backup: z.string().regex(BACKUP_ID_RE) })

@@ -10,7 +10,44 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.3.3 — non publiée
+## 0.3.4 — non publiée
+
+Installation d'OSV-Scanner et de Trivy sur une appliance réelle.
+
+### Corrigé
+- **Bases de vulnérabilités jamais téléchargées** : les modules `osv-db` et
+  `trivy-db` ne créaient qu'un dossier vide. OSV-Scanner et Trivy échouaient
+  donc à leur banc d'essai (`E_TESTBED`, code 127), et l'installation de la
+  sélection conseillée revenait en arrière. Le service système télécharge
+  maintenant les bases avant le banc d'essai :
+  - l'export OSV, par écosystème ;
+  - `trivy-db`, par OCI, avec contrôle d'empreinte et extraction sûre.
+  Le téléchargement se fait en HTTPS seulement, avec des tailles et des délais
+  bornés, le proxy système pris en compte et une bascule atomique. Une base
+  injoignable donne `E_FEED_UNAVAILABLE`, avec un message clair.
+- **Diagnostic** : un banc d'essai en échec nomme désormais le module et
+  donne la fin de l'erreur de l'outil.
+- La CI installe maintenant OSV-Scanner et Trivy par le service système, à
+  partir de bases vides et avec les vraies sources (`b18-live`). Elle ne
+  pré-remplit plus aucune base, ce qui avait masqué le défaut.
+
+### Ajouté
+- Mise à jour quotidienne des bases (`scanoria-feeds-refresh.timer`).
+  Âge de chaque base dans le Catalogue, avec un bouton « Mettre à jour
+  maintenant ».
+- Catalogue n° 3 : OSV-Scanner demande 1,5 Go de mémoire (pic mesuré
+  d'environ 600 Mo sur npm), et `trivy-db` 4 Go de disque.
+- Migration `008`.
+
+### Limites connues
+- Sans accès à Internet, l'installation de ces scanners échoue. Les lots
+  hors ligne signés arrivent en 0.6.
+- Un écosystème absent de la base OSV est seulement signalé par
+  l'outil. Le rapport de couverture (G15) le reprendra.
+- Les bases ne portent pas de signature de leur éditeur. Seules la version
+  active et la précédente sont gardées.
+
+## 0.3.3 — 2026-11-24
 
 Correctif de l'installation des scanners, et premières fonctions de la 0.4
 déjà terminées.

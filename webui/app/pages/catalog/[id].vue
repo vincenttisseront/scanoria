@@ -467,6 +467,15 @@ const testbedDetails = computed(() => {
           >{{ testbedDetails }}</pre>
         </div>
 
+        <ModuleBackups
+          v-if="inst.type === 'service' || inst.type === 'runner'"
+          :module="inst"
+          :name="title"
+          :admin="isAdmin"
+          :busy="anyRunning"
+          @done="reload"
+        />
+
         <div
           v-if="isAdmin"
           class="mt-4 flex flex-wrap items-center gap-3"
