@@ -134,7 +134,7 @@ export function evaluateSpdx(node: SpdxNode, decide: (id: string, orLater: boole
   switch (node.type) {
     case 'license': return decide(node.id, node.orLater)
     case 'with': return decide(node.license.id, node.license.orLater)
-    case 'or': return node.items.map(n => evaluateSpdx(n, decide)).reduce(best)
-    case 'and': return node.items.map(n => evaluateSpdx(n, decide)).reduce(worst)
+    case 'or': return node.items.reduce<LicenseDecision>((acc, n) => best(acc, evaluateSpdx(n, decide)), 'denied')
+    case 'and': return node.items.reduce<LicenseDecision>((acc, n) => worst(acc, evaluateSpdx(n, decide)), 'allowed')
   }
 }

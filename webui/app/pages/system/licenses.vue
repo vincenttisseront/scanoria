@@ -230,6 +230,22 @@ async function evaluate() {
             v-else
             class="w-full text-sm"
           >
+            <thead class="sr-only">
+              <tr>
+                <th scope="col">
+                  {{ t('licenses.license') }}
+                </th>
+                <th scope="col">
+                  {{ t('licenses.col.decision') }}
+                </th>
+                <th scope="col">
+                  {{ t('licenses.reason') }}
+                </th>
+                <th scope="col">
+                  {{ t('licenses.col.actions') }}
+                </th>
+              </tr>
+            </thead>
             <tbody>
               <tr
                 v-for="r in block.rows"

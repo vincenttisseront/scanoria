@@ -1772,6 +1772,7 @@ export default {
     evaluate: 'Évaluer',
     none: 'aucune licence',
     decision: { allowed: 'Autorisée', review: 'À revoir', denied: 'Interdite' },
+    col: { decision: 'Décision', actions: 'Actions' },
     source: { project: 'décision du projet', global: 'décision globale', default: 'défaut de l’appliance', unknown: 'licence absente ou illisible' },
   },
 }

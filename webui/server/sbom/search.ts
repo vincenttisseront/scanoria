@@ -110,7 +110,9 @@ async function candidates(db: Queryable, q: Omit<ComponentQuery, 'cursor' | 'lim
   if (q.project_id) where.push(`p.id = ${arg(q.project_id)}::uuid`)
   if (q.purl) {
     const base = q.purl.split('?')[0]!.split('#')[0]!
-    if (/@[^/]+$/.test(base)) where.push(`lower(split_part(split_part(c.purl, '?', 1), '#', 1)) = lower(${arg(base)})`)
+    const at = base.lastIndexOf('@')
+    const versioned = at > 0 && at < base.length - 1 && !base.includes('/', at)
+    if (versioned) where.push(`lower(split_part(split_part(c.purl, '?', 1), '#', 1)) = lower(${arg(base)})`)
     else where.push(`lower(c.purl) LIKE lower(${arg(`${base.replace(/[\\%_]/g, ch => `\\${ch}`)}@%`)})`)
   }
   if (q.name) where.push(`c.name ILIKE ${arg(like(q.name))}`)
