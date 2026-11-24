@@ -64,6 +64,11 @@ export const MODULE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/
 
 const unique = (items: readonly unknown[]) => new Set(items).size === items.length
 
+export const moduleIdSchema = z.string().regex(MODULE_ID_RE)
+export const moduleVersionSchema = z.string().regex(MODULE_VERSION_RE)
+/** Valeurs d'options d'un module (G3), validées par la console contre le schéma du manifeste. */
+export const moduleOptionsSchema = z.record(z.string(), z.unknown())
+
 export const fqdnSchema = z.string().min(4).max(253).regex(FQDN_RE)
 export const versionSchema = z.string().regex(VERSION_RE)
 export const uuidSchema = z.string().regex(UUID_V4_RE)
@@ -222,3 +227,32 @@ export const ROLE_RANK: Record<Role, number> = { viewer: 10, operator: 20, admin
 export function hasRole(actual: Role, required: Role): boolean {
   return ROLE_RANK[actual] >= ROLE_RANK[required]
 }
+
+// ---- Catalogue (0.2) ----
+
+const planModuleSchema = z.strictObject({
+  id: moduleIdSchema,
+  version: moduleVersionSchema.optional(),
+  options: moduleOptionsSchema.optional(),
+})
+
+const planShape = {
+  modules: z.array(planModuleSchema).min(1).max(32).optional(),
+  pack: moduleIdSchema.optional(),
+}
+const onePlanSource = (b: { modules?: unknown, pack?: unknown }) => (b.modules === undefined) !== (b.pack === undefined)
+
+/** Plan d'installation : une liste de modules, ou un pack (F11). */
+export const planBodySchema = z.strictObject(planShape).refine(onePlanSource, { message: 'modules or pack' })
+
+/** Installation : plan + licences acceptées explicitement (§ 2.1). */
+export const installBodySchema = z
+  .strictObject({ ...planShape, accept_licenses: z.array(moduleIdSchema).max(32).default([]) })
+  .refine(onePlanSource, { message: 'modules or pack' })
+
+export const moduleStateBodySchema = z.strictObject({ enabled: z.boolean() })
+export const moduleUpdateBodySchema = z.strictObject({
+  version: moduleVersionSchema.optional(),
+  accept_licenses: z.array(moduleIdSchema).max(32).default([]),
+})
+export const moduleUninstallBodySchema = z.strictObject({ keep_data: z.boolean() })

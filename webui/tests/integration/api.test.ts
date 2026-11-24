@@ -7,7 +7,7 @@
 // point d'accès de server/api sont servis par h3 sur 127.0.0.1, comme Nitro.
 
 import { readdirSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
@@ -21,6 +21,7 @@ import { closePool } from '../../server/utils/db'
 import { waitReady, ingestNow } from '../../server/utils/runtime'
 import { SESSION_COOKIE } from '../../server/utils/sessions'
 import { createUser } from '../../server/utils/users'
+import { setBuildInfo } from '../../server/utils/appliance'
 
 const API_DIR = fileURLToPath(new URL('../../server/api', import.meta.url))
 // Chemins calculés : le greffon de démarrage utilise les globales de Nitro,
@@ -125,6 +126,9 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
       NUXT_STATE_FILE: join(root, 'state.json'),
       NUXT_UPDATE_SOURCE_FILE: join(root, 'update-source.json'),
       NUXT_VERSION_FILE: join(root, 'VERSION'),
+      NUXT_CATALOG_INDEX_FILE: join(root, 'catalog-index.json'),
+      NUXT_MODULES_STATE_FILE: join(root, 'modules-state.json'),
+      NUXT_DNS_STATUS_FILE: join(root, 'dns-status.json'),
       NUXT_INGEST_INTERVAL_MS: '60000',
     }))
 
@@ -440,6 +444,150 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
       expect((await put('scanoria-0.2.0.tar.zst', new Blob([new Uint8Array([1, 2, 3])]))).status).toBe(201)
       const apply = await call('/api/system/updates/apply', { method: 'POST', client: admin, json: { source: 'upload', upload_id: id } })
       expect(apply.status).toBe(202)
+    })
+  })
+  describe('catalogue des modules', () => {
+    const FIXTURES = fileURLToPath(new URL('../fixtures/', import.meta.url))
+    let viewer: Client
+    // Fichier de la demande renvoyée par l'API (plusieurs demandes peuvent partager la même seconde).
+    const incomingFor = async (res: { data: Record<string, unknown> }, type: string) => {
+      const dir = join(root, 'requests', 'incoming')
+      const docs = await Promise.all((await readdir(dir)).map(async n => JSON.parse(await readFile(join(dir, n), 'utf8')) as { id: string, type: string, params: Record<string, unknown> }))
+      return docs.find(d => d.id === res.data.request_id && d.type === type)
+    }
+
+    beforeAll(async () => {
+      // Les modules du catalogue exigent une appliance >= 0.2.0.
+      setBuildInfo({ version: '0.2.0', sourceRepo: 'exemple/scanoria' })
+      await writeFile(join(root, 'state.json'), JSON.stringify({
+        version: 1, generated_at: new Date().toISOString(),
+        appliance: { fqdn: 'analyse.exemple.test', version: '0.2.0', cpu_count: 4, memory_mb: 8192 },
+        helper: { busy: false, current: null, queue_length: 0 },
+        disks: [{ mount: '/', size_mb: 40960, avail_mb: 20000 }],
+      }))
+      viewer = await newUser('catalogue-lecteur', 'viewer')
+    })
+    afterAll(() => setBuildInfo({ version: '0.1.0', sourceRepo: 'exemple/scanoria' }))
+
+    it('sans index : vue vide, plan et installation refusés (503)', async () => {
+      const res = await call('/api/catalog', { client: viewer })
+      expect(res.status).toBe(200)
+      expect(res.data.index).toMatchObject({ available: false })
+      expect(res.data.recommended).toMatchObject({ ids: [], first_access: true })
+      expect(code(await call('/api/catalog/plan', { method: 'POST', client: viewer, json: { pack: 'base' } }))).toBe('E_CATALOG_UNAVAILABLE')
+      expect(code(await call('/api/catalog/install', { method: 'POST', client: admin, json: { pack: 'base' } }))).toBe('E_CATALOG_UNAVAILABLE')
+      expect((await call('/api/catalog/modules/gitleaks', { client: viewer })).status).toBe(404)
+      const dns = await call('/api/dns', { client: viewer })
+      expect(dns.data).toEqual({ fqdn: 'analyse.exemple.test', status: null, required: [] })
+      for (const f of ['catalog-index.json', 'modules-state.json', 'dns-status.json']) await copyFile(join(FIXTURES, f), join(root, f))
+    })
+
+    it('vue complète pour un lecteur', async () => {
+      const res = await call('/api/catalog', { client: viewer })
+      const modules = res.data.modules as { id: string, update_available: string | null, installed: unknown }[]
+      expect(modules.find(m => m.id === 'gitleaks')).toMatchObject({ update_available: '8.28.0' })
+      expect(res.data.machine).toMatchObject({ cpu_count: 4, memory_mb: 8192 })
+      expect((res.data.operations as unknown[]).length).toBe(2)
+      expect(JSON.stringify(res.data)).not.toContain('sha256')
+      const detail = await call('/api/catalog/modules/trivy', { client: viewer })
+      expect(detail.data).toMatchObject({ versions: ['0.67.2', '0.66.0'], update_available: '0.67.2', dependents: [] })
+      expect((await call('/api/catalog/modules/ancien', { client: viewer })).data).toMatchObject({ module: null, plan: null })
+      expect((await call('/api/catalog/modules/BAD', { client: viewer })).status).toBe(404)
+      expect((await call('/api/catalog/modules/inconnu', { client: viewer })).status).toBe(404)
+    })
+
+    it('plan : dépendances, licences ; validation des corps', async () => {
+      const plan = await call('/api/catalog/plan', { method: 'POST', client: viewer, json: { modules: [{ id: 'osv-scanner' }, { id: 'codeql' }] } })
+      expect(plan.status).toBe(200)
+      expect((plan.data.items as { id: string }[]).map(i => i.id)).toEqual(['osv-scanner', 'codeql', 'osv-db'])
+      expect(plan.data.licenses_to_accept).toEqual(['codeql'])
+      for (const json of [{}, { pack: 'base', modules: [{ id: 'gitleaks' }] }, { modules: [] }, { pack: '../x' }]) {
+        expect(code(await call('/api/catalog/plan', { method: 'POST', client: viewer, json })), JSON.stringify(json)).toBe('E_VALIDATION')
+      }
+      expect(code(await call('/api/catalog/plan', { method: 'POST', client: viewer, json: { pack: 'inconnu' } }))).toBe('E_NOT_FOUND')
+      expect(code(await call('/api/catalog/plan', { method: 'POST', client: viewer, json: { pack: 'base' } }))).toBe('E_PLAN')
+    })
+
+    it('installation : admin seulement, plan bloqué refusé, demande avec défauts et licences', async () => {
+      const json = { modules: [{ id: 'osv-scanner' }, { id: 'codeql' }] }
+      expect(code(await call('/api/catalog/install', { method: 'POST', client: viewer, json }))).toBe('E_FORBIDDEN')
+      const blocked = await call('/api/catalog/install', { method: 'POST', client: admin, json })
+      expect(blocked.status).toBe(409)
+      expect(blocked.data.data).toMatchObject({ code: 'E_PLAN', blockers: [{ code: 'E_LICENSE_REQUIRED', other: 'codeql' }] })
+      const ok = await call('/api/catalog/install', { method: 'POST', client: admin, json: { ...json, accept_licenses: ['codeql'] } })
+      expect(ok.status, JSON.stringify(ok.data)).toBe(202)
+      expect((await incomingFor(ok, 'install-modules'))!.params).toEqual({
+        modules: [
+          { id: 'osv-scanner', version: '2.2.0', options: {} },
+          { id: 'codeql', version: '2.23.0', options: {} },
+          { id: 'osv-db', version: '1', options: {} },
+        ],
+        accept_licenses: ['codeql'],
+      })
+      const audit = await call('/api/audit?action=system.install-modules.request', { client: admin })
+      expect(JSON.stringify(audit.data)).toContain('osv-db')
+      const pack = await call('/api/catalog/install', { method: 'POST', client: admin, json: { pack: 'secrets' } })
+      expect(pack.data.data).toMatchObject({ code: 'E_PLAN', blockers: [{ code: 'W_PACK_INSTALLED', other: 'secrets' }] })
+      const iac = await call('/api/catalog/install', { method: 'POST', client: admin, json: { pack: 'iac' } })
+      expect(iac.data.data).toMatchObject({ code: 'E_PLAN', blockers: [{ code: 'E_NOT_FOUND', module: 'checkov' }] })
+    })
+
+    it('activation, mise à jour, désinstallation', async () => {
+      expect(code(await call('/api/catalog/modules/osv-scanner/state', { method: 'POST', client: admin, json: { enabled: true } }))).toBe('E_NOT_INSTALLED')
+      expect(code(await call('/api/catalog/modules/trivy/state', { method: 'POST', client: viewer, json: { enabled: true } }))).toBe('E_FORBIDDEN')
+      const enable = await call('/api/catalog/modules/trivy/state', { method: 'POST', client: admin, json: { enabled: true } })
+      expect(enable.status).toBe(202)
+      expect((await incomingFor(enable, 'set-module-state'))!.params).toEqual({ id: 'trivy', enabled: true })
+
+      const updGitleaks = await call('/api/catalog/modules/gitleaks/update', { method: 'POST', client: admin, json: {} })
+      expect(updGitleaks.status).toBe(202)
+      expect((await incomingFor(updGitleaks, 'update-module'))!.params).toEqual({ id: 'gitleaks', version: '8.28.0' })
+      expect(code(await call('/api/catalog/modules/trivy/update', { method: 'POST', client: admin, json: { version: '0.66.0' } }))).toBe('E_NO_UPDATE')
+      expect(code(await call('/api/catalog/modules/trivy/update', { method: 'POST', client: admin, json: { version: '9.9.9' } }))).toBe('E_NOT_FOUND')
+      const updTrivy = await call('/api/catalog/modules/trivy/update', { method: 'POST', client: admin, json: {} })
+      expect(updTrivy.status).toBe(202)
+      expect((await incomingFor(updTrivy, 'update-module'))!.params).toEqual({ id: 'trivy', version: '0.67.2' })
+      // Version cible soumise aux mêmes contrôles qu'une installation : licence, dépendances.
+      const idx = JSON.parse(await readFile(join(root, 'catalog-index.json'), 'utf8')) as { modules: Record<string, unknown>[] }
+      const next = { ...idx.modules.find(m => m.id === 'gitleaks')!, version: '9.0.0', license: { spdx: 'X', restrictions: 'other' }, requires: { modules: [], feeds: ['osv-db'] } }
+      await writeFile(join(root, 'catalog-index.json'), JSON.stringify({ ...idx, modules: [...idx.modules, next] }))
+      const blocked9 = await call('/api/catalog/modules/gitleaks/update', { method: 'POST', client: admin, json: { version: '9.0.0' } })
+      expect(blocked9.data.data).toMatchObject({ code: 'E_PLAN', blockers: [{ code: 'E_LICENSE_REQUIRED' }, { code: 'E_DEPENDENCY', other: 'osv-db' }] })
+      await writeFile(join(root, 'catalog-index.json'), JSON.stringify(idx))
+
+      const blocked = await call('/api/catalog/modules/trivy-db/uninstall', { method: 'POST', client: admin, json: { keep_data: true } })
+      expect(blocked.data.data).toMatchObject({ code: 'E_DEPENDENTS', dependents: ['trivy'] })
+      expect(code(await call('/api/catalog/modules/gitleaks/uninstall', { method: 'POST', client: admin, json: {} }))).toBe('E_VALIDATION')
+      const uninstall = await call('/api/catalog/modules/gitleaks/uninstall', { method: 'POST', client: admin, json: { keep_data: false } })
+      expect(uninstall.status).toBe(202)
+      expect((await incomingFor(uninstall, 'uninstall-module'))!.params).toEqual({ id: 'gitleaks', keep_data: false })
+      expect((await call('/api/catalog/modules/BAD/uninstall', { method: 'POST', client: admin, json: { keep_data: false } })).status).toBe(404)
+    })
+
+    it('actualisation du catalogue et DNS', async () => {
+      expect((await call('/api/catalog/refresh', { method: 'POST', client: admin, json: {} })).status).toBe(202)
+      expect(code(await call('/api/catalog/refresh', { method: 'POST', client: admin, json: { force: true } }))).toBe('E_VALIDATION')
+      expect(code(await call('/api/dns/check', { method: 'POST', client: viewer, json: {} }))).toBe('E_FORBIDDEN')
+      expect(code(await call('/api/dns/check', { method: 'POST', client: viewer, json: { x: 1 } }))).toBe('E_FORBIDDEN')
+      expect((await call('/api/dns/check', { method: 'POST', client: admin, json: {} })).status).toBe(202)
+      const dns = await call('/api/dns', { client: viewer })
+      expect(dns.data.required).toEqual([
+        { name: 'analyse.exemple.test', type: 'A', value: '192.0.2.10' },
+        { name: '*.analyse.exemple.test', type: 'A', value: '192.0.2.10' },
+        { name: 'analyse.exemple.test', type: 'AAAA', value: '2001:db8::10' },
+        { name: '*.analyse.exemple.test', type: 'AAAA', value: '2001:db8::10' },
+      ])
+    })
+
+    it('suivi : étape et avancement d’une opération de module', async () => {
+      const res = await call('/api/catalog/refresh', { method: 'POST', client: admin, json: {} })
+      const id = String(res.data.request_id)
+      const state = JSON.parse(await readFile(join(root, 'modules-state.json'), 'utf8')) as { operations: Record<string, unknown>[] }
+      state.operations[0]!.request_id = id
+      await writeFile(join(root, 'modules-state.json'), JSON.stringify(state))
+      expect((await call(`/api/requests/${id}`, { client: admin })).data).toMatchObject({ step: 'pull', progress: 40 })
+      await unlink(join(root, 'modules-state.json'))
+      expect((await call(`/api/requests/${id}`, { client: admin })).data).toMatchObject({ progress: null })
     })
   })
 })

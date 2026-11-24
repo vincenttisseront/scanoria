@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "updated_at": "2026-11-23T08:00:30Z",
+  "modules": [
+    {
+      "id": "gitleaks",
+      "version": "8.27.0",
+      "type": "scanner",
+      "status": "healthy",
+      "enabled": true,
+      "installed_at": "2026-11-20T10:00:00Z",
+      "options": {
+        "scan_history": true,
+        "max_target_megabytes": 100,
+        "redact": "full"
+      },
+      "testbed": {
+        "passed": true,
+        "at": "2026-11-20T10:05:00Z",
+        "details": [
+          {
+            "rule": "generic-api-key",
+            "category": "secrets",
+            "min": 1,
+            "found": 3,
+            "ok": true
+          },
+          {
+            "rule": null,
+            "category": "secrets",
+            "min": 2,
+            "found": 3,
+            "ok": true
+          }
+        ]
+      },
+      "route": null,
+      "last_error": null
+    },
+    {
+      "id": "trivy-db",
+      "version": "2",
+      "type": "feed",
+      "status": "healthy",
+      "enabled": true,
+      "installed_at": "2026-11-21T10:00:00Z",
+      "options": {},
+      "testbed": null,
+      "route": null,
+      "last_error": null
+    },
+    {
+      "id": "trivy",
+      "version": "0.66.0",
+      "type": "scanner",
+      "status": "disabled",
+      "enabled": false,
+      "installed_at": "2026-11-21T10:00:00Z",
+      "options": {
+        "severity": "HIGH"
+      },
+      "testbed": {
+        "passed": false,
+        "at": "2026-11-21T10:10:00Z",
+        "details": "0 résultat sur 2 attendus"
+      },
+      "route": null,
+      "last_error": "E_TESTBED : banc d’essai échoué"
+    },
+    {
+      "id": "ancien",
+      "version": "1.0.0",
+      "type": "scanner",
+      "status": "healthy",
+      "enabled": true,
+      "installed_at": "2026-11-01T10:00:00Z",
+      "options": {},
+      "testbed": null,
+      "route": null,
+      "last_error": null
+    },
+    {
+      "id": "Bad Id",
+      "version": "1",
+      "type": "scanner",
+      "status": "healthy",
+      "enabled": true
+    }
+  ],
+  "operations": [
+    {
+      "id": "0c1d2e3f-4a5b-4c6d-8e7f-001122334455",
+      "request_id": "6f1c2a9e-7b4d-4e2a-9c1f-0a1b2c3d4e50",
+      "kind": "install",
+      "module": "shellcheck",
+      "step": "pull",
+      "progress": 40,
+      "started_at": "2026-11-23T08:00:00Z",
+      "finished_at": null,
+      "result": null,
+      "message": null
+    },
+    {
+      "id": "0c1d2e3f-4a5b-4c6d-8e7f-001122334466",
+      "request_id": "0c1d2e3f-4a5b-4c6d-9e7f-001122334477",
+      "kind": "install",
+      "module": "trivy",
+      "step": "rollback",
+      "progress": 100,
+      "started_at": "2026-11-21T10:00:00Z",
+      "finished_at": "2026-11-21T10:12:00Z",
+      "result": "failed",
+      "message": "banc d’essai : 0 résultat sur 2 attendus"
+    }
+  ]
+}

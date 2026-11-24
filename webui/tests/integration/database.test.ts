@@ -35,15 +35,17 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
   })
 
   describe('migrations', () => {
-    it('crée toutes les tables et enregistre 001 avec son empreinte', async () => {
+    it('crée toutes les tables et enregistre chaque migration avec son empreinte', async () => {
       const { rows } = await db.pool.query<{ table_name: string }>(
         `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1`,
       )
       expect(rows.map(r => r.table_name)).toEqual([
         'appliance_settings', 'audit_log', 'helper_requests', 'roles', 'schema_migrations', 'sessions', 'update_history', 'users',
       ])
-      const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations')
-      expect(mig.rows).toEqual([{ version: 1, name: '001_initial.sql', checksum: loadMigrationsFromDir(MIGRATIONS_DIR)[0]!.checksum }])
+      const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
+      const files = loadMigrationsFromDir(MIGRATIONS_DIR)
+      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql'])
+      expect(mig.rows).toEqual(files.map((f, i) => ({ version: i + 1, name: f.name, checksum: f.checksum })))
     })
 
     it('est idempotente', async () => {
@@ -75,14 +77,15 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
           ...loadMigrationsFromDir(MIGRATIONS_DIR),
           ...prepareMigrations([
             { name: '001_x.sql', content: '' },
-            { name: '002_broken.sql', content: 'CREATE TABLE half_done (id int); SELECT * FROM no_such_table;' },
-          ]).slice(1),
+            { name: '002_x.sql', content: '' },
+            { name: '003_broken.sql', content: 'CREATE TABLE half_done (id int); SELECT * FROM no_such_table;' },
+          ]).slice(2),
         ]
-        await expect(applyMigrations(client, list)).rejects.toThrow(/002_broken.sql failed/)
+        await expect(applyMigrations(client, list)).rejects.toThrow(/003_broken.sql failed/)
         const t = await client.query(`SELECT to_regclass('public.half_done') AS t`)
         expect(t.rows[0].t).toBeNull()
         const v = await client.query('SELECT max(version) AS v FROM schema_migrations')
-        expect(v.rows[0].v).toBe(1)
+        expect(v.rows[0].v).toBe(2)
       }
       finally {
         client.release()
