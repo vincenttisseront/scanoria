@@ -1,0 +1,35 @@
+{
+  "total": 7,
+  "p": 1,
+  "ps": 100,
+  "rules": [
+    {
+      "key": "python:S1481",
+      "name": "Unused local variables should be removed"
+    },
+    {
+      "key": "python:S1192",
+      "name": "String literals should not be duplicated"
+    },
+    {
+      "key": "python:S2068",
+      "name": "Hard-coded passwords are security-sensitive"
+    },
+    {
+      "key": "python:S2077",
+      "name": "Formatting SQL queries is security-sensitive"
+    },
+    {
+      "key": "python:S4830",
+      "name": "Server certificates should be verified during SSL/TLS connections"
+    },
+    {
+      "key": "python:S1656",
+      "name": "Variables should not be self-assigned"
+    },
+    {
+      "key": "python:S1862",
+      "name": "Related \"if/else if\" statements should not have the same condition"
+    }
+  ]
+}

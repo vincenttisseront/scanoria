@@ -42,12 +42,16 @@ export const scanJobSchema = z.strictObject({
   schema: z.literal(1),
   id: uuid,
   scan_id: uuid,
+  // Facultatif (0.4, contrat 12) : clé de projet des scanners reliés à un service.
+  project_id: uuid.optional(),
   created_at: timestamp,
   source: z.union([
     z.strictObject({
       kind: z.literal('git'),
       url: z.string().max(2048).regex(GIT_URL_RE),
       ref: gitRef,
+      // Facultatif (0.4) : branche par défaut du projet, pour scan.refs « default-branch ».
+      default_branch: gitRef.optional(),
       commit: z.string().regex(COMMIT_RE).optional(),
       history: z.enum(['shallow', 'full']),
       credential: jobCredential.optional(),

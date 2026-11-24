@@ -32,7 +32,9 @@ import sys
 import threading
 import time
 
-from . import catalogverify, common, feeds, fetch, modules, schema, testbed
+import contextlib
+
+from . import catalogverify, common, feeds, fetch, modules, schema, svcnet, testbed
 from .common import Fail
 
 
@@ -339,6 +341,7 @@ def recover():
     for n in os.listdir(WORKSPACES) if os.path.isdir(WORKSPACES) else []:
         shutil.rmtree(os.path.join(WORKSPACES, n), ignore_errors=True)
     shutil.rmtree(fetch.CRED_DIR, ignore_errors=True)
+    svcnet.remove_orphan_secrets()
     fetch.reset_network()
 
 
@@ -391,9 +394,27 @@ def plan(reg, job):
                 "E_INPUT_UNSUPPORTED", "input", "module %s does not read a %s source" % (mid, want_input)), m),
                 None))
             continue
-        if scan.get("network", "none") != "none":
+        if scan.get("network", "none") == "target":
             out.append((_module_entry(mid, ver, "skipped", _err(
                 "E_NETWORK_UNSUPPORTED", "input", "networked scanners are not supported yet"), m), None))
+            continue
+        # Contrat 12 (0.4) : branche par défaut seulement, puis service joignable.
+        reason = svcnet.refs_skip(m, job["source"])
+        if reason:
+            out.append((_module_entry(mid, ver, "skipped", _err("E_REF_NOT_DEFAULT", "input", reason), m), None))
+            continue
+        try:
+            svc, mounts = None, svcnet.tool_mount(m)
+            if svcnet.service_of(m):
+                key = svcnet.project_key(job.get("project_id"))
+                if key is None:
+                    out.append((_module_entry(mid, ver, "skipped", _err(
+                        "E_PROJECT_UNKNOWN", "input", "the project of this scan is unknown to the runner"), m), None))
+                    continue
+                svc = dict(svcnet.resolve(reg, m), key=key)
+        except svcnet.Unavailable as u:
+            # Service absent, inactif ou sans jeton : module « missing », verdict non concluant (G13).
+            out.append((_module_entry(mid, ver, "missing", _err(u.code, "input", u.message), m), None))
             continue
         try:
             given = dict(e.get("options") or {})
@@ -408,7 +429,8 @@ def plan(reg, job):
         except Fail as f:
             out.append((_module_entry(mid, ver, "error", _err("E_OPTIONS_INVALID", "input", f.message), m), None))
             continue
-        spec = {"manifest": m, "options": options, "command": command, "history": history}
+        spec = {"manifest": m, "options": options, "command": command, "history": history,
+                "service": svc, "mounts": mounts}
         out.append((_module_entry(mid, ver, "ok", None, m), spec))
     return out
 
@@ -545,22 +567,38 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets):
     mounts = [(os.path.join(ws, "src"), "/src", "ro"), (out, "/out", "rw")]
     if spec["history"] and os.path.isdir(os.path.join(ws, "git")):
         mounts.append((os.path.join(ws, "git"), "/git", "ro"))
+    mounts += spec.get("mounts") or []
     name = "scanoria-scan-%s-%s" % (job["id"][:8], os.urandom(4).hex())
     try:
         args = [a for a in testbed.confined_args(m, mounts + testbed.feed_mounts(m), name=name) if a != "--rm"]
     except Fail as f:
         return finish("error", _err("E_MODULE_INVALID", "input", f.message))
-    args += ["--timeout", str(timeout)]
-    for k in sorted(scan.get("env") or {}):
-        args += ["--env", "%s=%s" % (k, scan["env"][k])]
-    cmd = spec["command"]
-    args += ["--entrypoint", json.dumps([cmd[0]]), m["image"]] + list(cmd[1:])
-    sampler = Sampler(name)
-    sampler.start()
+    svc = spec.get("service")
+    stack = contextlib.ExitStack()
+    if svc:
+        try:
+            att = stack.enter_context(svcnet.Attachment(svc, svc["key"], budget_s=max(60, timeout - 60)))
+            args = svcnet.network_args(args, att.args())
+        except (svcnet.Unavailable, Fail) as f:
+            stack.close()
+            return finish("error", _err(f.code, "infra", f.message))
+        secrets = list(secrets or []) + [svc["token"]]
+    try:
+        args += ["--timeout", str(timeout)]
+        for k in sorted(scan.get("env") or {}):
+            args += ["--env", "%s=%s" % (k, scan["env"][k])]
+        cmd = spec["command"]
+        args += ["--entrypoint", json.dumps([cmd[0]]), m["image"]] + list(cmd[1:])
+        sampler = Sampler(name)
+        sampler.start()
+    except BaseException:
+        stack.close()   # secret Podman du jeton jamais laissé derrière
+        raise
     try:
         rc, _, timed_out = fetch.run_logged(args, log_tmp, timeout + 30, None, secrets)
         sampler.sample()
     finally:
+        stack.close()
         sampler.stop_ev.set()
         sampler.join(5)
         r = common.run("podman", ["inspect", "--format", "{{.State.OOMKilled}}", name], timeout=60)

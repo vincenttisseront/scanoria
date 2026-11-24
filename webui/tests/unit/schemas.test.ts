@@ -180,6 +180,10 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
     valid: [{ id: 'sonarqube', backup: '20261123T020000Z' }, { id: 'sonarqube', backup: '20261123T020000Z-1' }],
     invalid: [{ id: 'sonarqube' }, { id: 'sonarqube', backup: '../20261123T020000Z' }, { id: 'sonarqube', backup: '20261123T020000Z-12' }, { id: 'sonarqube', backup: '20261123T020000Z', force: true }],
   },
+  'reset-service-admin': {
+    valid: [{ id: 'sonarqube' }],
+    invalid: [{}, { id: 'Sonar' }, { id: '../sonarqube' }, { id: 'sonarqube', password: 'x' }],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {

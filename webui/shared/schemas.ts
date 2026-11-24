@@ -44,6 +44,7 @@ export const REQUEST_TYPES = [
   'refresh-feeds',
   'backup-module',
   'restore-module',
+  'reset-service-admin',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -59,6 +60,7 @@ export const RESULT_CODES = [
   'E_AI_URL', 'E_AI_UNRESOLVED', 'E_AI_FORBIDDEN_ADDRESS', 'E_AI_CA',
   'E_FEED_UNAVAILABLE',
   'E_SERVICE_RESOURCES', 'E_BACKUP_FAILED', 'E_BACKUP_NOT_FOUND', 'E_BACKUP_INVALID',
+  'E_SONAR_UNAVAILABLE', 'E_SONAR_ADMIN', 'E_SONAR_API',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 
@@ -152,6 +154,7 @@ export const requestParamSchemas = {
   ]),
   'backup-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE) }),
   'restore-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE), backup: z.string().regex(BACKUP_ID_RE) }),
+  'reset-service-admin': z.strictObject({ id: z.string().regex(MODULE_ID_RE) }),
 } satisfies Record<RequestType, z.ZodType>
 
 export type RequestParams<T extends RequestType> = z.infer<(typeof requestParamSchemas)[T]>

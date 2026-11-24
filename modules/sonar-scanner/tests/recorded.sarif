@@ -1,0 +1,347 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "SonarQube",
+          "informationUri": "https://www.sonarsource.com/products/sonarqube/",
+          "rules": [
+            {
+              "id": "python:S1192",
+              "name": "String literals should not be duplicated",
+              "shortDescription": {
+                "text": "String literals should not be duplicated"
+              },
+              "properties": {
+                "tags": [
+                  "design"
+                ]
+              }
+            },
+            {
+              "id": "python:S1481",
+              "name": "Unused local variables should be removed",
+              "shortDescription": {
+                "text": "Unused local variables should be removed"
+              },
+              "properties": {
+                "tags": [
+                  "unused"
+                ]
+              }
+            },
+            {
+              "id": "python:S1656",
+              "name": "Variables should not be self-assigned",
+              "shortDescription": {
+                "text": "Variables should not be self-assigned"
+              }
+            },
+            {
+              "id": "python:S1862",
+              "name": "Related \"if/else if\" statements should not have the same condition",
+              "shortDescription": {
+                "text": "Related \"if/else if\" statements should not have the same condition"
+              },
+              "properties": {
+                "tags": [
+                  "unused",
+                  "pitfall"
+                ]
+              }
+            },
+            {
+              "id": "python:S2068",
+              "name": "Hard-coded passwords are security-sensitive",
+              "shortDescription": {
+                "text": "Hard-coded passwords are security-sensitive"
+              },
+              "properties": {
+                "tags": [
+                  "security-hotspot",
+                  "auth"
+                ]
+              }
+            },
+            {
+              "id": "python:S2077",
+              "name": "Formatting SQL queries is security-sensitive",
+              "shortDescription": {
+                "text": "Formatting SQL queries is security-sensitive"
+              },
+              "properties": {
+                "tags": [
+                  "security-hotspot",
+                  "sql-injection"
+                ]
+              }
+            },
+            {
+              "id": "python:S4830",
+              "name": "Server certificates should be verified during SSL/TLS connections",
+              "shortDescription": {
+                "text": "Server certificates should be verified during SSL/TLS connections"
+              },
+              "properties": {
+                "tags": [
+                  "cwe",
+                  "privacy",
+                  "ssl"
+                ]
+              }
+            }
+          ],
+          "version": "26.11.0.134175"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "python:S1481",
+          "level": "note",
+          "message": {
+            "text": "Remove the unused local variable \"unused\"."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/db.py"
+                },
+                "region": {
+                  "startLine": 10,
+                  "endLine": 10,
+                  "startColumn": 5,
+                  "endColumn": 11
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "low",
+            "tags": [
+              "unused",
+              "scanoria-category:quality"
+            ],
+            "sonarKind": "CODE_SMELL"
+          },
+          "partialFingerprints": {
+            "sonarqube/key/v1": "issue-0001"
+          }
+        },
+        {
+          "ruleId": "python:S1192",
+          "level": "error",
+          "message": {
+            "text": "Define a constant instead of duplicating this literal \"x\" 3 times."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/db.py"
+                },
+                "region": {
+                  "startLine": 17,
+                  "endLine": 17,
+                  "startColumn": 12,
+                  "endColumn": 41
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "high",
+            "tags": [
+              "design",
+              "scanoria-category:quality"
+            ],
+            "sonarKind": "CODE_SMELL"
+          },
+          "partialFingerprints": {
+            "sonarqube/key/v1": "issue-0002"
+          }
+        },
+        {
+          "ruleId": "python:S4830",
+          "level": "error",
+          "message": {
+            "text": "Enable server certificate validation on this SSL/TLS connection."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/db.py"
+                },
+                "region": {
+                  "startLine": 35,
+                  "endLine": 35,
+                  "startColumn": 5,
+                  "endColumn": 21
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "high",
+            "tags": [
+              "cwe",
+              "privacy",
+              "ssl",
+              "scanoria-category:sast"
+            ],
+            "sonarKind": "VULNERABILITY"
+          },
+          "partialFingerprints": {
+            "sonarqube/key/v1": "issue-0003"
+          }
+        },
+        {
+          "ruleId": "python:S1656",
+          "level": "warning",
+          "message": {
+            "text": "Remove or correct this useless self-assignment."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/db.py"
+                },
+                "region": {
+                  "startLine": 20,
+                  "endLine": 20,
+                  "startColumn": 5,
+                  "endColumn": 21
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "medium",
+            "tags": [
+              "scanoria-category:quality"
+            ],
+            "sonarKind": "BUG"
+          },
+          "partialFingerprints": {
+            "sonarqube/key/v1": "issue-0004"
+          }
+        },
+        {
+          "ruleId": "python:S1862",
+          "level": "warning",
+          "message": {
+            "text": "This branch duplicates the one on line 23."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/db.py"
+                },
+                "region": {
+                  "startLine": 25,
+                  "endLine": 25,
+                  "startColumn": 5,
+                  "endColumn": 21
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "medium",
+            "tags": [
+              "unused",
+              "pitfall",
+              "scanoria-category:quality"
+            ],
+            "sonarKind": "BUG"
+          },
+          "partialFingerprints": {
+            "sonarqube/key/v1": "issue-0005"
+          }
+        },
+        {
+          "ruleId": "python:S2068",
+          "level": "error",
+          "message": {
+            "text": "\"password\" detected here, review this potentially hard-coded password."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/db.py"
+                },
+                "region": {
+                  "startLine": 5,
+                  "endLine": 5,
+                  "startColumn": 1,
+                  "endColumn": 9
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "high",
+            "tags": [
+              "security-hotspot",
+              "auth",
+              "scanoria-category:sast"
+            ],
+            "sonarKind": "SECURITY_HOTSPOT"
+          },
+          "partialFingerprints": {
+            "sonarqube/key/v1": "hotspot-0001"
+          }
+        },
+        {
+          "ruleId": "python:S2077",
+          "level": "error",
+          "message": {
+            "text": "Make sure using a dynamically formatted SQL query is safe here."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/db.py"
+                },
+                "region": {
+                  "startLine": 12,
+                  "endLine": 12,
+                  "startColumn": 5,
+                  "endColumn": 26
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "high",
+            "tags": [
+              "security-hotspot",
+              "sql-injection",
+              "scanoria-category:sast"
+            ],
+            "sonarKind": "SECURITY_HOTSPOT"
+          },
+          "partialFingerprints": {
+            "sonarqube/key/v1": "hotspot-0002"
+          }
+        }
+      ],
+      "properties": {
+        "scanoria": {
+          "total": 7,
+          "kept": 7,
+          "truncated": false,
+          "skipped": 0,
+          "outside": 0
+        }
+      }
+    }
+  ]
+}

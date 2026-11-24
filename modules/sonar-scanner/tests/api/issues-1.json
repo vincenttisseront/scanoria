@@ -1,0 +1,218 @@
+{
+  "total": 5,
+  "p": 1,
+  "ps": 500,
+  "paging": {
+    "pageIndex": 1,
+    "pageSize": 500,
+    "total": 5
+  },
+  "effortTotal": 7,
+  "issues": [
+    {
+      "key": "issue-0001",
+      "rule": "python:S1481",
+      "severity": "MINOR",
+      "component": "scanoria-testbed:app/db.py",
+      "project": "scanoria-testbed",
+      "line": 10,
+      "hash": "3f1d0f1c0b8a3a7d2d0a6b4c6f6b1d2e",
+      "textRange": {
+        "startLine": 10,
+        "endLine": 10,
+        "startOffset": 4,
+        "endOffset": 10
+      },
+      "flows": [],
+      "status": "OPEN",
+      "message": "Remove the unused local variable \"unused\".",
+      "effort": "5min",
+      "debt": "5min",
+      "tags": [
+        "unused"
+      ],
+      "creationDate": "2026-11-24T14:00:00+0000",
+      "updateDate": "2026-11-24T14:00:00+0000",
+      "type": "CODE_SMELL",
+      "scope": "MAIN",
+      "quickFixAvailable": true,
+      "messageFormattings": [],
+      "codeVariants": [],
+      "cleanCodeAttribute": "CLEAR",
+      "cleanCodeAttributeCategory": "INTENTIONAL",
+      "impacts": [
+        {
+          "softwareQuality": "MAINTAINABILITY",
+          "severity": "LOW"
+        }
+      ],
+      "issueStatus": "OPEN",
+      "prioritizedRule": false
+    },
+    {
+      "key": "issue-0002",
+      "rule": "python:S1192",
+      "severity": "CRITICAL",
+      "component": "scanoria-testbed:app/db.py",
+      "project": "scanoria-testbed",
+      "line": 17,
+      "textRange": {
+        "startLine": 17,
+        "endLine": 17,
+        "startOffset": 11,
+        "endOffset": 40
+      },
+      "status": "OPEN",
+      "message": "Define a constant instead of duplicating this literal \"x\" 3 times.",
+      "tags": [
+        "design"
+      ],
+      "type": "CODE_SMELL",
+      "impacts": [
+        {
+          "softwareQuality": "MAINTAINABILITY",
+          "severity": "HIGH"
+        }
+      ]
+    },
+    {
+      "key": "issue-0003",
+      "rule": "python:S4830",
+      "severity": "CRITICAL",
+      "component": "scanoria-testbed:app/db.py",
+      "project": "scanoria-testbed",
+      "line": 35,
+      "hash": "3f1d0f1c0b8a3a7d2d0a6b4c6f6b0003",
+      "textRange": {
+        "startLine": 35,
+        "endLine": 35,
+        "startOffset": 4,
+        "endOffset": 20
+      },
+      "flows": [],
+      "status": "OPEN",
+      "message": "Enable server certificate validation on this SSL/TLS connection.",
+      "effort": "5min",
+      "debt": "5min",
+      "tags": [
+        "cwe",
+        "privacy",
+        "ssl"
+      ],
+      "creationDate": "2026-11-24T14:00:00+0000",
+      "updateDate": "2026-11-24T14:00:00+0000",
+      "type": "VULNERABILITY",
+      "scope": "MAIN",
+      "quickFixAvailable": false,
+      "messageFormattings": [],
+      "codeVariants": [],
+      "cleanCodeAttribute": "TRUSTWORTHY",
+      "cleanCodeAttributeCategory": "RESPONSIBLE",
+      "impacts": [
+        {
+          "softwareQuality": "SECURITY",
+          "severity": "HIGH"
+        }
+      ],
+      "issueStatus": "OPEN",
+      "prioritizedRule": false
+    },
+    {
+      "key": "issue-0004",
+      "rule": "python:S1656",
+      "severity": "MAJOR",
+      "component": "scanoria-testbed:app/db.py",
+      "project": "scanoria-testbed",
+      "line": 20,
+      "hash": "3f1d0f1c0b8a3a7d2d0a6b4c6f6b0004",
+      "textRange": {
+        "startLine": 20,
+        "endLine": 20,
+        "startOffset": 4,
+        "endOffset": 20
+      },
+      "flows": [],
+      "status": "OPEN",
+      "message": "Remove or correct this useless self-assignment.",
+      "effort": "5min",
+      "debt": "5min",
+      "tags": [],
+      "creationDate": "2026-11-24T14:00:00+0000",
+      "updateDate": "2026-11-24T14:00:00+0000",
+      "type": "BUG",
+      "scope": "MAIN",
+      "quickFixAvailable": false,
+      "messageFormattings": [],
+      "codeVariants": [],
+      "cleanCodeAttribute": "LOGICAL",
+      "cleanCodeAttributeCategory": "INTENTIONAL",
+      "impacts": [
+        {
+          "softwareQuality": "RELIABILITY",
+          "severity": "MEDIUM"
+        }
+      ],
+      "issueStatus": "OPEN",
+      "prioritizedRule": false
+    },
+    {
+      "key": "issue-0005",
+      "rule": "python:S1862",
+      "severity": "MAJOR",
+      "component": "scanoria-testbed:app/db.py",
+      "project": "scanoria-testbed",
+      "line": 25,
+      "hash": "3f1d0f1c0b8a3a7d2d0a6b4c6f6b0005",
+      "textRange": {
+        "startLine": 25,
+        "endLine": 25,
+        "startOffset": 4,
+        "endOffset": 20
+      },
+      "flows": [],
+      "status": "OPEN",
+      "message": "This branch duplicates the one on line 23.",
+      "effort": "5min",
+      "debt": "5min",
+      "tags": [
+        "unused",
+        "pitfall"
+      ],
+      "creationDate": "2026-11-24T14:00:00+0000",
+      "updateDate": "2026-11-24T14:00:00+0000",
+      "type": "BUG",
+      "scope": "MAIN",
+      "quickFixAvailable": false,
+      "messageFormattings": [],
+      "codeVariants": [],
+      "cleanCodeAttribute": "LOGICAL",
+      "cleanCodeAttributeCategory": "INTENTIONAL",
+      "impacts": [
+        {
+          "softwareQuality": "RELIABILITY",
+          "severity": "MEDIUM"
+        }
+      ],
+      "issueStatus": "OPEN",
+      "prioritizedRule": false
+    }
+  ],
+  "components": [
+    {
+      "key": "scanoria-testbed",
+      "qualifier": "TRK",
+      "name": "scanoria-testbed",
+      "longName": "scanoria-testbed",
+      "enabled": true
+    },
+    {
+      "key": "scanoria-testbed:app/db.py",
+      "qualifier": "FIL",
+      "name": "db.py",
+      "longName": "app/db.py",
+      "path": "app/db.py",
+      "enabled": true
+    }
+  ],
+  "facets": []
+}

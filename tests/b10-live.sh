@@ -44,7 +44,9 @@ echo "$SARIF_SHA256  $WORK/sarif-schema.json" | sha256sum --check --strict --qui
 ids=("$@")
 if [[ ${#ids[@]} -eq 0 ]]; then
 	for f in "$ROOT"/modules/*/module.yaml; do
-		[[ "$(yq "$f" | jq -r .type)" == scanner ]] && ids+=("$(basename "$(dirname "$f")")")
+		# Les scanners reliés à un service (sonar-scanner) ont leur propre batterie (b17-live).
+		[[ "$(yq "$f" | jq -r '.type == "scanner" and (.scan.network | startswith("service:") | not)')" == true ]] \
+			&& ids+=("$(basename "$(dirname "$f")")")
 	done
 fi
 

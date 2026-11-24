@@ -58,7 +58,8 @@
             "set-ai-endpoint",
             "refresh-feeds",
             "backup-module",
-            "restore-module"
+            "restore-module",
+            "reset-service-admin"
           ]
         }
       ]
@@ -123,7 +124,10 @@
         "E_SERVICE_RESOURCES",
         "E_BACKUP_FAILED",
         "E_BACKUP_NOT_FOUND",
-        "E_BACKUP_INVALID"
+        "E_BACKUP_INVALID",
+        "E_SONAR_UNAVAILABLE",
+        "E_SONAR_ADMIN",
+        "E_SONAR_API"
       ]
     },
     "message": {

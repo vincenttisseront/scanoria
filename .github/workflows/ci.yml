@@ -387,10 +387,34 @@ jobs:
       - name: tests/b16-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b16-live.sh
 
+  sonarqube-live:
+    # SonarQube Community Build réel et sonar-scanner sur son banc d'essai
+    # (chantier B de la 0.4) : réglages noyau, mise en service par le helper,
+    # jeton en secret Podman, réseau interne seul, SARIF validé. La RAM de la
+    # machine est mesurée et affichée dans le journal.
+    name: sonarqube-live (SonarQube réel, b17-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dépendances (podman, jq, python3-yaml, python3-jsonschema)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark aardvark-dns python3-yaml python3-jsonschema curl
+          sudo podman --version
+          free -m
+      # Machine jetable : sysctl, podman et secrets Podman en root (§ 3.2, § 6.4).
+      - name: tests/b17-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b17-live.sh
+
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

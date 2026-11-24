@@ -507,10 +507,19 @@
           "maximum": 86400
         },
         "network": {
-          "enum": [
-            "none",
-            "target"
-          ]
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "target"
+              ]
+            },
+            {
+              "type": "string",
+              "pattern": "^service:[a-z0-9][a-z0-9-]{1,40}$"
+            }
+          ],
+          "description": "Réseau du conteneur : « none » (défaut), « target » (DAST), ou « service:<id> » (contrat 12 de la 0.4) : rattaché au seul réseau interne scanoria-mod-<id>_scan du module service <id>, qui doit être installé et actif ; jeton d'analyse du service passé par un secret Podman."
         },
         "exit_codes_ok": {
           "type": "array",
@@ -553,6 +562,19 @@
             ]
           },
           "description": "Correspondance des gravités natives de l'outil vers la gravité normalisée (G5), lue par l'ingestion pour remplir severity_maps ; facultative."
+        },
+        "refs": {
+          "enum": [
+            "any",
+            "default-branch"
+          ],
+          "default": "any",
+          "description": "Références analysées : « default-branch » limite le module à la branche par défaut du projet (SonarQube Community Build) ; ailleurs, module « skipped » avec sa raison, sans effet sur le verdict (G13 ne s'applique pas)."
+        },
+        "tool": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,40}$",
+          "description": "Outil de l'appliance monté en lecture seule sur /scanoria : /usr/lib/scanoria/scan-tools/<tool> (convertisseur, orchestration). Livré et signé avec l'appliance, jamais avec le catalogue."
         }
       }
     },

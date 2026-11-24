@@ -117,6 +117,9 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
     }
     await writeFile(join(root, 'bootstrap', 'admin.json'), JSON.stringify({ username: 'admin', password_hash: await hashPassword(ADMIN_PASSWORD) }), { mode: 0o600 })
     await writeFile(join(root, 'update-source.json'), JSON.stringify({ repo: 'exemple/scanoria' }))
+    // Mot de passe admin d'un service rendu une seule fois (chantier B de la 0.4).
+    await mkdir(join(root, 'oneshot'), { recursive: true, mode: 0o700 })
+    process.env.NUXT_ONESHOT_DIR = join(root, 'oneshot')
     setConfig(loadConfig({
       NUXT_DATABASE_URL: db.url,
       NUXT_REQUESTS_DIR: join(root, 'requests'),
@@ -582,6 +585,37 @@ describe.skipIf(!DATABASE_URL)('API de la console (h3 dans le processus, Postgre
         { name: 'analyse.exemple.test', type: 'AAAA', value: '2001:db8::10' },
         { name: '*.analyse.exemple.test', type: 'AAAA', value: '2001:db8::10' },
       ])
+    })
+
+    it('SonarQube : mot de passe admin réinitialisé, rendu une seule fois au demandeur', async () => {
+      const state = JSON.parse(await readFile(join(root, 'modules-state.json'), 'utf8')) as { modules: Record<string, unknown>[] }
+      state.modules.push({ id: 'sonarqube', version: '26.11.0.134175', type: 'service', status: 'healthy', enabled: true, installed_at: '2026-11-24T10:00:00Z', options: {}, route: null, last_error: null })
+      await writeFile(join(root, 'modules-state.json'), JSON.stringify(state))
+      const otherAdmin = await newUser('sonar-admin-bis', 'admin')
+      expect(code(await call('/api/catalog/modules/sonarqube/admin-password', { method: 'POST', client: viewer, json: {} }))).toBe('E_FORBIDDEN')
+      expect(code(await call('/api/catalog/modules/trivy/admin-password', { method: 'POST', client: admin, json: {} }))).toBe('E_PRECONDITION')
+      expect(code(await call('/api/catalog/modules/osv-scanner/admin-password', { method: 'POST', client: admin, json: {} }))).toBe('E_NOT_INSTALLED')
+      const res = await call('/api/catalog/modules/sonarqube/admin-password', { method: 'POST', client: admin, json: {} })
+      expect(res.status).toBe(202)
+      expect((await incomingFor(res, 'reset-service-admin'))?.params).toEqual({ id: 'sonarqube' })
+      const rid = String(res.data.request_id)
+      const reveal = (client: Client, moduleId = 'sonarqube', json: unknown = { request_id: rid }) =>
+        call(`/api/catalog/modules/${moduleId}/admin-password/reveal`, { method: 'POST', client, json })
+      expect(code(await reveal(admin))).toBe('E_PRECONDITION')
+      // Fin de la demande côté helper : sortie sans mot de passe, fichier à usage unique.
+      const password = `Sq#${Date.now().toString(16)}${Math.random().toString(16).slice(2)}9a`
+      await db.pool.query(`UPDATE helper_requests SET status = 'ok', code = 'OK', output = $2 WHERE id = $1`, [rid, { id: 'sonarqube', login: 'admin', oneshot: true }])
+      await writeFile(join(root, 'oneshot', `${rid}.json`), JSON.stringify({ password }))
+      expect(code(await reveal(admin, 'sonarqube', { request_id: 'x' }))).toBe('E_VALIDATION')
+      expect(code(await reveal(admin, 'trivy'))).toBe('E_PRECONDITION')
+      expect(code(await reveal(otherAdmin))).toBe('E_FORBIDDEN')
+      const ok = await reveal(admin)
+      expect(ok.status).toBe(200)
+      expect(ok.data).toEqual({ login: 'admin', password })
+      expect(code(await reveal(admin))).toBe('E_GONE')
+      const audit = await db.pool.query(`SELECT outcome, details FROM audit_log WHERE action = 'modules.admin-password.reveal' ORDER BY id`)
+      expect(audit.rows.map(r => r.outcome)).toEqual(['failure', 'failure', 'success', 'failure'])
+      expect(JSON.stringify(audit.rows)).not.toContain(password)
     })
 
     it('suivi : étape et avancement d’une opération de module', async () => {

@@ -66,6 +66,7 @@ REQUEST_TYPES = (
     "refresh-catalog", "install-modules", "uninstall-module", "set-module-state", "update-module",
     "set-ai-endpoint", "refresh-feeds",
     "backup-module", "restore-module",
+    "reset-service-admin",
 )
 REJECT_CODES = frozenset((
     "E_INVALID_NAME", "E_NOT_REGULAR_FILE", "E_BAD_OWNER", "E_TOO_LARGE", "E_INVALID_JSON",
@@ -80,6 +81,7 @@ ERROR_CODES = frozenset((
     "E_AI_URL", "E_AI_UNRESOLVED", "E_AI_FORBIDDEN_ADDRESS", "E_AI_CA",
     "E_FEED_UNAVAILABLE",
     "E_SERVICE_RESOURCES", "E_BACKUP_FAILED", "E_BACKUP_NOT_FOUND", "E_BACKUP_INVALID",
+    "E_SONAR_UNAVAILABLE", "E_SONAR_ADMIN", "E_SONAR_API",
 ))
 ALL_CODES = frozenset(("OK",)) | REJECT_CODES | ERROR_CODES
 
@@ -329,6 +331,7 @@ SYSTEM_CMDS = {
     "hostnamectl": "/usr/bin/hostnamectl",
     "systemd-sysusers": "/usr/bin/systemd-sysusers",
     "systemd-tmpfiles": "/usr/bin/systemd-tmpfiles",
+    "systemd-run": "/usr/bin/systemd-run",
     "timedatectl": "/usr/bin/timedatectl",
     "getent": "/usr/bin/getent",
     "ip": "/usr/sbin/ip",
