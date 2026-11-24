@@ -2,14 +2,20 @@
 # Copyright (C) 2026 Vincent Tisseront
 #
 # gitleaks (ci.yml, travail « gitleaks », tout l'historique de toutes les
-# branches). Règles par défaut de gitleaks, SANS aucune exception pour un
-# fichier versionné : le dépôt ne contient ni secret ni clé privée, pas même
-# de test. Les clés de test (Ed25519, AC interne, certificats) sont générées
-# à l'exécution par les tests, dans des répertoires temporaires hors du dépôt,
-# et ne sont donc jamais vues par gitleaks. Un faux positif se corrige dans le
+# branches). Règles par défaut de gitleaks, avec UNE seule exception : les
+# bancs d'essai des modules (modules/<id>/testbed/, F12), dépôts piégés qui
+# contiennent volontairement de FAUX secrets, générés au hasard, pour vérifier
+# que les scanners les trouvent (docs/MODULES.md § Banc d'essai). Partout
+# ailleurs, le dépôt ne contient ni secret ni clé privée, pas même de test :
+# les clés de test (Ed25519, AC interne, certificats) sont générées à
+# l'exécution par les tests, hors du dépôt. Un faux positif se corrige dans le
 # fichier concerné (générer la valeur à l'exécution), pas ici ; toute
 # exception ajoutée ici doit être motivée dans la PR.
 title = "Scanoria"
 
 [extend]
 useDefault = true
+
+[[allowlists]]
+description = "Bancs d'essai des modules : faux secrets volontaires (F12)"
+paths = ['''^modules/[^/]+/testbed/''']
