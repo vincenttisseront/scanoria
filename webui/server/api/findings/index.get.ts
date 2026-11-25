@@ -8,9 +8,13 @@ import { getPool } from '../../utils/db'
 import { queryValidated, requireRole } from '../../utils/http'
 import { listFindings } from '../../findings/triage'
 import { findingQuerySchema } from '../../findings/schemas'
+import { ownerAliases } from '../../findings/owners'
 
 export default defineEventHandler(async (event) => {
-  requireRole(event, 'viewer')
-  const q = queryValidated(event, findingQuerySchema)
-  return listFindings(getPool(), q)
+  const auth = requireRole(event, 'viewer')
+  const { mine, ...q } = queryValidated(event, findingQuerySchema)
+  const pool = getPool()
+  // F6 : « Mes résultats » = responsables reliés au compte connecté (jamais un autre compte).
+  const me = mine ? { userId: auth.user.id, aliases: await ownerAliases(pool, auth.user.id) } : undefined
+  return listFindings(pool, { ...q, mine: me })
 })

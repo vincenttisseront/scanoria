@@ -182,7 +182,7 @@ describe('utilisateurs', () => {
     await settle()
     expect(bodyText()).toContain('Modifier bob')
     await click(button('Enregistrer'))
-    expect(callsTo('PATCH', '/api/users/2')[0]!.body).toEqual({ display_name: null, email: 'bob@exemple.test', role: 'viewer', locale: 'en', is_active: false })
+    expect(callsTo('PATCH', '/api/users/2')[0]!.body).toEqual({ display_name: null, email: 'bob@exemple.test', role: 'viewer', locale: 'en', is_active: false, kind: 'human' })
     expect(toastAdd).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Utilisateur modifié.' }))
 
     itemsOf(1).find(i => i.label === 'Réinitialiser le mot de passe')!.onSelect()
