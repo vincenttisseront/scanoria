@@ -40,9 +40,12 @@ export interface ChatMessage {
 export interface ChatRequest {
   model: string
   messages: ChatMessage[]
-  format: Record<string, unknown>
+  /** Schéma JSON imposé, « json » (JSON libre) ou null (texte, relais IA de la 0.7). */
+  format: Record<string, unknown> | 'json' | null
   numCtx: number
   temperature?: number
+  /** Longueur maximale de la réponse en jetons (relais IA, max_tokens) ; absent : défaut d'Ollama. */
+  maxTokens?: number
 }
 
 export interface ChatResult {
@@ -203,16 +206,18 @@ export class OllamaClient {
     return json as Record<string, unknown>
   }
 
-  /** Une réponse JSON complète, contrainte par le schéma de la tâche. */
+  /** Une réponse complète, contrainte par le schéma de la tâche (ou texte libre pour le relais). */
   async chat(req: ChatRequest, timeoutMs: number): Promise<ChatResult> {
-    const body = {
+    const options: Record<string, number> = { num_ctx: req.numCtx, temperature: req.temperature ?? 0.1 }
+    if (req.maxTokens) options.num_predict = req.maxTokens
+    const body: Record<string, unknown> = {
       model: req.model,
       messages: req.messages.map(m => ({ role: m.role, content: m.content })),
-      format: req.format,
       stream: false,
-      options: { num_ctx: req.numCtx, temperature: req.temperature ?? 0.1 },
+      options,
       keep_alive: '10m',
     }
+    if (req.format !== null) body.format = req.format
     const started = Date.now()
     const { json, bytesSent } = await this.request('POST', '/api/chat', body, timeoutMs)
     const content = (json as { message?: { content?: unknown } }).message?.content

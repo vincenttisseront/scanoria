@@ -25,6 +25,8 @@ export type SelectionReason = 'admin-choice' | 'admin-default' | 'admin-choice-m
  */
 export const DEFAULT_KEY = 'default'
 export const EMBEDDING_KEY = 'embedding'
+/** 0.7 (contrat 31) : modèle de rédaction du relais IA des modules d'analyse ; suit « default ». */
+export const RELAY_KEY = 'relay'
 
 export interface ModelChoice {
   model: string
@@ -114,4 +116,18 @@ export function contextFor(promptChars: number, modelContext: number | null, out
   const need = Math.ceil(promptChars / 3) + outputTokens
   const rounded = Math.max(4096, Math.ceil(need / 1024) * 1024)
   return modelContext ? Math.min(rounded, modelContext) : rounded
+}
+
+/** Modèle et début de son empreinte, tels que journalisés et affichés sur un résultat IA. */
+export function modelLabel(m: Pick<ModelChoice, 'model' | 'digest'>): string {
+  return `${m.model}@${m.digest.slice(0, 12)}`
+}
+
+/** « nom@empreinte » → {model, digest} (affichage d'un résultat IA). */
+export function parseModelLabel(label: string | null | undefined): { model: string, digest: string | null } | null {
+  if (!label) return null
+  const i = label.lastIndexOf('@')
+  if (i <= 0) return { model: label, digest: null }
+  const digest = label.slice(i + 1)
+  return /^[0-9a-f]{12}$/.test(digest) ? { model: label.slice(0, i), digest } : { model: label, digest: null }
 }

@@ -55,7 +55,7 @@ interface FindingRow {
   kev_added?: string | null
   group?: { confirmations: number, tools: string[], members: { id: string, tool: string, severity: string, status: string }[] } | null
   // 0.6 (J6) : résultat externe et sa source.
-  origin?: 'module' | 'external'
+  origin?: 'module' | 'external' | 'ai'
   external_source?: { tool: string, version: string | null, format: string, uploaded_via: string } | null
   // 0.7 (B) : responsables CODEOWNERS (F6) et règle de tri en masse (F4).
   owners?: string[]
@@ -109,7 +109,7 @@ const filters = reactive({
   epss_min: ['0.01', '0.1', '0.5'].includes(str(q.epss_min)) ? str(q.epss_min) : 'all',
   kev: q.kev === 'true',
   grouped: q.grouped !== 'false',
-  origin: ['module', 'external'].includes(str(q.origin)) ? str(q.origin) : 'all',
+  origin: ['module', 'external', 'ai'].includes(str(q.origin)) ? str(q.origin) : 'all',
   // F6 (0.7) : « Mes résultats » et responsable CODEOWNERS.
   mine: q.mine === 'true',
   owner: str(q.owner).slice(0, 255),
@@ -240,6 +240,7 @@ const originItems = computed(() => [
   { label: t('findings.filters.all'), value: 'all' },
   { label: t('external.origin.module'), value: 'module' },
   { label: t('external.origin.external'), value: 'external' },
+  { label: t('external.origin.ai'), value: 'ai' },
 ])
 const categoryLabel = (c: string) => (te(`findings.categories.${c}`) ? t(`findings.categories.${c}`) : c)
 const location = (r: { path: string | null, start_line: number | null, package: Pkg | null }) =>
@@ -251,6 +252,7 @@ const SeverityBadge = resolveComponent('FindingsSeverityBadge')
 const IntelBadges = resolveComponent('FindingsIntelBadges')
 const CorrelationBadge = resolveComponent('FindingsCorrelationBadge')
 const ExternalBadge = resolveComponent('FindingsExternalBadge')
+const AiOriginBadge = resolveComponent('FindingsAiOriginBadge')
 const columns = computed<TableColumn<FindingRow>[]>(() => [
   { accessorKey: 'severity', header: t('findings.columns.severity'), cell: ({ row }) => h(SeverityBadge, { severity: row.original.severity }) },
   {
@@ -272,6 +274,7 @@ const columns = computed<TableColumn<FindingRow>[]>(() => [
     cell: ({ row }) => h('div', { class: 'flex flex-wrap items-center gap-1' }, [
       h('span', { class: 'font-mono text-xs' }, row.original.tool),
       h(ExternalBadge, { origin: row.original.origin, source: row.original.external_source }),
+      h(AiOriginBadge, { origin: row.original.origin }),
     ]),
   },
   { id: 'location', header: t('findings.columns.location'), cell: ({ row }) => h('span', { class: 'font-mono text-xs break-all' }, location(row.original)) },
@@ -658,6 +661,7 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
                   :origin="detail.origin"
                   :source="detail.external_source"
                 />
+                <FindingsAiOriginBadge :origin="detail.origin" />
               </dd>
             </div>
             <div>
@@ -737,6 +741,12 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
             </p>
             <pre class="mt-1 max-h-64 overflow-auto rounded bg-muted p-3 font-mono text-xs">{{ detail.snippet }}</pre>
           </div>
+
+          <FindingsAiFindingPanel
+            :finding-id="detail.id"
+            :origin="detail.origin"
+            @confirmed="reloadAll"
+          />
 
           <FindingsFindingAi
             :finding-id="detail.id"

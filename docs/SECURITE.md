@@ -40,6 +40,64 @@ Pour signaler une vulnérabilité, voir [SECURITY.md](../SECURITY.md).
 - **Sans jeton** : l'appliance interroge l'API publique de GitHub sans
   identifiant, en HTTPS seul.
 
+### Relais IA des modules d'analyse par IA (0.7)
+
+**Pourquoi aucune règle nftables.** Un module d'IA ne reçoit aucun réseau :
+son conteneur est lancé en `--network=none`, comme tout scanner. Il n'y a donc
+ni interface, ni route, ni adresse à filtrer, et rien à ouvrir dans nftables.
+La seule sortie vers Ollama reste celle de `scanoria-ai` (règle `meta skuid`
+du connecteur, inchangée). Un réseau Podman dédié aurait demandé une passerelle,
+des règles de filtrage et un contrôle qu'aucun autre conteneur ne s'y attache :
+le socket Unix supprime ces trois points.
+
+**Ce que voit le conteneur**, en lecture seule, en plus de `/src` et `/out` :
+
+- `/run/scanoria-relay/relay.sock` : le socket du relais, seul fichier monté
+  du répertoire d'exécution de `scanoria-ai` (0700 sur l'hôte : aucun autre
+  compte que root et `scanoria-ai` ne peut le joindre sur l'hôte) ;
+- `/run/scanoria-relay/ca.pem` : le certificat public de l'AC interne ;
+- `/scanoria-relay/bridge.py` : le pont de l'appliance ;
+- `/etc/hosts` : `ai-relay.<nom>` vers `127.0.0.1`, rien d'autre ;
+- `/run/scanoria-relay/command.json` : la commande de l'outil, liste JSON
+  validée par le runner (`airelay.command_doc` : 256 arguments au plus, sans
+  NUL) puis relue et revalidée par le pont, qui la lance sans shell. Elle ne
+  passe pas par les arguments du pont. Ce fichier et `/etc/hosts` sont créés
+  en 0400 pour l'utilisateur 65534 (`O_EXCL`, `O_NOFOLLOW`) et retirés après
+  le module ;
+- `/run/secrets/relay-token` : son jeton éphémère (secret Podman, 0400,
+  utilisateur 65534).
+
+Il ne voit ni la clé du certificat, ni la configuration du connecteur, ni le
+jeton porteur d'Ollama, ni la base, ni les jetons des autres modules (le
+répertoire des jetons n'est pas monté).
+
+**Ce que le pont permet.** Il écoute sur la boucle locale du conteneur
+(`127.0.0.1:8443`) et recopie les octets de chaque connexion vers le socket
+du relais, sans les lire ni les modifier : 32 connexions au plus, refermées
+après 10 minutes sans échange. Il ne permet de joindre que le relais, qui
+n'expose que `/v1/models`, `/v1/chat/completions`, `/v1/embeddings` et
+`/v1/relay/check`, chacune après vérification du jeton. Le TLS (certificat
+`ai-relay.<nom>`, vérifié par l'outil avec l'AC interne) va de l'outil au
+relais : le pont ne voit que du chiffré.
+
+**Jeton éphémère** par module et par analyse, lié au projet et au module, avec
+une expiration au-delà du délai du module ; jamais en argument ni en variable
+visible de `podman inspect` (secret Podman lu par le pont), masqué dans les
+journaux, retiré après le module ; jetons et secrets orphelins purgés au
+démarrage du runner.
+
+**Garde-fous du relais** (CLAUDE.md § 3.5), à chaque requête : outils
+retirés, secrets masqués (messages système et schéma JSON compris), consigne
+de l'appliance en tête, « aucun envoi à l'IA » et cloisonnement par projet,
+taille bornée, modèle choisi par l'appliance, journal sans contenu.
+
+**Verdict** : les résultats d'un module d'IA n'entrent dans aucun verdict sans
+confirmation d'une personne (compte humain, rôle operator ou plus, audit) ; un
+compte « agent » ou « bot » et un jeton d'API ne confirment jamais. Une panne
+de l'IA (relais, modèle, sortie invalide) ne rend jamais un verdict non
+concluant : le module est « skipped », la panne figure dans la couverture de
+l'analyse (G15, `ai-module-failed`) et dans la santé des analyses (G20).
+
 ## 2. Dépôt et CI
 
 - **Dépôt public, mais non annoncé** : aucun nom d'hôte, domaine, adresse ou
