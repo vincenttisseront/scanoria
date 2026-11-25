@@ -3,23 +3,32 @@
 #
 # Image d'outil Scanoria pour OpenSSF Scorecard (0.7, chantier A, H2). L'image
 # amont (ghcr.io/ossf/scorecard, base cgr.dev/chainguard/static) n'a pas
-# d'interpréteur : le binaire Go statique /scorecard en est copié tel quel,
-# depuis l'image amont épinglée par empreinte, dans python:3.13-slim (épinglé),
-# où l'enveloppe sast_run.py de l'appliance convertit son JSON en SARIF.
-FROM ghcr.io/ossf/scorecard@sha256:70b14bcf41b0a1dda48742257a95bf284f81a6dca866e5c96e3f533bb102666f AS upstream
-
+# d'interpréteur : le binaire Go statique de l'archive de release amont,
+# vérifiée par son sha256 (scorecard_checksums.txt de la release), est déposé
+# dans python:3.13-slim (épinglé), où l'enveloppe sast_run.py de l'appliance
+# convertit son JSON en SARIF.
 FROM docker.io/library/python@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
 
 ARG SOURCE_DATE_EPOCH
+ARG SCORECARD_VERSION=5.7.0
+ARG SCORECARD_SHA256=3b08ec0a8681806c3e744ec9210742a502c7d66f06f25523b70f7128738235d3
 
 LABEL org.opencontainers.image.source="https://github.com/ossf/scorecard" \
       org.opencontainers.image.revision="v5.7.0" \
       org.opencontainers.image.version="5.7.0" \
       org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.description="OpenSSF Scorecard for Scanoria (upstream static binary)" \
+      org.opencontainers.image.description="OpenSSF Scorecard for Scanoria (static release binary, sha256-pinned)" \
       io.scanoria.module="scorecard"
 
-COPY --from=upstream /scorecard /usr/local/bin/scorecard
-RUN /usr/local/bin/scorecard version
+# Téléchargement par la bibliothèque standard, contrôle de l'empreinte, puis
+# extraction du seul binaire (aucun autre membre de l'archive n'est écrit).
+RUN python3 -I -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \
+        "https://github.com/ossf/scorecard/releases/download/v${SCORECARD_VERSION}/scorecard_${SCORECARD_VERSION}_linux_amd64.tar.gz" \
+        /tmp/scorecard.tar.gz \
+    && echo "${SCORECARD_SHA256}  /tmp/scorecard.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/scorecard.tar.gz -C /usr/local/bin --no-same-owner scorecard \
+    && rm -f /tmp/scorecard.tar.gz \
+    && chmod 0755 /usr/local/bin/scorecard \
+    && /usr/local/bin/scorecard version
 
 USER 65534:65534
