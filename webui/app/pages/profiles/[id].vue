@@ -31,10 +31,11 @@ const profile = computed(() => detail.value?.profile ?? null)
 const canEdit = computed(() => session.can('admin') && !!profile.value && !profile.value.archived_at)
 useHead({ title: computed(() => profile.value ? `${t('profiles.title')} · ${profile.value.slug}` : t('profiles.title')) })
 
-const form = reactive({ description: '', categories: [] as Category[], include_modules: [] as string[], exclude_modules: [] as string[], locks: emptyLocks() })
+const form = reactive({ description: '', categories: [] as Category[], include_modules: [] as string[], exclude_modules: [] as string[], locks: emptyLocks(), rulesets: [] as RulesetAttachment[] })
+const attachments = (p: ProfileRow): RulesetAttachment[] => p.rulesets.map(r => ({ ruleset_id: r.ruleset_id, pinned_version: r.pinned_version }))
 function fill(p: ProfileRow) {
   Object.assign(form, {
-    description: p.description ?? '', categories: [...p.categories] as Category[], include_modules: [...p.include_modules], exclude_modules: [...p.exclude_modules], locks: cloneLocks(p.locks),
+    description: p.description ?? '', categories: [...p.categories] as Category[], include_modules: [...p.include_modules], exclude_modules: [...p.exclude_modules], locks: cloneLocks(p.locks), rulesets: attachments(p),
   })
 }
 async function load() {
@@ -65,12 +66,13 @@ const body = computed(() => ({
   include_modules: form.include_modules,
   exclude_modules: form.exclude_modules,
   locks: form.locks,
+  rulesets: form.rulesets,
 }))
 const dirty = computed(() => {
   const p = profile.value
   if (!p) return false
   return JSON.stringify(body.value) !== JSON.stringify({
-    description: p.description, categories: p.categories, include_modules: p.include_modules, exclude_modules: p.exclude_modules, locks: cloneLocks(p.locks),
+    description: p.description, categories: p.categories, include_modules: p.include_modules, exclude_modules: p.exclude_modules, locks: cloneLocks(p.locks), rulesets: attachments(p),
   })
 })
 /** Brouillon pour l'aperçu : le profil tel qu'il serait enregistré. */
@@ -278,6 +280,19 @@ async function setArchived(archived: boolean) {
             />
           </UFormField>
         </div>
+      </UCard>
+
+      <UCard>
+        <template #header>
+          <h2 class="font-semibold">
+            {{ t('profiles.rulesets') }}
+          </h2>
+        </template>
+        <ProfilesRulesetsEditor
+          v-model="form.rulesets"
+          :known="profile.rulesets"
+          :disabled="!canEdit"
+        />
       </UCard>
 
       <UCard>
