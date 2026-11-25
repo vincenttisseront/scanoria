@@ -304,7 +304,7 @@ r = selftest.Report(); selftest.check_ai(r)
 print(json.dumps([c["status"] for c in r.checks if c["id"] == "ai.alive"]))' "$PY"; }
 expect "ai.alive : service actif" "$(st)" '["pass"]'
 echo 3 > "$TMP/active-rc"
-expect "ai.alive : service arrêté" "$(st)" '["fail"]'
+expect "ai.alive : service arrêté → avertissement" "$(st)" '["warn"]'
 rm -f "$TMP/active-rc"
 
 # --- 9. Retrait du connecteur ------------------------------------------------------------------

@@ -122,6 +122,8 @@ done
 grep -q '^ReadWritePaths=/var/lib/scanoria/requests$' "$RF/usr/lib/systemd/system/scanoria-console.service" \
 	&& grep -q '^ReadWritePaths=/var/lib/scanoria/scans/jobs$' "$W" \
 	&& ok "dépôt des demandes et des tâches : répertoire parent ouvert en écriture" || ko "ReadWritePaths des demandes ou des tâches"
+grep -q '^ReadWritePaths=/var/lib/scanoria/pins$' "$RF/usr/lib/systemd/system/scanoria-console.service" \
+	&& ok "console : versions figées (pins.json) en écriture" || ko "console : /var/lib/scanoria/pins absent des ReadWritePaths (EROFS)"
 
 # --- 3. Pare-feu --------------------------------------------------------------------------
 T="$TMP/root"

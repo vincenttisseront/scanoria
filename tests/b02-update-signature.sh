@@ -292,6 +292,53 @@ out=$(SCANORIA_UPDATE_DEADLINE=$(( $(date +%s) + 600 )) "$SU" rollback --expecte
 expect "retour N-1 sans assez de temps → E_TIMEOUT" "$(code "$out")" E_TIMEOUT
 expect "retour N-1 refusé : versions inchangées" "$(current) $(previous)" "releases/0.2.0 releases/0.1.0"
 
+# --- 4 ter. Selftest de santé rejoué, contrôles en échec nommés ----------------------------------
+st_out=$(python3 -I -B - "$ROOT/src/rootfs/usr/lib/scanoria/py" <<-'EOF'
+	import json, os, sys
+	sys.path.insert(0, sys.argv[1])
+	from scanoria import common, selfupdate as su
+	from scanoria.common import Fail
+	su.time.sleep = lambda s: None
+	class R:
+	    def __init__(self, rc, out):
+	        self.returncode, self.stdout = rc, out.encode()
+	rep = json.dumps({"checks": [{"id": "worker.alive", "status": "fail", "message": "stale"},
+	                             {"id": "disk.free", "status": "pass", "message": "ok"}]})
+	def seq(*results):
+	    it = iter(results)
+	    calls = []
+	    def run(name, args=(), **kw):
+	        calls.append(name)
+	        return next(it)
+	    common.run = run
+	    return calls
+	res = []
+	os.environ["SCANORIA_TEST_HEALTH_TIMEOUT"] = "60"
+	calls = seq(R(1, rep), R(1, rep), R(0, "{}"))
+	su.selftest_until_pass()
+	res.append("retry-%d" % len(calls))
+	os.environ["SCANORIA_TEST_HEALTH_TIMEOUT"] = "0"
+	seq(R(1, rep))
+	try:
+	    su.selftest_until_pass()
+	    res.append("no-fail")
+	except Fail as e:
+	    res.append(e.message)
+	seq(R(2, "not json"))
+	try:
+	    su.selftest_until_pass()
+	    res.append("no-fail")
+	except Fail as e:
+	    res.append(e.message)
+	print("|".join(res))
+EOF
+)
+expect "selftest de santé rejoué jusqu'au succès" "${st_out%%|*}" retry-3
+expect "selftest en échec : contrôles nommés dans le message" "$(cut -d'|' -f2 <<< "$st_out")" \
+	"selftest --quick failed after update (worker.alive)"
+expect "selftest sans rapport lisible : message générique" "$(cut -d'|' -f3 <<< "$st_out")" \
+	"selftest --quick failed after update"
+
 # --- 5. Retour à N-1 sur demande ----------------------------------------------------------------
 rb() { code "$("$SU" rollback --expected-current "$1" --expected-target "$2" 2> /dev/null || true)"; }
 expect "retour N-1 avec versions inattendues → E_PRECONDITION" "$(rb 0.2.0 0.0.9)" E_PRECONDITION
