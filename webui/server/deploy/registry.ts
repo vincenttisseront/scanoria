@@ -148,11 +148,23 @@ function drain(res: RegistryResponse): void {
 /** Paramètres d'un en-tête WWW-Authenticate « Bearer realm=…,service=…,scope=… ». */
 export function parseChallenge(header: string | undefined): { scheme: string, params: Record<string, string> } | null {
   if (!header || header.length > 2000) return null
-  const m = /^(\w+)\s*(.*)$/s.exec(header.trim())
-  if (!m) return null
+  // Lecture à la main (aucune expression à retour arrière) : schéma, puis clé="valeur" séparés par des virgules.
+  const h = header.trim()
+  const sp = h.search(/\s/)
+  const scheme = sp < 0 ? h : h.slice(0, sp)
+  if (!/^\w+$/.test(scheme)) return null
   const params: Record<string, string> = {}
-  for (const p of m[2]!.matchAll(/(\w+)="([^"]*)"/g)) params[p[1]!.toLowerCase()] = p[2]!
-  return { scheme: m[1]!.toLowerCase(), params }
+  let rest = sp < 0 ? '' : h.slice(sp + 1)
+  while (rest) {
+    const eq = rest.indexOf('="')
+    if (eq < 0) break
+    const end = rest.indexOf('"', eq + 2)
+    if (end < 0) break
+    const key = rest.slice(0, eq).replace(/^[\s,]*/, '')
+    if (/^\w+$/.test(key)) params[key.toLowerCase()] = rest.slice(eq + 2, end)
+    rest = rest.slice(end + 1)
+  }
+  return { scheme: scheme.toLowerCase(), params }
 }
 
 export class RegistryClient {

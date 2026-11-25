@@ -131,8 +131,11 @@ const WORKFLOW_DIRS = ['.forgejo/workflows', '.gitea/workflows', '.github/workfl
  * se déclenche pas à la main ou n'attend pas scanoria_report.
  */
 export function dispatchInputs(yaml: string): CdInput[] | null {
-  if (yaml.length > 256 * 1024 || !/^\s*workflow_dispatch\s*:/m.test(yaml)) return null
-  const declared = CD_INPUTS.filter(k => new RegExp(`^\\s+${k}\\s*:`, 'm').test(yaml))
+  if (yaml.length > 256 * 1024) return null
+  // Clés YAML lues ligne à ligne (aucune expression à retour arrière sur le fichier entier).
+  const keys = yaml.split('\n').map(line => ({ indented: /^\s/.test(line), key: line.trim().split(':')[0]!.trim(), colon: line.includes(':') }))
+  if (!keys.some(k => k.colon && k.key === 'workflow_dispatch')) return null
+  const declared = CD_INPUTS.filter(name => keys.some(k => k.indented && k.colon && k.key === name))
   return declared.includes('scanoria_report') ? declared : null
 }
 
@@ -140,7 +143,10 @@ function environmentOf(fileName: string): string {
   const base = fileName.replace(/\.ya?ml$/, '').toLowerCase()
   if (/prod/.test(base)) return 'production'
   if (/stag|recette|preprod/.test(base)) return 'staging'
-  const clean = base.replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+  let clean = base.replace(/[^a-z0-9-]+/g, '-')
+  while (clean.startsWith('-')) clean = clean.slice(1)
+  while (clean.endsWith('-')) clean = clean.slice(0, -1)
+  clean = clean.slice(0, 40)
   return /^[a-z0-9]/.test(clean) ? clean : 'deploy'
 }
 

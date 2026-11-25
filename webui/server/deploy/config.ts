@@ -53,7 +53,7 @@ const httpsBase = z.string().max(300).refine((s) => {
 }, { message: 'url' })
 
 /** Gabarit d'étiquette : {tag}, {commit}, {short_commit} et caractères d'étiquette OCI. */
-const tagTemplate = z.string().regex(TEMPLATE_RE).refine(t => (t.match(/\{[^}]*\}/g) ?? []).every(x => ['{tag}', '{commit}', '{short_commit}'].includes(x)), { message: 'template' })
+const tagTemplate = z.string().regex(TEMPLATE_RE).refine(t => !/[{}]/.test(t.replaceAll('{tag}', '').replaceAll('{short_commit}', '').replaceAll('{commit}', '')), { message: 'template' })
 
 export const cdTriggerConfig = z.discriminatedUnion('provider', [
   z.strictObject({

@@ -157,7 +157,7 @@ if [[ -s "$TMP/out/image.txt" ]]; then
 	[[ $rc -eq 1 ]] && ok "scanoria-verify attestation : autre clé refusée" || ko "scanoria-verify attestation : autre clé (code $rc)"
 
 	# cosign officiel, épinglé par SHA-256 ; identifiants du registre dans une configuration jetable.
-	curl -fsSL -m 120 -o "$TMP/cosign" "$COSIGN_URL"
+	curl -fsSL --proto =https --proto-redir =https -m 120 -o "$TMP/cosign" "$COSIGN_URL"
 	if [[ "$(sha256sum "$TMP/cosign" | cut -d' ' -f1)" == "$COSIGN_SHA256" ]]; then
 		ok "cosign téléchargé, empreinte vérifiée"
 		chmod 0755 "$TMP/cosign"

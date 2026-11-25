@@ -404,6 +404,43 @@ describe.skipIf(!DATABASE_URL)('déploiement après verdict favorable (chantier 
     expect((d.body as { ref: string }).ref).toBe('main')
   })
 
+  it('Jenkins : buildWithParameters une fois, file puis build suivis jusqu\'au résultat', async () => {
+    const jenkins: { path: string, auth: string | null }[] = []
+    let building = true
+    setForgeTransport(async (url, init) => {
+      const u = new URL(url)
+      if (u.host !== 'jenkins.exemple.test') return forge.handler(url, init)
+      jenkins.push({ path: u.pathname + u.search, auth: new Headers(init.headers).get('authorization') })
+      const ok = (d: unknown, h: Record<string, string> = {}) => new Response(JSON.stringify(d), { status: 201, headers: { 'content-type': 'application/json', ...h } })
+      if (u.pathname.endsWith('/buildWithParameters')) return ok({}, { location: 'https://jenkins.exemple.test/queue/item/5/' })
+      if (u.pathname === '/queue/item/5/api/json') return ok({ executable: { number: 12 } })
+      if (u.pathname === '/job/livraison/job/app/12/api/json') return ok(building ? { building: true, result: null } : { building: false, result: 'SUCCESS' })
+      return new Response('{}', { status: 404 })
+    })
+    try {
+      await createTarget(db.pool, projectId, {
+        kind: 'cd-trigger', environment: 'jenkins', on_trigger: 'branch', enabled: true,
+        config: { provider: 'jenkins', url: 'https://jenkins.exemple.test/', job: 'livraison/app', branch: 'jenkins', inputs: ['scanoria_commit', 'scanoria_tag'] },
+        credential: { username: 'robot', value: fakeToken() },
+      } as never, admin())
+      const s = await scan({ verdict: 'passed', trigger: 'commit', ref: 'refs/heads/jenkins', tag: null })
+      await deployPass(db.pool)
+      await deployPass(db.pool)
+      await deployPass(db.pool)
+      expect((await runs(s))[0]).toMatchObject({ status: 'running', external_id: 'build:12' })
+      building = false
+      await deployPass(db.pool)
+      expect((await runs(s))[0]).toMatchObject({ status: 'succeeded' })
+      const builds = jenkins.filter(j => j.path.includes('/buildWithParameters'))
+      expect(builds).toHaveLength(1)
+      expect(builds[0]!.path).toMatch(/^\/job\/livraison\/job\/app\/buildWithParameters\?SCANORIA_COMMIT=[0-9a-f]{40}&SCANORIA_TAG=$/)
+      expect(jenkins.every(j => j.auth?.startsWith('Basic '))).toBe(true)
+    }
+    finally {
+      setForgeTransport(forge.handler)
+    }
+  })
+
   it('proposition J11 : workflow manuel qui déclare scanoria_report', async () => {
     const yaml = 'on:\n  workflow_dispatch:\n    inputs:\n      scanoria_report: { required: true }\n      scanoria_commit: { required: true }\n'
     const prev = forge.handler

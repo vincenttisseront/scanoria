@@ -241,6 +241,12 @@ export function jenkinsQueueItem(location: string | null, base: string): RegExpE
   }
 }
 
+function trimEnd(s: string, ch: string): string {
+  let end = s.length
+  while (end > 0 && s[end - 1] === ch) end--
+  return s.slice(0, end)
+}
+
 const SAFE_TAG_RE = /^[A-Za-z0-9._/+-]{1,255}$/
 
 function cdInputs(cfg: CdTriggerConfig, scan: ScanInfo, url: string | null, digests: Map<string, string>): Record<string, string> {
@@ -271,7 +277,7 @@ async function advanceCd(db: Queryable, run: Run, scan: ScanInfo, digests: Map<s
   const url = await consoleUrl()
   const age = Date.now() - run.created_at.getTime()
   if (cfg.provider === 'jenkins') {
-    const base = cfg.url.replace(/\/+$/, '')
+    const base = trimEnd(cfg.url, '/')
     const req = await jenkinsRequest(db, run.credential_id)
     if (run.status === 'pending') {
       if (!await claimDeployment(db, run.id)) return

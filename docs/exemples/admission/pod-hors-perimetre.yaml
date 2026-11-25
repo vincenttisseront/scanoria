@@ -7,6 +7,10 @@ metadata:
   name: outil-interne
   namespace: defaut
 spec:
+  automountServiceAccountToken: false
   containers:
     - name: outil
       image: registre.exemple.test/outils/console@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      resources:
+        requests: { cpu: 50m, memory: 64Mi, ephemeral-storage: 64Mi }
+        limits: { memory: 64Mi, ephemeral-storage: 64Mi }
