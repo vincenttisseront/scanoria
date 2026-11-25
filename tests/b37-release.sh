@@ -99,8 +99,14 @@ expect "clé privée jamais dans un résultat" "$(grep -rl 'PRIVATE KEY' "$Q/don
 openssl pkey -in "$KEY" -pubout -out "$TMP/appliance.pem" 2> /dev/null
 expect "empreinte = SHA-256 de la clé publique brute" "$FP" "$(openssl pkey -pubin -in "$TMP/appliance.pem" -outform DER | tail -c 32 | openssl dgst -sha256 -r | cut -c1-64)"
 expect "params.content_b64 jamais recopié dans le résultat" "$(jq -r '.. | strings | select(length > 4096)' "$RES" | wc -l)" 0
+REC="$T/var/lib/scanoria/release/signed/$SCAN.json"
+expect "relevé root du rapport signé (0600, répertoire 0700)" "$(stat -c %a "$REC") $(stat -c %a "$(dirname "$REC")")" "600 700"
+expect "relevé : analyse, empreinte, commit, tag, verdict, clé" \
+	"$(jq -r '[.scan_id, .report_sha256, .commit_sha, .tag, .verdict, .key_fingerprint] | join(" ")' "$REC")" \
+	"$SCAN $(sha "$TMP/report.canon") $COMMIT v1.2.0 passed $FP"
 
 # === 2. Demandes hostiles ========================================================
+rm -f "$REC"
 sign "empreinte qui ne correspond pas → E_SIGN_DIGEST" E_SIGN_DIGEST "$TMP/report.canon" "$SCAN" "$(printf '%064d' 0)"
 sign "autre scan_id que la demande → E_SIGN_SCAN" E_SIGN_SCAN "$TMP/report.canon" "$(uuid)"
 jq -c '.schema = "scanoria-attestation/1"' "$TMP/report.json" > "$TMP/x.json"; canon "$TMP/x.json" > "$TMP/x.canon"
@@ -116,6 +122,7 @@ sed 's/^{/{"commit_sha":"'"$(printf '%040d' 0)"'",/' "$TMP/report.canon" > "$TMP
 sign "clé en double (deux commits) → E_SIGN_CANONICAL" E_SIGN_CANONICAL "$TMP/x.dup" "$SCAN"
 printf '[1,2]' > "$TMP/x.array"
 sign "contenu qui n'est pas un objet → E_SIGN_CANONICAL" E_SIGN_CANONICAL "$TMP/x.array" "$SCAN"
+expect "demandes refusées : aucun relevé écrit" "$(find "$T/var/lib/scanoria/release/signed" -type f | wc -l)" 0
 
 # base64 non strict : remplissage retiré (le schéma de la demande ou release.py refuse)
 id=$(uuid); name="$NAME_TS-$id.json"

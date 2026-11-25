@@ -124,6 +124,33 @@ def sign_bytes(raw):
     return sig, fp
 
 
+SIGNED_DIR = common.VARLIB + "/release/signed"
+
+
+def _str_or_none(v):
+    return v if isinstance(v, str) else None
+
+
+def record_signed_report(obj, report_sha256, fingerprint):
+    """Relevé root (0600) de ce que le helper vient de signer, lu par les
+    demandes qui en dépendent (attestation J9, chantier D) : la console ne
+    peut pas l'écrire, donc ne peut pas faire attester une analyse sans
+    rapport signé ici. Écrit avant que la signature ne soit rendue."""
+    verdict = obj.get("verdict")
+    rec = {
+        "scan_id": obj.get("scan_id"),
+        "report_sha256": report_sha256,
+        "commit_sha": _str_or_none(obj.get("commit_sha")),
+        "tag": _str_or_none(obj.get("tag")),
+        "verdict": _str_or_none(verdict.get("value")) if isinstance(verdict, dict) else None,
+        "key_fingerprint": fingerprint,
+        "signed_at": common.iso(common.now()),
+    }
+    os.makedirs(SIGNED_DIR, mode=0o700, exist_ok=True)
+    os.chmod(SIGNED_DIR, 0o700)
+    common.write_json(SIGNED_DIR + "/" + rec["scan_id"] + ".json", rec, mode=0o600, group_scanoria=False)
+
+
 def act_sign_release_report(c):
     prm = c.params
     if prm["kind"] != "release-report":
@@ -137,6 +164,7 @@ def act_sign_release_report(c):
     if obj.get("scan_id") != prm["scan_id"]:
         raise Fail("E_SIGN_SCAN", "scan_id differs from the request")
     sig, fp = sign_bytes(raw)
+    record_signed_report(obj, prm["sha256"], fp)
     common.log("release report of scan %s signed (%s)" % (prm["scan_id"], prm["sha256"][:12]))
     return {"kind": "release-report", "scan_id": prm["scan_id"], "sha256": prm["sha256"],
             "signature": sig, "key_fingerprint": fp}
