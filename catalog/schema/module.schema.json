@@ -143,6 +143,10 @@
       "maxLength": 300,
       "description": "Image épinglée par empreinte, registre explicite (pas de nom court), sans étiquette."
     },
+    "image_pending": {
+      "const": true,
+      "description": "0.7 : image construite par la CI de Scanoria (modules/<id>/image/Containerfile, workflow tool-images.yml) et pas encore publiée. Exclusif avec image : un module en attente n'a pas d'image, catalog/build.py l'écarte de l'index, et la PR de suivi pose image (ghcr.io/vincenttisseront/scanoria-<id>@sha256:…) en retirant cette clé."
+    },
     "version": {
       "type": "string",
       "pattern": "^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$",
@@ -1233,7 +1237,6 @@
       },
       "then": {
         "required": [
-          "image",
           "scan",
           "outputs",
           "testbed"
@@ -1283,7 +1286,6 @@
       },
       "then": {
         "required": [
-          "image",
           "service",
           "hostname"
         ],
@@ -1355,9 +1357,7 @@
         }
       },
       "then": {
-        "required": [
-          "image"
-        ],
+        "required": [],
         "not": {
           "anyOf": [
             {
@@ -1401,6 +1401,53 @@
               "const": "dast"
             }
           }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "scanner",
+              "service",
+              "runner"
+            ]
+          }
+        }
+      },
+      "then": {
+        "oneOf": [
+          {
+            "required": [
+              "image"
+            ],
+            "not": {
+              "required": [
+                "image_pending"
+              ]
+            }
+          },
+          {
+            "required": [
+              "image_pending"
+            ],
+            "not": {
+              "required": [
+                "image"
+              ]
+            }
+          }
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "image_pending"
+          ]
         }
       }
     }
