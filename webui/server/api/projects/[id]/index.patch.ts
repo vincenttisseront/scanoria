@@ -13,6 +13,8 @@ import { requireProject } from '../../../projects/guards'
 import { patchFromBody } from '../../../projects/update'
 import { publicProject } from '../../../projects/service'
 import { projectUpdateSchema } from '../../../projects/schemas'
+import { checkDefaultProfileChange } from '../../../profiles/assign'
+import { profileHttpError } from '../../../profiles/http'
 
 export default defineEventHandler(async (event) => {
   const auth = requireRole(event, 'operator')
@@ -20,6 +22,8 @@ export default defineEventHandler(async (event) => {
   const project = await requireProject(pool, getRouterParam(event, 'id'))
   const body = await readValidated(event, projectUpdateSchema)
   if (body.gate_id && body.gate_id !== project.gate_id) requireRole(event, 'admin')
+  // 0.7 (G8, G9) : un profil plus souple ou archivé, mêmes règles que PUT /profiles.
+  if (body.profile_id) await checkDefaultProfileChange(pool, project.id, body.profile_id, { admin: auth.user.role === 'admin' }).catch(profileHttpError)
   const actor = { type: 'user' as const, userId: auth.user.id, username: auth.user.username, ip: clientAddress(event) }
   return { project: publicProject(await patchFromBody(pool, project, body, actor)) }
 })
