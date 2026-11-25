@@ -20,6 +20,8 @@ import { parseCycloneDx, parseSarif, type ParsedFinding, type ParseIssue } from 
 import { resolveSeverities } from './severity'
 import { computeCoverage, mergeCoverageGaps, type CoverageGap } from './coverage'
 import { assignCorrelationKeys } from './correlation'
+import { assignOwners, readCodeowners } from './owners'
+import { applyTriageRulesOnIngest } from './triage-rules'
 
 export const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 const OUTPUT_PATH_RE = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/
@@ -260,6 +262,9 @@ export async function ingestModuleOutputs(db: Db, input: IngestInput): Promise<I
     const res = await upsert(q, scan, withSeverity, origin)
     // F16 (0.5, contrat 18) : clé de recoupement entre outils, sans toucher à l'empreinte G19.
     await assignCorrelationKeys(q, res.map(r => r.id))
+    // 0.7 (B) : responsables lus dans CODEOWNERS (F6), puis règles de tri en masse (F4).
+    if (!input.external) await assignOwners(q, scan.project_id, res.map(r => r.id), await readCodeowners(input.resultDir))
+    await applyTriageRulesOnIngest(q, scan.project_id, res.map(r => r.id))
     // G15 : sortie tronquée ou illisible consignée dans la couverture. Une sortie
     // illisible empêche aussi de déclarer « corrigés » les résultats de ce module.
     const gaps: CoverageGap[] = []

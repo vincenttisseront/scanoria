@@ -117,9 +117,15 @@ try:
     airelay.python_of({"scan": {"relay_python": "/opt/../bin/python3"}}); print("accepté")
 except airelay.Unavailable as u:
     print(u.code)')" E_MODULE_INVALID
-expect "wrap_command : sous le pont, en mode isolé" "$(py 'import json
+expect "wrap_command : sous le pont, en mode isolé, sans la commande en argument" "$(py 'import json
 from scanoria import airelay
-print(json.dumps(airelay.wrap_command({"scan": {}}, ["pr-agent", "review"])))')" '["python3", "-I", "/scanoria-relay/bridge.py", "--", "pr-agent", "review"]'
+print(json.dumps(airelay.wrap_command({"scan": {}})))')" '["python3", "-I", "/scanoria-relay/bridge.py"]'
+expect "command_doc : commande vide, NUL ou non-chaîne refusée" "$(py 'from scanoria import airelay
+for c in ([], [""], ["ia", "a\0b"], ["ia", 3], "ia"):
+    try:
+        airelay.command_doc(c); print("accepté")
+    except airelay.Unavailable as u:
+        print(u.code)' | sort -u)" E_MODULE_INVALID
 
 # --- 3. Jetons éphémères ---------------------------------------------------------------------
 TOK_DIR="$T/run/scanoria-relay/tokens"
@@ -263,7 +269,9 @@ for i, x in enumerate(a):
         vols[target] = (host, mode)
 toks = sorted(os.listdir("$T/run/scanoria-relay/tokens"))
 open("$TMP/run-state", "w").write(json.dumps({"vols": vols, "tokens": [json.load(open("$T/run/scanoria-relay/tokens/" + t)) for t in toks],
-    "hosts": open(vols["/etc/hosts"][0]).read() if "/etc/hosts" in vols else None}))
+    "hosts": open(vols["/etc/hosts"][0]).read() if "/etc/hosts" in vols else None,
+    "modes": {k: oct(os.stat(v[0]).st_mode & 0o777) for k, v in vols.items() if k in ("/etc/hosts", "/run/scanoria-relay/command.json")},
+    "command": json.load(open(vols["/run/scanoria-relay/command.json"][0])) if "/run/scanoria-relay/command.json" in vols else None}))
 print("jeton vu par l'outil : " + open("$TMP/secret-value").read())
 if os.path.exists("$TMP/tool-fails"):
     print("upstream_error 502 from the relay"); sys.exit(1)
@@ -325,11 +333,13 @@ expect "conteneur : secret Podman du jeton monté pour l'utilisateur 65534" \
 	"S,type=mount,target=relay-token,uid=65534,gid=65534,mode=400"
 expect "conteneur : montages du relais en lecture seule" \
 	"$(jq -r '.vols | to_entries | map(select(.key | test("relay|hosts"))) | map(.key + ":" + .value[1]) | sort | join(" ")' "$TMP/run-state")" \
-	"/etc/hosts:ro /run/scanoria-relay/ca.pem:ro /run/scanoria-relay/relay.sock:ro /scanoria-relay:ro"
+	"/etc/hosts:ro /run/scanoria-relay/ca.pem:ro /run/scanoria-relay/command.json:ro /run/scanoria-relay/relay.sock:ro /scanoria-relay:ro"
 expect "conteneur : socket du relais monté" "$(jq -r '.vols["/run/scanoria-relay/relay.sock"][0]' "$TMP/run-state")" "$SOCK"
 expect "conteneur : /etc/hosts désigne la boucle locale pour le relais" "$(jq -r .hosts "$TMP/run-state" | head -n 1)" "$(printf '127.0.0.1\tlocalhost %s' "$H")"
-expect "conteneur : commande sous le pont" "$(jq -c '. as $a | (index("--entrypoint")) as $i | [$a[$i + 1]] + $a[$i + 3:$i + 6]' <<< "$RUN")" \
-	'["[\"python3\"]","-I","/scanoria-relay/bridge.py","--"]'
+expect "conteneur : commande sous le pont, sans argument" "$(jq -c '. as $a | (index("--entrypoint")) as $i | [$a[$i + 1]] + $a[$i + 3:]' <<< "$RUN")" \
+	'["[\"python3\"]","-I","/scanoria-relay/bridge.py"]'
+expect "conteneur : commande de l'outil remise au pont par un fichier" "$(jq -c .command "$TMP/run-state")" '["ia","/src","/out/result.sarif"]'
+expect "conteneur : hosts et commande en 0400 (utilisateur du conteneur seul)" "$(jq -r '.modes | [.["/etc/hosts"], .["/run/scanoria-relay/command.json"]] | join(" ")' "$TMP/run-state")" "0o400 0o400"
 expect "conteneur : base OpenAI vers le relais en HTTPS" "$(jq -r '.[] | select(startswith("OPENAI_BASE_URL="))' <<< "$RUN")" "OPENAI_BASE_URL=https://$H:8443/v1"
 expect "conteneur : modèle choisi par l'appliance (alias)" "$(jq -r '.[] | select(startswith("SCANORIA_AI_MODEL="))' <<< "$RUN")" "SCANORIA_AI_MODEL=scanoria"
 TOKV=$(cat "$TMP/secret-value")
@@ -340,7 +350,7 @@ expect "jeton : lié au projet, à l'analyse et au module" "$(jq -c '.tokens[0] 
 expect "jeton : expire après le délai du module" "$(jq -r '.tokens[0].expires_at - now | floor | . > 60 and . < 1000' "$TMP/run-state")" true
 expect "jeton : retiré après le module" "$(find "$TOK_DIR" -type f | wc -l)" 0
 grep -qxF "$(cat "$TMP/secrets")" "$TMP/secrets-rm" && ok "secret Podman : retiré après le module" || ko "secret Podman : laissé"
-[[ -z "$(find "$SCANS/workspaces" -name relay-hosts)" ]] && ok "fichier hosts retiré" || ko "fichier hosts laissé"
+[[ -z "$(find "$SCANS/workspaces" -name 'relay-hosts' -o -name 'relay-command.json')" ]] && ok "fichiers hosts et commande retirés" || ko "fichier hosts ou commande laissé"
 expect "relais : vérifié une fois avec le jeton du module" "$(jq -c 'select(.token.module_id == "ia-faux") | .line' "$TMP/relay.log" | tail -n 1)" '"GET /v1/relay/check HTTP/1.1"'
 expect "aucune réutilisation de résultat (V4)" "$(jq -r '.cache_key // "aucune" | tostring' <<< "$M") $(jq -r '.reused // false' <<< "$M")" "aucune false"
 expect "result.json conforme au schéma" "$(py 'import json
@@ -415,8 +425,10 @@ for _ in $(seq 50); do [[ -S "$B/relay.sock" ]] && break; sleep 0.1; done
 bridge() { # code-de-sortie-de-l-outil
 	SCANORIA_RELAY_PORT=$BPORT python3 -I -B -c 'import runpy, sys
 g = runpy.run_path(sys.argv[1], run_name="bridge")
-g["main"].__globals__.update(SOCKET=sys.argv[2], TOKEN=sys.argv[3])
-sys.exit(g["main"](["bridge.py", "--", sys.executable, "-I", sys.argv[4], sys.argv[5], sys.argv[6]]))' "$BRIDGE" "$B/relay.sock" "$B/token" "$B/tool.py" "$1" "$BPORT"
+import json
+json.dump([sys.executable, "-I", sys.argv[4], sys.argv[5], sys.argv[6]], open(sys.argv[7], "w"))
+g["main"].__globals__.update(SOCKET=sys.argv[2], TOKEN=sys.argv[3], COMMAND=sys.argv[7])
+sys.exit(g["main"](["bridge.py"]))' "$BRIDGE" "$B/relay.sock" "$B/token" "$B/tool.py" "$1" "$BPORT" "$B/command.json"
 }
 set +e
 out=$(bridge 0); rc=$?
@@ -432,14 +444,24 @@ expect "pont : code de sortie de l'outil rendu (3)" "$rc" 3
 set +e
 python3 -I -B -c 'import runpy, sys
 g = runpy.run_path(sys.argv[1], run_name="bridge")
-g["main"].__globals__.update(TOKEN=sys.argv[2])
-sys.exit(g["main"](["bridge.py", "--", "true"]))' "$BRIDGE" "$B/absent" 2> "$B/err"; rc=$?
+g["main"].__globals__.update(TOKEN=sys.argv[2], COMMAND=sys.argv[3])
+sys.exit(g["main"](["bridge.py"]))' "$BRIDGE" "$B/absent" "$B/command.json" 2> "$B/err"; rc=$?
 set -e
 expect "pont : jeton absent → 70, outil non lancé" "$rc $(cat "$B/err")" "70 ai-relay bridge: relay token missing"
+for bad in '[]' '[""]' '"true"' '["true", 3]' '{' ; do
+	printf '%s' "$bad" > "$B/bad-command.json"
+	set +e
+	python3 -I -B -c 'import runpy, sys
+g = runpy.run_path(sys.argv[1], run_name="bridge")
+g["main"].__globals__.update(TOKEN=sys.argv[2], COMMAND=sys.argv[3])
+sys.exit(g["main"](["bridge.py"]))' "$BRIDGE" "$B/token" "$B/bad-command.json" 2> "$B/err"; rc=$?
+	set -e
+	expect "pont : commande invalide ($bad) → 70, outil non lancé" "$rc $(cat "$B/err")" "70 ai-relay bridge: tool command missing or invalid"
+done
 set +e
 python3 -I -B "$BRIDGE" true 2> /dev/null; rc=$?
 set -e
-expect "pont : usage sans « -- » → 70" "$rc" 70
+expect "pont : commande en argument refusée → 70" "$rc" 70
 kill "$ECHO_PID" 2> /dev/null || true
 
 # --- 7. I23 : désactivation automatique d'un module d'IA au canari ------------------------------

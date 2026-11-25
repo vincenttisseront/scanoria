@@ -57,6 +57,9 @@ interface FindingRow {
   // 0.6 (J6) : résultat externe et sa source.
   origin?: 'module' | 'external' | 'ai'
   external_source?: { tool: string, version: string | null, format: string, uploaded_via: string } | null
+  // 0.7 (B) : responsables CODEOWNERS (F6) et règle de tri en masse (F4).
+  owners?: string[]
+  triage_rule_id?: string | null
 }
 interface FindingDetail extends FindingRow {
   message: string | null
@@ -107,6 +110,9 @@ const filters = reactive({
   kev: q.kev === 'true',
   grouped: q.grouped !== 'false',
   origin: ['module', 'external', 'ai'].includes(str(q.origin)) ? str(q.origin) : 'all',
+  // F6 (0.7) : « Mes résultats » et responsable CODEOWNERS.
+  mine: q.mine === 'true',
+  owner: str(q.owner).slice(0, 255),
 })
 const items = ref<FindingRow[]>([])
 const total = ref(0)
@@ -139,6 +145,8 @@ function query(): Record<string, unknown> {
   if (filters.kev) out.kev = 'true'
   if (filters.grouped) out.grouped = 'true'
   if (filters.origin !== 'all') out.origin = filters.origin
+  if (filters.mine) out.mine = 'true'
+  if (filters.owner.trim()) out.owner = filters.owner.trim()
   return out
 }
 
@@ -202,7 +210,7 @@ watch(filters, () => {
 onBeforeUnmount(() => clearTimeout(debounce))
 
 function resetFilters() {
-  Object.assign(filters, { project_id: 'all', scan_id: '', tool: '', severity: 'all', category: 'all', status: 'open', q: '', is_new: false, secret: false, malicious: false, epss_min: 'all', kev: false, grouped: true, origin: 'all' })
+  Object.assign(filters, { project_id: 'all', scan_id: '', tool: '', severity: 'all', category: 'all', status: 'open', q: '', is_new: false, secret: false, malicious: false, epss_min: 'all', kev: false, grouped: true, origin: 'all', mine: false, owner: '' })
 }
 
 const totals = computed(() => summary.value.reduce((acc, p) => ({
@@ -319,7 +327,8 @@ async function post(path: string, body: Record<string, unknown>, key: string): P
     const res = await api<FindingDetail>(`/api/findings/${detail.value.id}/${groupPath(path)}`, { method: 'POST', body })
     // F16 : le tri d'un groupe renvoie la liste des résultats triés ; le détail est relu.
     detail.value = groupPath(path) === path ? res : await api<FindingDetail>(`/api/findings/${detail.value.id}`)
-    toast.add({ title: t('findings.saved'), color: 'success' })
+    // « accepted » dépose une demande d'exception (F5, J15) : le statut ne change qu'à l'approbation.
+    toast.add({ title: key === 'accepted' ? t('findings.requestSent') : t('findings.saved'), color: 'success' })
     void reloadAll()
     return true
   }
@@ -336,7 +345,7 @@ const applyToGroup = ref(true)
 const groupPath = (path: string) => (path === 'status' && applyToGroup.value && (detail.value?.group?.members.length ?? 0) > 1 ? 'group-status' : path)
 const setStatus = (status: 'new' | 'confirmed') => post('status', { status }, status)
 
-// Modale de motif (faux positif) ou de motif + date de fin (acceptation).
+// Modale de motif (faux positif) ou de motif + date de fin (demande d'acceptation, approuvée par un administrateur).
 const reasonOpen = ref(false)
 const reasonMode = ref<'false-positive' | 'accepted'>('false-positive')
 const reasonForm = reactive({ reason: '', until: '' })
@@ -375,6 +384,13 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
         color="neutral"
         variant="ghost"
         :label="t('findings.exceptionsLink')"
+      />
+      <UButton
+        to="/findings/rules"
+        icon="i-lucide-list-filter"
+        color="neutral"
+        variant="ghost"
+        :label="t('triage.rules.nav')"
       />
       <UButton
         to="/system/severities"
@@ -512,6 +528,18 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
       <UCheckbox
         v-model="filters.malicious"
         :label="t('findings.filters.onlyMalicious')"
+      />
+      <UCheckbox
+        v-model="filters.mine"
+        :label="t('triage.owners.mine')"
+        data-testid="filter-mine"
+      />
+      <UBadge
+        v-if="filters.owner"
+        color="neutral"
+        variant="subtle"
+        :label="t('triage.owners.filtered', { owner: filters.owner })"
+        data-testid="filter-owner"
       />
       <UButton
         size="xs"
@@ -804,6 +832,34 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
             >
               {{ t('findings.detail.reason') }} : {{ detail.status_reason }}
             </p>
+            <p
+              v-if="detail.triage_rule_id"
+              class="text-xs text-muted"
+              data-testid="detail-triage-rule"
+            >
+              <NuxtLink
+                :to="`/findings/rules?rule=${detail.triage_rule_id}`"
+                class="underline"
+              >
+                {{ t('triage.rules.appliedBy') }}
+              </NuxtLink>
+            </p>
+            <p
+              v-if="detail.owners?.length"
+              class="flex flex-wrap items-center gap-1"
+              data-testid="detail-owners"
+            >
+              <span class="text-muted">{{ t('triage.owners.label') }} :</span>
+              <UButton
+                v-for="o in detail.owners"
+                :key="o"
+                size="xs"
+                color="neutral"
+                variant="subtle"
+                :label="o"
+                @click="filters.owner = o"
+              />
+            </p>
             <div
               v-if="canTriage && detail.status !== 'fixed'"
               class="mt-2 flex flex-wrap gap-2"
@@ -843,7 +899,7 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
                 color="neutral"
                 variant="ghost"
                 icon="i-lucide-shield-off"
-                :to="`/findings/exceptions?project_id=${detail.project_id}&finding_id=${detail.id}`"
+                :to="`/projects/${detail.project_id}/exceptions/new?finding=${detail.id}`"
                 :label="t('findings.actions.createException')"
               />
             </div>

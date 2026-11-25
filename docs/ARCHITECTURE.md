@@ -832,8 +832,10 @@ conteneur du module (--network=none, utilisateur 65534)
   modèle est choisi par l'appliance, clé de sélection `relay`, qui suit le
   modèle par défaut), `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
   `NODE_EXTRA_CA_CERTS` (`/run/scanoria-relay/ca.pem`). La commande du module
-  est lancée sous le pont (`python3 -I /scanoria-relay/bridge.py -- …`,
-  interpréteur réglable par `scan.relay_python`).
+  est lancée sous le pont (`python3 -I /scanoria-relay/bridge.py`, interpréteur
+  réglable par `scan.relay_python`), qui la lit dans
+  `/run/scanoria-relay/command.json` (écrit par le runner, 0400, jamais en
+  argument).
 - **Jeton éphémère** : `scr_` + 48 octets aléatoires, créé par le runner pour un
   module d'une analyse ; sa portée `{purpose, module_id, project_id, scan_id,
   expires_at}` est écrite sous son empreinte dans `/run/scanoria-relay/tokens`

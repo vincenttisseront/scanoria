@@ -58,6 +58,12 @@ le socket Unix supprime ces trois points.
 - `/run/scanoria-relay/ca.pem` : le certificat public de l'AC interne ;
 - `/scanoria-relay/bridge.py` : le pont de l'appliance ;
 - `/etc/hosts` : `ai-relay.<nom>` vers `127.0.0.1`, rien d'autre ;
+- `/run/scanoria-relay/command.json` : la commande de l'outil, liste JSON
+  validée par le runner (`airelay.command_doc` : 256 arguments au plus, sans
+  NUL) puis relue et revalidée par le pont, qui la lance sans shell. Elle ne
+  passe pas par les arguments du pont. Ce fichier et `/etc/hosts` sont créés
+  en 0400 pour l'utilisateur 65534 (`O_EXCL`, `O_NOFOLLOW`) et retirés après
+  le module ;
 - `/run/secrets/relay-token` : son jeton éphémère (secret Podman, 0400,
   utilisateur 65534).
 

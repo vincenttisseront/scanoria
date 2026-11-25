@@ -176,7 +176,7 @@ describe('mise en page principale', () => {
     const lists = nav.props('items') as { label: string, type?: string, to?: string, target?: string }[][]
     expect(lists.map(l => l.map(i => i.label))).toEqual([
       ['Tableau de bord'],
-      ['Analyse', 'Projets', 'Analyses', 'Résultats', 'Composants', 'Quality gates', 'Licences', 'Santé'],
+      ['Analyse', 'Projets', 'Analyses', 'Résultats', 'Exceptions à approuver', 'Composants', 'Quality gates', 'Licences', 'Santé'],
       ['Modules', 'Catalogue', 'Dependency-Track', 'SonarQube'],
       ['Administration', 'Système', 'Certificats TLS', 'Utilisateurs', 'IA', 'Hors ligne', 'Journal d’audit', 'Mises à jour', 'À propos'],
     ])

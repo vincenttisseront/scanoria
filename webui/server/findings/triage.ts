@@ -9,6 +9,7 @@ import type { Queryable } from '../utils/db'
 import { redact } from './redact'
 import { INTEL_COLUMNS, intelJoin } from '../intel/lookup'
 import { groupsFor, type FindingGroup } from './correlation'
+import { mineClause } from './owners'
 
 /** Statut effectif : une acceptation échue redevient « nouveau » d'elle-même. */
 export const EFFECTIVE_STATUS = `CASE WHEN f.status = 'accepted' AND f.status_until < current_date THEN 'new' ELSE f.status END`
@@ -34,6 +35,10 @@ export interface FindingFilter {
   grouped?: boolean
   /** J6 (0.6) : origine du résultat. */
   origin?: 'module' | 'external' | 'ai'
+  /** F6 (0.7) : un responsable lu dans CODEOWNERS. */
+  owner?: string
+  /** F6 (0.7) : « Mes résultats », compte et ses formes directes (ownerAliases). */
+  mine?: { userId: number, aliases: string[] }
   limit: number
   offset: number
 }
@@ -73,6 +78,9 @@ export interface FindingRow {
   external_source: { tool: string, version: string | null, format: string, uploaded_via: string } | null
   correlation_key: string | null
   group?: FindingGroup | null
+  /** F6 (0.7) : responsables (CODEOWNERS). F4 (0.7) : règle de tri qui a posé le statut. */
+  owners: string[]
+  triage_rule_id: string | null
 }
 
 const TS = (col: string) => `to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`
@@ -97,6 +105,11 @@ function where(f: Omit<FindingFilter, 'limit' | 'offset'>, params: unknown[]): s
   if (f.epss_min !== undefined) add('round(intel.epss::numeric, 6) >= ?::numeric', f.epss_min)
   if (f.kev !== undefined) clauses.push(f.kev ? 'intel.kev' : 'NOT intel.kev')
   if (f.origin) add('f.origin = ?', f.origin)
+  if (f.owner) add('EXISTS (SELECT 1 FROM unnest(f.owners) o WHERE lower(o) = lower(?))', f.owner)
+  if (f.mine) {
+    params.push(f.mine.userId, f.mine.aliases)
+    clauses.push(mineClause(`$${params.length - 1}`, `$${params.length}`))
+  }
   if (f.q) {
     const like = `%${f.q.replace(/[\\%_]/g, m => `\\${m}`)}%`
     add('(f.title ILIKE ? OR f.rule_id ILIKE $X OR f.path ILIKE $X OR array_to_string(f.vuln_ids, \' \') ILIKE $X OR f.package->>\'name\' ILIKE $X)'.replace(/\$X/g, `$${params.length + 1}`), like)
@@ -110,6 +123,7 @@ const LIST_COLUMNS = `f.id, f.project_id, p.slug AS project_slug, p.name AS proj
   (${IS_NEW}) AS is_new,
   ${TS('f.created_at')} AS first_seen_at, ${TS('f.updated_at')} AS updated_at,
   ${INTEL_COLUMNS}, f.correlation_key,
+  f.owners, f.triage_rule_id,
   f.origin, (SELECT s.external_source FROM scans s WHERE s.id = f.last_scan_id AND f.origin = 'external') AS external_source`
 
 const SEV_RANK = `CASE f.severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END`
@@ -241,15 +255,59 @@ export async function findingsSummary(db: Queryable): Promise<SummaryRow[]> {
 }
 
 export class TriageError extends Error {
-  constructor(public code: 'E_NOT_FOUND' | 'E_MALICIOUS' | 'E_NOT_SECRET' | 'E_VALIDATION') {
+  constructor(public code: 'E_NOT_FOUND' | 'E_MALICIOUS' | 'E_NOT_SECRET' | 'E_VALIDATION' | 'E_TRIAGE_NOT_ALLOWED', public detail?: TriageRefusal) {
     super(code)
   }
 }
 
+/** Raison d'un tri refusé (même règle que J15 pour l'approbation). */
+export type TriageRefusal = 'not-human' | 'commit-author'
+
+/**
+ * Tri direct d'un opérateur. « accepted » n'en fait pas partie : accepter un
+ * risque passe par une demande d'exception approuvée par un administrateur
+ * (F5, J15), et seule l'approbation pose ce statut (applyApprovedAcceptance).
+ */
 export interface StatusChange {
-  status: 'new' | 'confirmed' | 'false-positive' | 'accepted'
+  status: 'new' | 'confirmed' | 'false-positive'
   reason?: string | null
-  until?: string | null
+}
+
+/** Qui trie : son compte, pour les règles « auteur du commit » et « non humain ». */
+export interface Triager {
+  id: number
+  username: string
+  email: string | null
+  kind: string
+}
+
+const sameIdentity = (a: string | null | undefined, b: string | null | undefined) =>
+  !!a && !!b && a.trim().replace(/^@/, '').toLowerCase() === b.trim().replace(/^@/, '').toLowerCase()
+
+/** Auteurs connus des commits où le résultat a été vu (auteur de la PR analysée). */
+export async function findingAuthors(db: Queryable, findingId: string): Promise<string[]> {
+  const r = await db.query<{ author: string }>(
+    `SELECT DISTINCT s.pull_request->>'author' AS author
+       FROM scan_findings sf JOIN scans s ON s.id = sf.scan_id
+      WHERE sf.finding_id = $1 AND s.pull_request->>'author' IS NOT NULL
+      LIMIT 20`, [findingId])
+  return r.rows.map(x => x.author).filter(a => !!a.trim())
+}
+
+/**
+ * Un faux positif écarte le résultat du quality gate : refusé, comme une
+ * approbation J15, à une identité non humaine et à l'auteur du commit concerné.
+ */
+export async function falsePositiveRefusal(db: Queryable, findingId: string, who: Triager | null): Promise<TriageRefusal | null> {
+  if (!who || who.kind !== 'human') return 'not-human'
+  const authors = await findingAuthors(db, findingId)
+  return authors.some(a => sameIdentity(a, who.username) || sameIdentity(a, who.email)) ? 'commit-author' : null
+}
+
+/** Compte du trieur (null s'il n'existe plus). */
+export async function loadTriager(db: Queryable, userId: number): Promise<Triager | null> {
+  const r = await db.query<Triager>('SELECT id::int AS id, username, email, kind FROM users WHERE id = $1', [userId])
+  return r.rows[0] ?? null
 }
 
 interface Current {
@@ -269,14 +327,38 @@ async function lockFinding(db: Queryable, id: string): Promise<Current> {
 
 /** Tri d'un résultat ; renvoie l'ancien statut pour l'audit. */
 export async function setFindingStatus(db: Queryable, id: string, change: StatusChange, userId: number | null): Promise<{ before: Current }> {
+  if (!(['new', 'confirmed', 'false-positive'] as string[]).includes(change.status)) throw new TriageError('E_VALIDATION')
   const cur = await lockFinding(db, id)
   // H4 : un paquet malveillant reste bloquant, sans exception possible.
-  if (cur.malicious && (change.status === 'accepted' || change.status === 'false-positive')) throw new TriageError('E_MALICIOUS')
-  if (change.status === 'accepted' && (!change.reason || !change.until)) throw new TriageError('E_VALIDATION')
+  if (cur.malicious && change.status === 'false-positive') throw new TriageError('E_MALICIOUS')
+  if (change.status === 'false-positive') {
+    const refusal = await falsePositiveRefusal(db, id, userId === null ? null : await loadTriager(db, userId))
+    if (refusal) throw new TriageError('E_TRIAGE_NOT_ALLOWED', refusal)
+  }
   await db.query(
-    `UPDATE findings SET status = $2, status_reason = $3, status_until = $4::date, status_by = $5, status_at = now(), updated_at = now()
+    // Un tri humain reprend la main sur une règle F4 : sa révocation ne le défera pas.
+    `UPDATE findings SET status = $2, status_reason = $3, status_until = NULL, status_by = $4, status_at = now(), updated_at = now(),
+            triage_rule_id = NULL
       WHERE id = $1`,
-    [id, change.status, change.reason ? redact(change.reason) : null, change.status === 'accepted' ? change.until : null, userId],
+    [id, change.status, change.reason ? redact(change.reason) : null, userId],
+  )
+  return { before: cur }
+}
+
+/**
+ * Seul chemin qui pose « accepted » : l'approbation d'une exception de type
+ * « finding » (decideException), avec la date de fin et le motif approuvés.
+ * Renvoie l'ancien statut, ou null si le résultat n'existe plus ou est malveillant.
+ */
+export async function applyApprovedAcceptance(db: Queryable, id: string, approved: { until: string, reason: string, deciderId: number }): Promise<{ before: Current } | null> {
+  const r = await db.query<Current>('SELECT id, project_id, status, malicious, secret_type, secret_state FROM findings WHERE id = $1 FOR UPDATE', [id])
+  const cur = r.rows[0]
+  if (!cur || cur.malicious) return null
+  await db.query(
+    `UPDATE findings SET status = 'accepted', status_reason = $2, status_until = $3::date, status_by = $4, status_at = now(), updated_at = now(),
+            triage_rule_id = NULL
+      WHERE id = $1`,
+    [id, redact(approved.reason), approved.until, approved.deciderId],
   )
   return { before: cur }
 }
@@ -287,6 +369,11 @@ export async function setSecretState(db: Queryable, id: string, state: 'to-revok
   if (!cur.secret_type) throw new TriageError('E_NOT_SECRET')
   // H4 : « pas un secret » classerait faux positif un résultat malveillant.
   if (cur.malicious && state === 'false-positive') throw new TriageError('E_MALICIOUS')
+  // « Pas un secret » est un faux positif : même règle que le tri (J15).
+  if (state === 'false-positive') {
+    const refusal = await falsePositiveRefusal(db, id, userId === null ? null : await loadTriager(db, userId))
+    if (refusal) throw new TriageError('E_TRIAGE_NOT_ALLOWED', refusal)
+  }
   await db.query(
     `UPDATE findings SET secret_state = $2, secret_state_by = $3, secret_state_at = now(), updated_at = now(),
             status = CASE WHEN $2 = 'false-positive' THEN 'false-positive'

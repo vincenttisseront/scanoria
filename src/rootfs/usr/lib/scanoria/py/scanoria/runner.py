@@ -35,7 +35,7 @@ import urllib.parse
 
 import contextlib
 
-from . import airelay, applicability, catalogverify, common, feeds, fetch, gitmirror, modules, resultcache, sbom, \
+from . import airelay, applicability, catalogverify, codeowners, common, feeds, fetch, gitmirror, modules, resultcache, sbom, \
     schedule, schema, svcnet, testbed, vigilance, workspace
 from .common import Fail
 
@@ -836,7 +836,11 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
         if use_sbom:
             cmd = spec["sbom_command"]
         if relay:
-            cmd = airelay.wrap_command(m, cmd)
+            try:
+                cmd = lease.wrap(cmd)
+            except (airelay.Unavailable, OSError) as u:
+                stack.close()
+                return finish("error", _err("E_MODULE_INVALID", "input", getattr(u, "message", str(u))))
         args += ["--entrypoint", json.dumps([cmd[0]]), m["image"]] + list(cmd[1:])
         sampler = Sampler(name)
         sampler.start()
@@ -1080,6 +1084,9 @@ def execute(job):
             _copy_fetch_log(ws, rdir)
             return result
         source.update(files=files, bytes=size, skipped=skipped)
+        # F6 (0.7, B) : CODEOWNERS copié tel quel pour la console, sans rien exécuter.
+        if src["kind"] != "sbom":
+            codeowners.capture(os.path.join(ws, "src"), rdir)
         # V9 : exclusions masquées pour les modules hors secrets et SAST seulement ;
         # jamais écrites dans le résultat (seul leur décompte l'est). Les masques sont
         # créés avant les modules, qui tournent en parallèle (V5).

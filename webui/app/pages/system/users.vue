@@ -28,6 +28,7 @@ interface UserRow {
   role: Role
   locale: 'fr' | 'en'
   is_active: boolean
+  kind?: 'human' | 'agent' | 'bot'
   must_change_password: boolean
   locked_until: string | null
   last_login_at: string | null
@@ -91,11 +92,12 @@ async function create() {
 // --- Modification ---
 const editOpen = ref(false)
 const editing = ref<UserRow | null>(null)
-const editForm = reactive({ display_name: '', email: '', role: 'viewer' as Role, locale: 'fr' as 'fr' | 'en', is_active: true })
+const editForm = reactive({ display_name: '', email: '', role: 'viewer' as Role, locale: 'fr' as 'fr' | 'en', is_active: true, kind: 'human' as 'human' | 'agent' | 'bot' })
+const kindItems = computed(() => (['human', 'agent', 'bot'] as const).map(k => ({ label: t(`triage.userKind.${k}`), value: k })))
 const saving = ref(false)
 function openEdit(u: UserRow) {
   editing.value = u
-  Object.assign(editForm, { display_name: u.display_name ?? '', email: u.email ?? '', role: u.role, locale: u.locale, is_active: u.is_active })
+  Object.assign(editForm, { display_name: u.display_name ?? '', email: u.email ?? '', role: u.role, locale: u.locale, is_active: u.is_active, kind: u.kind ?? 'human' })
   editOpen.value = true
 }
 async function saveEdit() {
@@ -110,6 +112,7 @@ async function saveEdit() {
         role: editForm.role,
         locale: editForm.locale,
         is_active: editForm.is_active,
+        kind: editForm.kind,
       },
     })
     toast.add({ title: t('users.updated'), color: 'success' })
@@ -374,6 +377,17 @@ const columns = computed<TableColumn<UserRow>[]>(() => [
             v-model="editForm.is_active"
             :label="t('users.active')"
           />
+          <UFormField
+            :label="t('triage.userKind.label')"
+            :help="t('triage.userKind.help')"
+          >
+            <USelect
+              v-model="editForm.kind"
+              :items="kindItems"
+              class="w-60"
+              data-testid="user-kind"
+            />
+          </UFormField>
         </div>
       </template>
       <template #footer>

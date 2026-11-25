@@ -46,6 +46,8 @@ PORT = 8443
 MOUNT = "/run/scanoria-relay"
 BRIDGE_MOUNT = "/scanoria-relay"
 TOKEN_NAME = "relay-token"
+COMMAND_MOUNT = MOUNT + "/command.json"
+COMMAND_MAX_ARGS = 256
 MODEL_ALIAS = "scanoria"
 NOBODY = 65534
 PYTHON_RE = re.compile(r"(python3|/[A-Za-z0-9._/-]{1,120}/python3(\.[0-9]{1,2})?)\Z")
@@ -90,9 +92,18 @@ def python_of(m):
     return py
 
 
-def wrap_command(m, cmd):
-    """Commande lancée sous le pont : il écoute, lance l'outil, rend son code de sortie."""
-    return [python_of(m), "-I", BRIDGE_MOUNT + "/bridge.py", "--"] + list(cmd)
+def wrap_command(m):
+    """Point d'entrée du conteneur : le pont écoute, lance l'outil décrit dans
+    COMMAND_MOUNT (écrit par Lease.wrap), rend son code de sortie."""
+    return [python_of(m), "-I", BRIDGE_MOUNT + "/bridge.py"]
+
+
+def command_doc(cmd):
+    """Commande de l'outil pour le pont : liste JSON de chaînes, bornée, sans NUL."""
+    if not isinstance(cmd, list) or not 1 <= len(cmd) <= COMMAND_MAX_ARGS or not cmd[0] \
+            or not all(isinstance(a, str) and len(a) <= 4096 and "\0" not in a for a in cmd):
+        raise Unavailable("E_MODULE_INVALID", "invalid scan.command for the AI relay bridge")
+    return json.dumps(cmd, separators=(",", ":"))
 
 
 def bridge_ready():
@@ -183,12 +194,28 @@ def purge_tokens(now=None, everything=False):
     return n
 
 
-def _hosts_file(workdir, host):
-    path = os.path.join(workdir, "relay-hosts")
-    with open(path, "w", encoding="ascii") as f:
-        f.write("127.0.0.1\tlocalhost %s\n::1\tlocalhost ip6-localhost\n" % host)
-    os.chmod(path, 0o644)
+def _container_file(path, content):
+    """Fichier monté en lecture seule dans le conteneur : lisible par son seul
+    utilisateur (NOBODY, testbed.confined_args), mode 0400, jamais un lien."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            f.write(content)
+            if os.geteuid() == 0:   # root, y compris b35-live ; sans root (b35-relais), le propriétaire reste
+                os.fchown(f.fileno(), NOBODY, NOBODY)
+            os.fchmod(f.fileno(), 0o400)
+    except BaseException:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
     return path
+
+
+def _hosts_file(workdir, host):
+    return _container_file(os.path.join(workdir, "relay-hosts"),
+                           "127.0.0.1\tlocalhost %s\n::1\tlocalhost ip6-localhost\n" % host)
 
 
 def check(token, host, timeout=CHECK_TIMEOUT_S):
@@ -260,6 +287,7 @@ class Lease:
         self.token_path = None
         self.secret_created = False
         self.hosts = None
+        self.command = None
         self.host = None
         self.model = None
 
@@ -272,6 +300,7 @@ class Lease:
             self.token_path = write_token(self.token, self.record)
             self.model = check(self.token, self.host)
             self.hosts = _hosts_file(self.workdir, self.host)
+            self.command = os.path.join(self.workdir, "relay-command.json")
             tmp = os.path.join(common.RUN, "relay-secret-%s" % self.secret)
             os.makedirs(os.path.dirname(tmp), mode=0o750, exist_ok=True)
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -289,6 +318,11 @@ class Lease:
             raise
         return self
 
+    def wrap(self, cmd):
+        """Écrit la commande de l'outil (lue par le pont) et rend le point d'entrée du conteneur."""
+        _container_file(self.command, command_doc(list(cmd)))
+        return wrap_command(self.m)
+
     def args(self):
         base = "https://%s:%d/v1" % (self.host, PORT)
         ca = MOUNT + "/ca.pem"
@@ -296,6 +330,7 @@ class Lease:
                 "--volume", "%s:%s/relay.sock:ro" % (SOCKET, MOUNT),
                 "--volume", "%s:%s:ro" % (CA_CERT, ca),
                 "--volume", "%s:/etc/hosts:ro" % self.hosts,
+                "--volume", "%s:%s:ro" % (self.command, COMMAND_MOUNT),
                 "--volume", "%s:%s:ro" % (BRIDGE_DIR, BRIDGE_MOUNT),
                 "--env", "OPENAI_BASE_URL=" + base,
                 "--env", "OPENAI_API_BASE=" + base,
@@ -318,12 +353,14 @@ class Lease:
             except Exception as e:  # noqa: BLE001 (repris par remove_orphan_secrets au démarrage)
                 common.log("runner: cannot remove podman secret %s: %r" % (self.secret, e))
             self.secret_created = False
-        if self.hosts:
-            try:
-                os.unlink(self.hosts)
-            except OSError:
-                pass
-            self.hosts = None
+        for attr in ("hosts", "command"):
+            path = getattr(self, attr)
+            if path:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+                setattr(self, attr, None)
         return False
 
 

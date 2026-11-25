@@ -495,11 +495,13 @@ def run(manifest, timeout=None):
             try:
                 with airelay.Lease(manifest, project_id=None, scan_id=None, timeout_s=t + 60,
                                    workdir=work, purpose="testbed") as lease:
-                    rc, hint = run_confined(manifest, airelay.wrap_command(manifest, cmd), mounts, timeout=t,
+                    rc, hint = run_confined(manifest, lease.wrap(cmd), mounts, timeout=t,
                                             env=scan.get("env"), with_stderr=True,
                                             network=["--network=none"] + lease.args())
                     hint = hint.replace(lease.token, "***")
             except airelay.Unavailable as u:
+                if u.code == "E_MODULE_INVALID":
+                    raise Fail(u.code, u.message)
                 raise Fail("E_RELAY_UNAVAILABLE" if u.code != airelay.E_RELAY_TOKEN else "E_RELAY_TOKEN",
                            "%s: activate the AI connector (System › AI) before this module" % u.message
                            if u.code == airelay.E_RELAY_UNAVAILABLE else u.message)

@@ -36,6 +36,9 @@ export const findingQuerySchema = z.strictObject({
   grouped: bool.optional(),
   // 0.6 (J6) : origine du résultat, module de l'appliance ou outil externe ; 0.7 (contrat 32) : module d'analyse par IA.
   origin: z.enum(['module', 'external', 'ai']).optional(),
+  // 0.7 (F6) : responsable CODEOWNERS, et « Mes résultats ».
+  owner: z.string().trim().min(1).max(255).optional(),
+  mine: bool.optional(),
 })
 
 const day = z.string().refine(isValidDay)
