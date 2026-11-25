@@ -3,9 +3,11 @@
 //
 // Jetons d'API de la CI (ARCHITECTURE § 12.8). Passe avant auth.ts (ordre
 // alphabétique des middlewares Nitro) :
-// - « Authorization: Bearer scn_… » n'est admis que sur les routes de la CI
-//   (dépôt d'une analyse, verdict), et seulement pour le projet du jeton ;
-//   empreinte comparée en temps constant, limite de débit, last_used_at ;
+// - « Authorization: Bearer … » n'est admis que sur les routes de la CI
+//   (dépôt d'une analyse, verdict), et seulement pour le projet de l'appelant :
+//   jeton d'API « scn_… » (empreinte comparée en temps constant, last_used_at)
+//   ou, depuis la 0.8 (J4), jeton OIDC de la CI rattaché par une liaison ;
+//   l'authentification passe par authenticateCi (contrat 41), avec limite de débit ;
 // - badge SVG et client scanoria-scan : routes publiques (le badge vérifie
 //   lui-même qu'il est activé pour le projet).
 // Une requête authentifiée ici n'a pas de session : auth.ts la laisse passer,
@@ -15,7 +17,7 @@ import { defineEventHandler, getHeader, setHeader, type H3Event } from 'h3'
 import { getPool } from '../utils/db'
 import { apiError, clientAddress } from '../utils/http'
 import { FixedWindowLimiter } from '../utils/ratelimit'
-import { verifyApiToken } from '../gates/tokens'
+import { CiAuthError, authenticateCi, ciAuthHttpError } from '../ci/auth'
 import { gateError } from '../gates/http'
 
 const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
@@ -65,18 +67,26 @@ export default defineEventHandler(async (event) => {
   const route = CI_ROUTES.find(r => r.method === method && r.re.test(path))
   if (!route) throw gateError(403, 'E_TOKEN_SCOPE')
 
-  const presented = authz.replace(/^bearer\s+/i, '').trim()
-  const check = await verifyApiToken(getPool(), presented)
-  if (!check.ok) {
+  const projectId = route.project ? route.re.exec(path)![1]!.toLowerCase() : null
+  let auth
+  try {
+    auth = await authenticateCi(event, getPool(), projectId)
+  }
+  catch (err) {
+    if (!(err instanceof CiAuthError)) throw err
     // Seuls les refus sont limités par adresse : un jeton valide derrière le
     // même NAT n'est jamais bloqué par le mauvais jeton d'un voisin.
     if (!badTokenLimiter.hit(ip)) throw tooMany(event, badTokenLimiter, ip)
-    throw gateError(401, check.code)
+    throw ciAuthHttpError(err)
   }
-  if (!tokenLimiter.hit(check.token.id)) throw tooMany(event, tokenLimiter, check.token.id)
-  if (route.project) {
-    const projectId = route.re.exec(path)![1]!.toLowerCase()
-    if (projectId !== check.token.projectId) throw gateError(403, 'E_TOKEN_SCOPE')
+  const key = auth.apiTokenId ?? auth.identity.label
+  if (!tokenLimiter.hit(key)) throw tooMany(event, tokenLimiter, key)
+  event.context.apiToken = {
+    id: auth.apiTokenId ?? auth.identity.label,
+    apiTokenId: auth.apiTokenId,
+    projectId: auth.projectId,
+    scopes: auth.scopes,
+    prefix: auth.prefix,
+    label: auth.identity.label,
   }
-  event.context.apiToken = check.token
 })

@@ -19,6 +19,7 @@ import type { Queryable } from '../utils/db'
 import type { ScanTrigger } from '#shared/analysis'
 import { ForgeError } from '../forges/http'
 import { discoverForge, dueForges } from './discover'
+import { runCiIntegration } from '../ci/integration'
 import { nightlyFullScans, pollPullRequests } from '../forges/poll'
 import { getProject, projectClient, refreshDetection, type ProjectRow } from './service'
 
@@ -146,6 +147,10 @@ export async function runProjectSchedules(db: ScheduleDb, now: Date, enqueue: En
     if (updated?.detection && !('error' in updated.detection)) result.detected++
     else result.errors++
   }
+
+  // J2 (0.8) : PR d'intégration des dépôts détectés, suivi des PR ouvertes.
+  const integ = await runCiIntegration(db).catch(() => ({ errors: 1 }))
+  result.errors += integ.errors
 
   const { rows: due } = await db.query<{ id: string }>(
     `SELECT id::text FROM projects

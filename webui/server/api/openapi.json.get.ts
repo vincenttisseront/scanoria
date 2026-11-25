@@ -11,6 +11,7 @@ import { VIGILANCE_OPS, vigilanceSchemas } from '../vigilance/openapi'
 import { PROFILE_OPS, profileSchemas } from '../profiles/openapi'
 import { RULESET_OPS, rulesetSchemas } from '../rulesets/openapi'
 import { TRIAGE_OPS, triageSchemas } from '../findings/openapi-07'
+import { CI_OPS, ciSchemas } from '../ci/openapi'
 
 type Role = 'public' | 'viewer' | 'operator' | 'admin'
 
@@ -147,6 +148,7 @@ const OPS: Record<string, Record<string, Op>> = {
   ...PROFILE_OPS,
   ...RULESET_OPS,
   ...TRIAGE_OPS,
+  ...CI_OPS,
   '/api/scans': {
     get: { summary: 'Scan queue (status=active, in worker order) or history (filters: project, status, verdict, trigger; paginated)', role: 'viewer' },
     post: { summary: 'Queue a manual scan {project_id, ref?, profile?}; 200 when merged into an identical queued scan', role: 'operator', body: 'ScanCreate', status: 202 },
@@ -257,7 +259,7 @@ export default defineEventHandler(async () => {
     components: {
       securitySchemes: {
         session: { type: 'apiKey', in: 'cookie', name: '__Host-scanoria_session' },
-        apiToken: { type: 'http', scheme: 'bearer', description: 'Project API token scn_… (CI routes only: queue a scan, read a verdict)' },
+        apiToken: { type: 'http', scheme: 'bearer', description: 'Project API token scn_…, or since 0.8 (J4) a CI OIDC token (GitHub Actions, Forgejo Actions, GitLab id_tokens; audience scanoria) bound to the project by repository and ref. CI routes only: queue a scan, read a verdict, upload results, request an exception. Always a non-human identity' },
       },
       schemas: {
         AiConnector: {
@@ -401,6 +403,7 @@ export default defineEventHandler(async () => {
         ...profileSchemas(),
         ...rulesetSchemas(),
         ...triageSchemas(),
+        ...ciSchemas(),
         FindingStatus: {
           type: 'object', additionalProperties: false, required: ['status'],
           properties: {

@@ -16,6 +16,7 @@ import { ProjectExistsError, createProject } from './service'
 import { ensureServiceApp, refreshAppCredential, webhookSecret } from '../forges/apps'
 import { forgePublisher } from '../forges/client'
 import { consoleUrl } from '../forges/context'
+import { bindEnrolledProject, ensureForgeOidc } from '../ci/oidc'
 
 export interface DiscoveryResult {
   repos: number
@@ -41,6 +42,8 @@ export async function discoverForge(db: Queryable, forgeIn: ForgeRow, actor: { u
     const client = await openForge(db, forge)
     const repos = await client.listRepos()
     result.repos = repos.length
+    // J4 (0.8) : émetteur OIDC de la forge déclaré une fois (liaisons des projets déjà enrôlés).
+    await ensureForgeOidc(db, forge)
     const { rows } = await db.query<{ repo_full_name: string }>(
       `SELECT repo_full_name FROM projects WHERE forge_id = $1 AND repo_full_name IS NOT NULL`, [forge.id])
     const known = new Set(rows.map(r => r.repo_full_name.toLowerCase()))
@@ -62,6 +65,8 @@ export async function discoverForge(db: Queryable, forgeIn: ForgeRow, actor: { u
           schedule: 'on-commit',
         })
         result.created.push(p.id)
+        // J4 (0.8) : liaison OIDC du dépôt (refs/heads/main, refs/tags/*).
+        await bindEnrolledProject(db, forge, p.id, repo.full_name, { id: repo.id, defaultBranch: repo.default_branch })
         known.add(repo.full_name.toLowerCase())
       }
       catch (err) {
