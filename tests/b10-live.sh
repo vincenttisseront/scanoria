@@ -46,7 +46,9 @@ if [[ ${#ids[@]} -eq 0 ]]; then
 	for f in "$ROOT"/modules/*/module.yaml; do
 		# Les scanners reliés à un service (sonar-scanner) ont leur propre batterie (b17-live),
 		# ceux de la catégorie sbom (Syft, Grype, dtrack-upload) la leur (b19-live).
-		[[ "$(yq "$f" | jq -r '.type == "scanner" and (.scan.network | startswith("service:") | not) and (.categories | index("sbom") | not)')" == true ]] \
+		# Un module en attente d'image (image_pending, 0.7) est éprouvé par la batterie -live qui
+		# construit son image localement (b36-live pour les modules d'analyse IA).
+		[[ "$(yq "$f" | jq -r '.type == "scanner" and (.image_pending != true) and (.scan.network | startswith("service:") | not) and (.categories | index("sbom") | not)')" == true ]] \
 			&& ids+=("$(basename "$(dirname "$f")")")
 	done
 fi

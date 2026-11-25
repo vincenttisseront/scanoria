@@ -485,6 +485,19 @@ def check_index(index, index_validator):
 
 # --- Construction -----------------------------------------------------------------------
 
+def check_pending(entries, packs, pending):
+    """Un module en attente d'image (image_pending) n'est requis par aucun module publié ni cité par un pack."""
+    waiting = set(pending)
+    for m in entries:
+        for r in m["requires"].get("modules", []):
+            if r in waiting:
+                raise BuildError("%s : requiert « %s », en attente d'image (absent de l'index)" % (m["id"], r))
+    for p in packs:
+        for mid in p.get("modules", []):
+            if mid in waiting:
+                raise BuildError("pack %s : « %s » est en attente d'image (absent de l'index)" % (p["id"], mid))
+
+
 def normalize(manifest):
     m = json.loads(json.dumps(manifest))
     req = m.get("requires") or {}
@@ -533,7 +546,7 @@ def build(a):
 
     prepare_out(out)
 
-    entries = []
+    entries, pending = [], []
     for mid in ids:
         mdir = os.path.join(modules_dir, mid)
         if os.path.islink(mdir) or not os.path.isdir(mdir):
@@ -544,6 +557,11 @@ def build(a):
         validate(mod_v, manifest, "modules/%s/module.yaml" % mid)
         if not isinstance(manifest, dict) or manifest.get("id") != mid:
             raise BuildError("modules/%s/module.yaml : id ≠ nom du répertoire" % mid)
+        if manifest.get("image_pending") is True:
+            # 0.7 : image construite par la CI de Scanoria, pas encore publiée
+            # (tool-images.yml) ; le module n'entre dans l'index qu'avec son empreinte.
+            pending.append(mid)
+            continue
         m = normalize(manifest)
         tb = m.get("testbed")
         if tb is None:
@@ -573,6 +591,7 @@ def build(a):
 
     packs_doc = load_yaml(packs_file)
     validate(packs_v, packs_doc, os.path.relpath(packs_file, root))
+    check_pending(entries, packs_doc["packs"], pending)
     index = {
         "schema": 1,
         "version": version,
@@ -592,6 +611,8 @@ def build(a):
             f.write("%s  %s\n" % (sha256_file(os.path.join(out, n)), n))
     print("catalogue %d : %d modules, %d packs, %d bancs d'essai → %s"
           % (version, len(entries), len(index["packs"]), len(names) - 1, out))
+    if pending:
+        print("en attente d'image, hors de l'index : %s" % ", ".join(pending))
     return 0
 
 
