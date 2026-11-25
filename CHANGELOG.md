@@ -24,6 +24,11 @@ mise à jour d'une appliance échouait, puis son retour arrière aussi.
   un avertissement. Le contrôle de santé qui suit une mise à jour rejoue
   `selftest --quick` pendant 180 s au plus, et nomme les contrôles en échec.
 - **Worker** : il publie son signe de vie dès le démarrage.
+- **Modules « service »** : l'ISO installe désormais `aardvark-dns` et
+  `netavark`. Sans eux, un scanner relié au réseau d'un service ne résolvait
+  pas son nom, et l'installation de `dtrack-upload` échouait à son banc
+  d'essai. `scanoria-selftest` signale leur absence (`podman.dns`, en
+  avertissement).
 - **Versions figées par projet** (G6) : la console écrit de nouveau
   `pins.json`.
 - Base : la migration 018 (préparation de la 0.8) est appliquée. Elle ne
@@ -45,6 +50,13 @@ rm -f /var/lib/scanoria/updates/alert.json
 Autre possibilité : désactiver le connecteur IA, mettre à jour, puis le
 réactiver. Une fois la 0.7.1 installée, le fichier ajouté ne sert plus et
 peut être supprimé.
+
+Une mise à jour n'installe aucun paquet système. Sur une appliance installée
+depuis une ISO antérieure à la 0.7.1, si `scanoria-selftest` signale
+`podman.dns`, il faut donc, en root, lancer `apt install aardvark-dns`, puis
+réinstaller depuis le catalogue le module concerné (par exemple
+`dtrack-upload`). Hors ligne, on installe le paquet `aardvark-dns` de la
+distribution de l'appliance avec `apt install ./aardvark-dns_*.deb`.
 
 ## 0.7.0 — 2026-11-25
 
