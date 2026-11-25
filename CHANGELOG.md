@@ -10,7 +10,94 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.5.0 — non publiée
+## 0.6.0 — non publiée
+
+Hors ligne et vigilance : une appliance sans Internet reçoit le catalogue,
+les images et les bases par un lot signé ou depuis une appliance miroir.
+L'appliance surveille ses propres outils, et les analyses vont plus vite
+sans rien perdre en reproductibilité ni en confinement.
+
+### Ajouté
+- **Hors ligne** :
+  - chaque appliance a sa propre clé Ed25519 ;
+  - **lots hors ligne signés** : export à la demande ou planifié du
+    catalogue, des images et des bases, puis import vérifié (signature
+    d'une clé de confiance, images présentes dans le catalogue officiel,
+    empreintes, chemins, taille) ;
+  - magasin de clés de confiance tenu par le service root ;
+  - **appliance miroir** (F17) ;
+  - page « Hors ligne » sous Système.
+- **Dependency-Track hors ligne** : sa sortie Internet est fermée. Il lit
+  les bases de l'appliance en HTTPS, sous un certificat de l'AC interne,
+  depuis son seul réseau. Les sources qui ne peuvent pas être servies
+  localement sont affichées comme trous de couverture.
+- **Fraîcheur obligatoire** (G16) : au-delà de 7 jours par défaut, une base
+  utilisée rend le verdict non concluant (motif « base trop ancienne »,
+  action « rafraîchir la base »). Le seuil se règle dans le quality gate et
+  peut se limiter à un simple signalement.
+- **Vigilance de l'appliance** (F19) : les SBOM de la console et des images
+  des modules installés sont comparés chaque jour aux bases. Une alerte
+  « module vulnérable, mise à jour disponible » s'affiche sur le tableau de
+  bord et dans Mises à jour.
+- **Canaris nocturnes** (G14) : les bancs d'essai des scanners sont rejoués
+  chaque nuit. Une détection perdue est signalée et auditée, sans
+  désactiver le module.
+- **Mise à jour d'outil à l'essai** (F13) : la version candidate rejoue les
+  dernières analyses sans aucun effet. L'écart s'affiche, puis on l'adopte
+  ou on l'abandonne en un clic.
+- **Version de module figée par projet** (G6), avec un motif obligatoire.
+  L'image est gardée après une mise à jour.
+- **Résultats externes** (J6) : un SARIF 2.1.0 ou un CycloneDX produit
+  ailleurs se téléverse par l'API ou par `scanoria-scan upload`. Il est
+  validé, normalisé, marqué « externe » et pris en compte par le quality
+  gate.
+- **ModelScan** (K8) : les fichiers de modèles qui exécutent du code au
+  chargement sont bloquants par défaut. Le module ne se lance que si le
+  dépôt contient des modèles.
+- IA : **diagnostic de l'appliance** (I16), qui explique en clair une alerte
+  ou un échec de selftest, de mise à jour ou d'installation, et propose une
+  action de la console.
+- Catalogue n° 16.
+
+### Plus rapide
+- Les images des modules sont préchargées et vérifiées : une analyse ne
+  télécharge jamais d'image (V1).
+- **Miroir Git local** par projet : seuls les nouveaux objets sont
+  récupérés (V2).
+- **SBOM unique** produit par Syft et relu par Grype (V3).
+- **Résultats réutilisés** pour un commit déjà analysé, après revalidation
+  (V4).
+- Les outils longs démarrent d'abord, en parallèle dans la limite de la RAM
+  (V5).
+- Un outil sans fichier concerné n'est plus lancé : il est « non
+  applicable » et jamais bloquant (V6).
+- Les bases sont louées par analyse : une mise à jour pendant une analyse
+  ne change pas la version lue (V7, G11).
+- Les sources sont traitées en mémoire quand la RAM le permet (V9). Les
+  modules de secrets et de SAST voient toujours tout l'arbre.
+- Cache SonarQube par projet (V10).
+- Une batterie de mesure des délais (2 vCPU / 4 Go) tourne à chaque
+  changement du moteur d'analyse et chaque semaine.
+
+### Limites connues
+- OSV-Scanner et Trivy ne relisent pas encore le SBOM partagé. Les modules
+  qui lisent l'historique (gitleaks) ne sont jamais mis en cache.
+- Un plan dont tous les modules sont « non applicables » donne un verdict
+  favorable. Les modules de secrets n'ont pas de restriction de contenu et
+  tournent toujours.
+- « Mise à jour disponible » ne vérifie pas que la nouvelle version corrige
+  la vulnérabilité.
+- Désinstaller un module retire aussi ses versions figées : les projets
+  concernés deviennent non concluants.
+- Une analyse externe ne se rejoue pas (ni plan ni image).
+- L'image ModelScan n'existe qu'en amd64, et pèse environ 616 Mo.
+- Une fois un miroir déclaré, les bases ne sont plus rafraîchies par
+  Internet.
+- La sortie réseau des runners de CI n'est pas encore fermée (prévu en
+  0.9).
+- La référence de la batterie de mesure sera posée dans une PR séparée.
+
+## 0.5.0 — 2026-11-24
 
 SBOM : chaque analyse relève ses composants, et toute la chaîne de la 0.5
 (composants, licences, quarantaine, EPSS et KEV, recoupement) fonctionne de
