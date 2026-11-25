@@ -304,5 +304,38 @@ else
 	echo "info vrai catalogue : aucun modules/*/module.yaml dans le dépôt, construction réelle non testée"
 fi
 
+# --- Image en attente (image_pending, 0.7) : module écarté de l'index ---------------------------------
+# Copie du vrai catalogue plus un scanner « zz-pending » tiré de gitleaks, sans image et
+# image_pending: true (image construite par la CI de Scanoria, pas encore publiée).
+pending_tree() {
+	rm -rf "$TMP/pd" && mkdir -p "$TMP/pd" && cp -a "$ROOT/modules" "$TMP/pd/modules" && cp "$ROOT/catalog/packs.yaml" "$TMP/pd/packs.yaml"
+	cp -a "$ROOT/modules/gitleaks" "$TMP/pd/modules/zz-pending"
+	sed -i -e 's/^id: gitleaks$/id: zz-pending/' -e '/^image: /d' -e 's/^version: \(.*\)$/image_pending: true\nversion: \1/' \
+		"$TMP/pd/modules/zz-pending/module.yaml"
+}
+pd_build() {
+	python3 "$B" build --modules "$TMP/pd/modules" --packs "$TMP/pd/packs.yaml" --date "$DATE" --version 9 --out "$TMP/pd-out"
+}
+pending_tree
+if pd_build > "$TMP/log" 2>&1; then ok "image en attente : construction acceptée"; else ko "image en attente : construction"; sed 's/^/     /' "$TMP/log" | head -n 10; fi
+grep -q "en attente d'image, hors de l'index : zz-pending" "$TMP/log" && ok "image en attente : annoncée par build.py" || ko "image en attente : non annoncée"
+jq -e '[.modules[].id] | index("zz-pending") == null' "$TMP/pd-out/catalog-index.json" > /dev/null \
+	&& ok "image en attente : module absent de l'index" || ko "image en attente : module présent dans l'index"
+pd_archives=("$TMP"/pd-out/testbed-zz-pending*)
+[[ ${#pd_archives[@]} -eq 0 ]] && ok "image en attente : aucun banc d'essai archivé" || ko "image en attente : banc d'essai archivé"
+pending_hostile() { # libellé motif commande_sed_ou_shell
+	pending_tree
+	(cd "$TMP/pd" && eval "$3")
+	expect_ko "image en attente hostile : $1" "$2" pd_build
+}
+pending_hostile "image et image_pending ensemble" "schéma" \
+	'sed -i "s|^image_pending: true$|image_pending: true\nimage: registry.exemple.test/outils/z@sha256:$(printf "0%.0s" {1..64})|" modules/zz-pending/module.yaml'
+pending_hostile "image_pending: false" "schéma" 'sed -i "s/^image_pending: true$/image_pending: false/" modules/zz-pending/module.yaml'
+pending_hostile "base (feed) avec image_pending" "schéma" 'sed -i "s/^type: feed$/type: feed\nimage_pending: true/" modules/trivy-db/module.yaml'
+pending_hostile "module publié qui le requiert" "en attente d'image" \
+	'sed -i "s/modules: \[git-fetch\]/modules: [git-fetch, zz-pending]/" modules/osv-scanner/module.yaml && grep -q zz-pending modules/osv-scanner/module.yaml'
+pending_hostile "pack qui le cite" "en attente d'image" \
+	'python3 -c "import sys, yaml; p = sys.argv[1]; d = yaml.safe_load(open(p)); d[\"packs\"][0][\"modules\"].append(\"zz-pending\"); yaml.safe_dump(d, open(p, \"w\"), allow_unicode=True)" packs.yaml'
+
 echo "b11 : $PASS ok, $FAIL échec(s)"
 [[ "$FAIL" -eq 0 ]]
