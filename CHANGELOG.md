@@ -10,7 +10,134 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.6.0 — non publiée
+## 0.7.0 — non publiée
+
+SAST, IaC et intégration aux forges : l'appliance analyse le code et les
+workflows avec de nouveaux outils, publie son verdict dans les PR, et toute
+acceptation d'un risque passe par l'approbation d'une autre personne. Les
+profils s'héritent et se verrouillent, la configuration se met dans le
+dépôt, et les premiers outils d'analyse par IA passent par un relais local.
+
+### Ajouté
+- **SAST, IaC et CI** :
+  - **Opengrep** (moteur SAST par défaut), avec des règles maison livrées
+    comme jeu de règles de départ ;
+  - **Semgrep CE** en option, avec seulement des jeux de règles importés par
+    l'administrateur, car les règles officielles ne sont jamais embarquées ;
+  - **Checkov** et **KICS** (IaC), **Bandit** (Python) ;
+  - **zizmor** (H1), lancé dès qu'un dépôt contient des workflows ;
+  - **OpenSSF Scorecard** (H2) en mode local, avec un score par projet et un
+    seuil par défaut dans le quality gate.
+- **Jeux de règles gérés** (G4) : création, import, versions et différences,
+  retour à une version antérieure. Ils se rattachent aux profils depuis la
+  page du profil. Un jeu est validé par le moteur dans un conteneur confiné,
+  et son empreinte est figée dans le plan de l'analyse.
+- **Tri en masse** (F4) : des règles par chemin, outil, règle et gravité,
+  avec une justification et une date de fin obligatoires. L'effet est simulé
+  avant l'enregistrement, et les règles sont auditées et révocables.
+- **Exceptions soumises à approbation** (F5, J15) :
+  - une acceptation se demande depuis la console, la CI, la PR
+    (`/scanoria accept`) ou un outil, puis un autre administrateur humain la
+    décide ;
+  - ni le demandeur ni l'auteur du commit ne peuvent décider, et un jeton,
+    un agent, un bot ou l'IA ne peuvent que demander ;
+  - aucune exception pour un paquet malveillant (`MAL-`) ni contre un verrou
+    de profil ;
+  - le verdict est réévalué sans réanalyse ;
+  - accepter un résultat depuis le tri dépose désormais une demande
+    d'exception ;
+  - un faux positif est refusé à l'auteur du commit et aux identités non
+    humaines ;
+  - `/scanoria accept` est réservé à l'auteur de la PR et aux rédacteurs du
+    dépôt, à raison de 10 demandes par heure au plus.
+- **Responsables `CODEOWNERS`** (F6), lus sans rien exécuter, avec la vue
+  « Mes résultats ». Les comptes ont une nature : personne, agent ou bot.
+- **Profils** (G8, G9, G10) :
+  - profils personnalisés hérités de l'entreprise, puis de l'équipe, puis du
+    projet ;
+  - des verrous qu'un niveau inférieur ne peut pas assouplir (catégories et
+    modules exigés, plancher de quality gate, « aucun envoi à l'IA ») ;
+  - un profil par déclencheur : `rapide` pour les PR, `complet` la nuit,
+    `release` pour les releases ;
+  - un aperçu avant l'enregistrement : modules, manques, durée, ressources
+    et couverture.
+- **Configuration en code** (J8) : `.scanoria.yml` facultatif, dont les
+  exceptions deviennent des demandes. L'export et l'import en YAML de la
+  configuration de l'appliance se font sans aucun secret, avec un aperçu des
+  écarts.
+- **Reprise de l'existant** (J5) : les configurations d'outils présentes
+  dans le dépôt, et les statuts de tri d'une instance SonarQube,
+  Dependency-Track ou DefectDojo, sont repris comme demandes d'exception.
+- **Forges** (J1, D4) :
+  - application GitHub créée par son manifeste, jeton de compte de service
+    pour Forgejo et GitLab ;
+  - enrôlement automatique des dépôts de l'organisation, et suspension d'un
+    dépôt archivé ;
+  - webhooks signés, sans rejeu possible.
+- **Retour dans la PR** :
+  - un statut de commit ;
+  - un seul commentaire de synthèse, mis à jour en place, avec la revue des
+    dépendances (H6) et l'explication IA des nouveaux résultats (I25) ;
+  - des annotations bornées ligne à ligne (J7) ;
+  - l'analyse incrémentale des PR (G18), qui compare le gate à la base ;
+  - le **verdict défavorable anticipé** (V8) : le statut d'échec est publié
+    dès qu'un blocage est certain.
+- **Relais IA local** (§ 3.5) : `scanoria-ai` sert une API compatible
+  OpenAI, en HTTPS sur un socket Unix. Il applique les mêmes garde-fous que
+  le reste de l'IA. Le conteneur d'un module d'analyse par IA reste sans
+  réseau et reçoit un jeton éphémère pour chaque analyse.
+- **Modules d'analyse par IA** :
+  - **Agentic Radar** (K7), qui fait l'inventaire des workflows d'agents ;
+  - **Cisco MCP Scanner** (K5) et **Cisco Skill Scanner** (K6), en YARA hors
+    ligne, avec un juge LLM facultatif ;
+  - **Vulnhuntr** (K3) ;
+  - **PR-Agent** (K2) et **Fraim** (K4), qui reçoivent le diff de la PR.
+
+  Leurs résultats sont marqués « IA » et restent hors verdict tant qu'une
+  personne ne les a pas confirmés. Sans connecteur, ces modules sont
+  « non applicables ».
+- IA : **recherche en langage naturel** (I8), traduite en filtres de la
+  console et jamais en SQL ; **générateur de règles** (I12), dont chaque
+  règle est testée sur un exemple positif et un négatif ; **rédaction des
+  exceptions** (I10).
+- **Images d'outils construites par la CI** quand l'amont n'en publie pas
+  d'épinglable. Elles sont publiées sur GHCR, puis épinglées par empreinte.
+- Ollama : la vérification du certificat peut être désactivée pour un
+  certificat autosigné, avec un avertissement.
+- Catalogue n° 24.
+
+### Corrigé
+- Masquage des valeurs aléatoires faites de lettres seules avant tout envoi
+  à l'IA.
+- Tests : attente de la fermeture réelle des connexions avant la
+  suppression d'une base de test.
+
+### Reporté
+- **Kodus (K1)** n'est pas intégré dans cette version. Une partie de son
+  code est sous licence propriétaire. Il lui faut un jeton d'écriture et le
+  rôle administrateur sur chaque dépôt. Il ne tient pas sur 4 Go. PR-Agent
+  (K2) assure la revue IA des PR. L'étude est dans `docs/ETUDE-K1-KODUS.md`.
+
+### Limites connues
+- Une appliance qui n'a qu'un seul administrateur ne peut pas approuver les
+  demandes de cet administrateur.
+- L'auteur d'un résultat n'est connu que par la PR analysée. La simulation
+  d'une règle faux positif donne un majorant.
+- Scorecard ne lance pas les contrôles qui demandent l'API de la forge.
+  Checkov ne donne pas de gravité native. Semgrep CE exige un jeu de règles
+  attaché. Pour gitleaks, un seul jeu de règles par profil.
+- La connexion OAuth de Forgejo et de GitLab n'est pas encore faite : un
+  jeton de compte de service, administrateur du dépôt, sert à sa place. En
+  mode tiré, seuls les commentaires des dernières 24 h sont lus.
+- Les annotations J7 ne sont pas marquées « IA ». La description de PR
+  proposée par PR-Agent n'est pas publiée.
+- Le relais rend un flux en un seul morceau. Aucun essai n'a été fait
+  contre un vrai serveur Ollama : le support d'Ollama par Vulnhuntr est
+  « expérimental » en amont.
+- Les images d'outils construites par la CI n'ont qu'une version amd64, et
+  les premières n'ont pas d'attestation de provenance.
+
+## 0.6.0 — 2026-11-25
 
 Hors ligne et vigilance : une appliance sans Internet reçoit le catalogue,
 les images et les bases par un lot signé ou depuis une appliance miroir.

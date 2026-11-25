@@ -33,7 +33,7 @@ license:
 upstream:
   homepage: https://github.com/the-pr-agent/pr-agent
   source: https://pypi.org/project/pr-agent/0.50.0/
-image_pending: true
+image: ghcr.io/vincenttisseront/scanoria-pr-agent@sha256:a39cf52a4a321b522caf24c98c8365ed14e27a494c4290880152fff6bcd8397e
 version: "0.50.0"
 resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 1500 }
 hostname: null
