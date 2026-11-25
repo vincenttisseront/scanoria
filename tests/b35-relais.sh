@@ -707,7 +707,7 @@ def discover_workflows():
 EOF
 ESS="$TMP/essai-k"; mkdir -p "$ESS"
 tool() { # outil args… (environnement de l'essai déjà posé)
-	PYTHONPATH="$STUB" TMPDIR="$ESS" ESSAI_LOG="$ESS/log.jsonl" python3 -B "$@" 2> "$ESS/err"
+	PYTHONPATH="$STUB" TMPDIR="$ESS" SCANORIA_OUT_DIR="$ESS" ESSAI_LOG="$ESS/log.jsonl" python3 -B "$@" 2> "$ESS/err"
 }
 cp "$ROOT/modules/pr-agent/tests/native-review.json" "$ESS/review.json"; cp "$ROOT/modules/pr-agent/tests/native-describe.json" "$ESS/describe.json"
 : > "$ESS/log.jsonl"; set +e
@@ -724,6 +724,8 @@ SCANORIA_PR_DIFF="$ROOT/modules/pr-agent/testbed/pr.diff" ESSAI_REVIEW=raise ESS
 tool "$PA"; rc3=$?
 set -e
 expect "PR-Agent : sans diff ou sans revue → 3 (skipped), usage → 2, aucun SARIF" "$rc1 $rc2 $rc3 $([[ -e "$ESS/pa2.sarif" ]] && echo écrit || echo absent)" "3 3 2 absent"
+set +e; tool "$PA" "$TMP/ailleurs.sarif"; ra=$?; tool "$PA" "$ESS/../x.sarif"; rb=$?; tool "$FR" "$ESS/src" "$ESS/x.json"; rc=$?; set -e
+expect "PR-Agent, Fraim : sortie hors du répertoire de sortie, remontée ou mauvais nom refusée (usage)" "$ra $rb $rc" "2 2 2"
 mkdir -p "$ESS/src" && printf 'app.py\ninfra/main.tf\n../hors.py\n' > "$ESS/changed.txt"
 : > "$ESS/log.jsonl"; set +e
 SCANORIA_PR_DIFF="$ROOT/modules/fraim/testbed/pr.diff" SCANORIA_CHANGED_FILES="$ESS/changed.txt" GITHUB_TOKEN=ghp_essai \

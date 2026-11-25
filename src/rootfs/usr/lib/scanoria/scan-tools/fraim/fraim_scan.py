@@ -55,6 +55,21 @@ SEVERITIES = ("critical", "high", "medium", "low")
 CONFIDENCE = 7
 
 
+OUT_DIR = os.environ.get("SCANORIA_OUT_DIR") or "/out"     # /out dans le conteneur
+NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,100}")
+
+
+def out_path(arg):
+    """Sortie reconstruite sous OUT_DIR depuis un nom validé ; None si l'argument n'est pas <OUT_DIR>/<nom>.sarif."""
+    if os.path.dirname(arg) != OUT_DIR.rstrip("/"):
+        return None
+    m = NAME_RE.fullmatch(os.path.basename(arg))
+    if not m or not m.group(0).endswith(".sarif") or m.group(0) in (".", ".."):
+        return None
+    path = os.path.realpath(os.path.join(OUT_DIR, m.group(0)))
+    return path if os.path.dirname(path) == os.path.realpath(OUT_DIR) else None
+
+
 def text(v, limit=MAX_TEXT):
     if isinstance(v, dict):
         v = v.get("text")
@@ -230,12 +245,13 @@ def configure():
 
 
 def main(argv):
-    if len(argv) != 3:
-        sys.stderr.write("usage: fraim_scan.py <sources> <output.sarif>\n")
+    output = out_path(argv[2]) if len(argv) == 3 else None
+    if output is None:
+        sys.stderr.write("usage: fraim_scan.py <sources> /out/<nom>.sarif\n")
         return 2
-    root, output = argv[1], argv[2]
+    root = argv[1]
     configure()
-    work = tempfile.mkdtemp(prefix="fraim-", dir=os.environ.get("TMPDIR") or "/tmp")
+    work = tempfile.mkdtemp(prefix="fraim-")   # TMPDIR du manifeste, privé (0700)
     os.chdir(work)
     model = "openai/" + (os.environ.get("SCANORIA_AI_MODEL") or "scanoria")
     base = {"location": root, "model": model, "temperature": 0, "confidence": CONFIDENCE,

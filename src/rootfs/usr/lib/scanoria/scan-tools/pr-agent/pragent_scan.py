@@ -47,6 +47,21 @@ RULES = {
 }
 
 
+OUT_DIR = os.environ.get("SCANORIA_OUT_DIR") or "/out"     # /out dans le conteneur
+NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,100}")
+
+
+def out_path(arg):
+    """Sortie reconstruite sous OUT_DIR depuis un nom validé ; None si l'argument n'est pas <OUT_DIR>/<nom>.sarif."""
+    if os.path.dirname(arg) != OUT_DIR.rstrip("/"):
+        return None
+    m = NAME_RE.fullmatch(os.path.basename(arg))
+    if not m or not m.group(0).endswith(".sarif") or m.group(0) in (".", ".."):
+        return None
+    path = os.path.realpath(os.path.join(OUT_DIR, m.group(0)))
+    return path if os.path.dirname(path) == os.path.realpath(OUT_DIR) else None
+
+
 def text(v, limit=MAX_TEXT):
     if not isinstance(v, str):
         return ""
@@ -216,8 +231,9 @@ def run_pr_agent(diff_path, work):
 
 
 def main(argv):
-    if len(argv) != 2:
-        sys.stderr.write("usage: pragent_scan.py <output.sarif>\n")
+    output = out_path(argv[1]) if len(argv) == 2 else None
+    if output is None:
+        sys.stderr.write("usage: pragent_scan.py /out/<nom>.sarif\n")
         return 2
     diff_path = os.environ.get("SCANORIA_PR_DIFF") or ""
     try:
@@ -227,17 +243,17 @@ def main(argv):
         sys.stderr.write("pr-agent: no pull request diff\n")
         return 3
     configure()
-    work = tempfile.mkdtemp(prefix="pr-agent-", dir=os.environ.get("TMPDIR") or "/tmp")
+    work = tempfile.mkdtemp(prefix="pr-agent-")   # TMPDIR du manifeste, privé (0700)
     os.chdir(work)               # aucune racine Git : PR-Agent reste sur le seul diff
     produced = run_pr_agent(diff_path, work)
     if produced.get("review") is None:
         sys.stderr.write("pr-agent: the review produced no structured output\n")
         return 3
     doc = convert(produced["review"], produced.get("describe"), diff_files(diff))
-    tmp = argv[1] + ".tmp"
+    tmp = output + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
-    os.replace(tmp, argv[1])
+    os.replace(tmp, output)
     return 0
 
 
