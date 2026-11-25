@@ -76,3 +76,6 @@ export function lockValueLabel(v: unknown, t: (k: string) => string, te: (k: str
   if (typeof v === 'string' && te(`gates.severities.${v}`)) return t(`gates.severities.${v}`)
   return String(v)
 }
+
+/** Jeu de règles attaché à un profil (G4) : dernière version (null) ou version épinglée. */
+export interface RulesetAttachment { ruleset_id: string, pinned_version: number | null }

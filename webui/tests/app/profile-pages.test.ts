@@ -20,6 +20,7 @@ import ProjectProfiles from '~/components/profiles/ProjectProfiles.vue'
 import ImportExisting from '~/components/profiles/ImportExisting.vue'
 import LocksEditor from '~/components/profiles/LocksEditor.vue'
 import ScanConfigNote from '~/components/profiles/ScanConfigNote.vue'
+import RulesetsEditor from '~/components/profiles/RulesetsEditor.vue'
 import { cloneLocks, emptyLocks, lockFieldLabel, lockValueLabel, profileErrorDetails } from '~/utils/profiles'
 
 const { toastAdd, navigateToMock } = vi.hoisted(() => ({ toastAdd: vi.fn(), navigateToMock: vi.fn() }))
@@ -183,6 +184,77 @@ describe('détail d’un profil', () => {
     const buttons = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).filter(b => b.textContent?.trim() === 'Archiver')
     await click(buttons[buttons.length - 1]!)
     expect(callsTo('POST', `/api/profiles/${TEAM}/archive`)[0]!.body).toEqual({ archived: true })
+  })
+})
+
+describe('jeux de règles d’un profil', () => {
+  const RS1 = '66666666-6666-4666-8666-666666666666'
+  const RS2 = '77777777-7777-4777-8777-777777777777'
+  const rulesets = () => ({
+    items: [
+      { id: RS1, slug: 'regles-web', engine: 'opengrep', name: 'Web', latest_version: 3, archived_at: null },
+      { id: RS2, slug: 'gitleaks-maison', engine: 'gitleaks', name: 'Secrets', latest_version: 1, archived_at: null },
+    ],
+  })
+
+  it('attacher, épingler une version, détacher ; indicateur d’attente au chargement', async () => {
+    setUser('admin')
+    let release!: () => void
+    route('GET', '/api/rulesets', () => new Promise((resolve) => {
+      release = () => resolve(rulesets())
+    }))
+    const updates: unknown[] = []
+    const w = await mountIn(RulesetsEditor, {
+      props: { 'modelValue': [{ ruleset_id: RS1, pinned_version: null }], 'onUpdate:modelValue': (v: unknown) => {
+        updates.push(v)
+        void w.setProps({ modelValue: v as never })
+      } },
+    })
+    await settle()
+    expect(document.body.querySelector('[data-testid="rulesets-loading"]')).not.toBeNull()
+    release()
+    await settle()
+    expect(bodyText()).toContain('regles-web')
+    // Version : dernière, puis épinglée sur la 2.
+    w.findAllComponents({ name: 'USelect' }).at(0)!.vm.$emit('update:modelValue', '2')
+    await settle()
+    expect(updates.at(-1)).toEqual([{ ruleset_id: RS1, pinned_version: 2 }])
+    w.findAllComponents({ name: 'USelect' }).at(0)!.vm.$emit('update:modelValue', '__latest__')
+    await settle()
+    expect(updates.at(-1)).toEqual([{ ruleset_id: RS1, pinned_version: null }])
+    // Attacher le second, puis détacher le premier.
+    w.findComponent({ name: 'USelectMenu' }).vm.$emit('update:modelValue', RS2)
+    await settle()
+    expect(updates.at(-1)).toEqual([{ ruleset_id: RS1, pinned_version: null }, { ruleset_id: RS2, pinned_version: null }])
+    await click(document.body.querySelector<HTMLButtonElement>('[data-testid="ruleset-regles-web"] [data-testid="ruleset-remove"]')!)
+    expect(updates.at(-1)).toEqual([{ ruleset_id: RS2, pinned_version: null }])
+  })
+
+  it('lecture seule : ni ajout ni détachement ; erreur de chargement affichée', async () => {
+    setUser('viewer')
+    route('GET', '/api/rulesets', () => {
+      throw createError({ statusCode: 500, statusMessage: 'boom' })
+    })
+    await mount(RulesetsEditor, { props: { modelValue: [{ ruleset_id: RS1, pinned_version: 2 }], disabled: true, known: [{ ruleset_id: RS1, slug: 'regles-web', engine: 'opengrep' }] } })
+    expect(bodyText()).toContain('regles-web')
+    expect(document.body.querySelector('[data-testid="ruleset-add"]')).toBeNull()
+    expect(document.body.querySelector<HTMLButtonElement>('[data-testid="ruleset-remove"]')!.disabled).toBe(true)
+  })
+
+  it('page du profil : les jeux de règles partent avec le PATCH', async () => {
+    setUser('admin')
+    route('GET', '/api/rulesets', () => rulesets())
+    route('GET', `/api/profiles/${TEAM}`, () => ({
+      profile: { ...team, rulesets: [{ ruleset_id: RS1, slug: 'regles-web', engine: 'opengrep', pinned_version: 3 }] },
+      inherited_locks: emptyLocks(),
+      effective: { chain: [{ id: TEAM, slug: 'equipe-web', level: 'team' }], categories: [], include_modules: [], exclude_modules: [], locks: emptyLocks() },
+      projects: [],
+    }))
+    route('PATCH', `/api/profiles/${TEAM}`, () => team)
+    await mount(ProfilePage, { route: `/profiles/${TEAM}` })
+    await click(document.body.querySelector<HTMLButtonElement>('[data-testid="ruleset-regles-web"] [data-testid="ruleset-remove"]')!)
+    await click(document.body.querySelector<HTMLButtonElement>('[data-testid="profile-save"]')!)
+    expect(callsTo('PATCH', `/api/profiles/${TEAM}`)[0]!.body).toMatchObject({ rulesets: [] })
   })
 })
 

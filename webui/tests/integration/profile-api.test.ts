@@ -185,6 +185,26 @@ describe.skipIf(!DATABASE_URL)('profils (PostgreSQL réel)', () => {
     })
   })
 
+  describe('jeux de règles d’un profil (G4)', () => {
+    it('attacher, épingler, détacher par le PATCH ; version inexistante ou jeu archivé refusés', async () => {
+      const rs = (await h.db.pool.query<{ id: string }>(
+        `INSERT INTO rulesets (slug, engine, name) VALUES ('regles-profil', 'opengrep', 'Règles du profil') RETURNING id::text`)).rows[0]!.id
+      await h.db.pool.query(
+        `INSERT INTO ruleset_versions (ruleset_id, version, content, sha256) VALUES ($1, 1, 'rules: []', repeat('a', 64)), ($1, 2, 'rules: [] ', repeat('b', 64))`, [rs])
+      const patch = (rulesets: unknown) => h.call(`/api/profiles/${ids.equipe}`, { method: 'PATCH', client: admin, json: { rulesets } })
+      expect((await patch([{ ruleset_id: rs, pinned_version: 1 }])).status).toBe(200)
+      let got = await h.call(`/api/profiles/${ids.equipe}`, { client: viewer })
+      expect(got.data.profile.rulesets).toEqual([expect.objectContaining({ ruleset_id: rs, slug: 'regles-profil', pinned_version: 1 })])
+      expect((await patch([{ ruleset_id: rs, pinned_version: 9 }])).status).toBe(400)
+      expect((await h.call(`/api/profiles/${ids.equipe}`, { method: 'PATCH', client: operator, json: { rulesets: [] } })).status).toBe(403)
+      expect((await patch([])).status).toBe(200)
+      got = await h.call(`/api/profiles/${ids.equipe}`, { client: viewer })
+      expect(got.data.profile.rulesets).toEqual([])
+      await h.db.pool.query('UPDATE rulesets SET archived_at = now() WHERE id = $1', [rs])
+      expect((await patch([{ ruleset_id: rs, pinned_version: null }])).status).toBe(404)
+    })
+  })
+
   describe('profil par déclencheur (G9, contrat 29)', () => {
     it('défauts de l’entreprise : PR → rapide, nuit → complet, release → release', async () => {
       const p = await h.db.pool.query<{ id: string }>(
