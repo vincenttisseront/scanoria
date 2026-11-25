@@ -84,8 +84,9 @@ def write_json(path, doc):
     os.replace(tmp, path)
 
 
-def ruleset_dirs(root=RULES):
+def ruleset_dirs(root=None):
     """Dossiers /rules/<slug> retenus par le plan, triés ; jamais un lien."""
+    root = root or RULES
     if not os.path.isdir(root) or os.path.islink(root):
         return []
     out = []
@@ -96,7 +97,7 @@ def ruleset_dirs(root=RULES):
     return out
 
 
-def ruleset_files(name, root=RULES):
+def ruleset_files(name, root=None):
     """Fichiers <name> des jeux de règles montés : [(slug, chemin)]."""
     res = []
     for slug, d in ruleset_dirs(root):
@@ -229,9 +230,10 @@ def grep_configs(engine, builtin):
 GREP_WORK = "/tmp/sast-rules"
 
 
-def stage_configs(configs, work=GREP_WORK):
+def stage_configs(configs, work=None):
     """Copie chaque fichier de règles en <work>/<nom>.yaml : lancé depuis work,
     le moteur ne préfixe pas les identifiants de règle par le chemin du fichier."""
+    work = work or GREP_WORK
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work)
     names = []
@@ -300,8 +302,11 @@ def checkov_external_dirs(work):
     return dirs, ids
 
 
+CHECKOV_WORK = "/tmp/checkov-rules"
+
+
 def run_checkov(args):
-    work = "/tmp/checkov-rules"
+    work = CHECKOV_WORK
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work)
     ext, ids = checkov_external_dirs(work)
