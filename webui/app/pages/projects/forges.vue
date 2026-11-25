@@ -54,14 +54,45 @@ onBeforeUnmount(() => {
 const kinds = computed(() => [
   { label: label('forgeKind', 'forgejo'), value: 'forgejo' },
   { label: label('forgeKind', 'github'), value: 'github' },
+  { label: label('forgeKind', 'gitlab'), value: 'gitlab' },
 ])
-const form = reactive({ kind: 'forgejo' as 'forgejo' | 'github', name: '', base_url: '', token: '', discovery: true })
+const form = reactive({ kind: 'forgejo' as 'forgejo' | 'github' | 'gitlab', name: '', base_url: '', token: '', discovery: true })
 const adding = ref(false)
 const addError = ref('')
 const canAdd = computed(() => form.name.trim() && /^https:\/\//.test(form.base_url.trim()))
 watch(() => form.kind, (kind) => {
   if (kind === 'github' && !form.base_url) form.base_url = 'https://github.com'
 })
+
+// --- GitHub en un clic (J1) : manifeste posté par un formulaire caché ---
+const gh = reactive({ name: 'GitHub', org: '', reachable: false })
+const ghStarting = ref(false)
+const ghError = ref('')
+async function startGithub() {
+  ghStarting.value = true
+  ghError.value = ''
+  try {
+    const r = await api<{ action: string, manifest: string }>('/api/forges/github/manifest', {
+      method: 'POST',
+      body: { name: gh.name.trim(), org: gh.org.trim() || null, reachable: gh.reachable },
+    })
+    // Le flux du manifeste GitHub exige un POST de formulaire vers github.com.
+    const f = document.createElement('form')
+    f.method = 'post'
+    f.action = r.action
+    const input = document.createElement('input')
+    input.type = 'hidden'
+    input.name = 'manifest'
+    input.value = r.manifest
+    f.appendChild(input)
+    document.body.appendChild(f)
+    f.submit()
+  }
+  catch (err) {
+    ghError.value = message(err)
+    ghStarting.value = false
+  }
+}
 async function add() {
   adding.value = true
   addError.value = ''
@@ -231,6 +262,33 @@ async function confirmRemove() {
             · {{ t('projects.forges.lastDiscovery') }} {{ fmt.date(f.last_discovery_at) }}
             · {{ t('projects.forges.projectCount', { n: f.projects }) }}
           </p>
+          <template v-if="f.integration?.app">
+            <p class="text-sm">
+              {{ t(`projects.forges.app.${f.integration.app}`, { slug: f.integration.slug ?? '' }) }}
+              <template v-if="f.integration.app === 'github-app'">
+                · {{ t('projects.forges.installations', { n: f.integration.installations }) }}
+              </template>
+            </p>
+            <p class="text-xs text-muted">
+              {{ f.integration.app === 'github-app' ? t('projects.forges.appScopes') : t('projects.forges.serviceToken') }}
+              <span class="font-mono">{{ f.integration.scopes.join(', ') }}</span>
+            </p>
+          </template>
+          <p
+            v-if="f.integration"
+            class="text-sm text-muted"
+          >
+            {{ f.integration.mode === 'push' ? t('projects.forges.modePush') : t('projects.forges.modePull') }}
+            <template v-if="f.integration.last_webhook_at">
+              · {{ t('projects.forges.lastWebhook') }} {{ fmt.date(f.integration.last_webhook_at) }}
+            </template>
+          </p>
+          <UBadge
+            v-if="f.integration?.rejected_webhooks_30d"
+            color="warning"
+            variant="subtle"
+            :label="t('projects.forges.rejected', { n: f.integration.rejected_webhooks_30d })"
+          />
           <UAlert
             v-if="f.last_error"
             color="warning"
@@ -266,6 +324,63 @@ async function confirmRemove() {
           />
         </div>
       </div>
+    </UCard>
+
+    <UCard v-if="isAdmin">
+      <template #header>
+        <h2 class="font-semibold">
+          {{ t('projects.forges.github.title') }}
+        </h2>
+        <p class="text-sm text-muted">
+          {{ t('projects.forges.github.help') }}
+        </p>
+      </template>
+      <form
+        class="grid gap-4 sm:grid-cols-2"
+        @submit.prevent="startGithub"
+      >
+        <UFormField :label="t('projects.forges.name')">
+          <UInput
+            v-model="gh.name"
+            class="w-full"
+            maxlength="100"
+          />
+        </UFormField>
+        <UFormField
+          :label="t('projects.forges.github.org')"
+          :help="t('projects.forges.github.orgHelp')"
+        >
+          <UInput
+            v-model="gh.org"
+            class="w-full"
+            maxlength="39"
+          />
+        </UFormField>
+        <UFormField
+          class="sm:col-span-2"
+          :help="t('projects.forges.github.reachableHelp')"
+        >
+          <USwitch
+            v-model="gh.reachable"
+            :label="t('projects.forges.github.reachable')"
+          />
+        </UFormField>
+        <div class="flex items-center justify-end gap-2 sm:col-span-2">
+          <UAlert
+            v-if="ghError"
+            color="error"
+            variant="subtle"
+            :title="ghError"
+          />
+          <UButton
+            type="submit"
+            icon="i-lucide-github"
+            :loading="ghStarting"
+            :disabled="!gh.name.trim()"
+            :label="ghStarting ? t('projects.forges.github.preparing') : t('projects.forges.github.start')"
+          />
+        </div>
+      </form>
     </UCard>
 
     <UCard v-if="isAdmin">

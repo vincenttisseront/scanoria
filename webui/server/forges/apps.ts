@@ -16,7 +16,7 @@ import { createHmac, createPrivateKey, randomBytes, randomUUID, sign, timingSafe
 import type { Queryable } from '../utils/db'
 import { writeAudit, type AuditActor } from '../utils/audit'
 import { decryptSecret, encryptSecret, loadSecretKey, rotateSecret } from '../utils/secrets'
-import { ForgeError, forgeSendJson, normalizeBaseUrl } from './http'
+import { ForgeError, forgeGetJson, forgeSendJson, normalizeBaseUrl } from './http'
 import { githubApiBase } from './github'
 
 export type ForgeAppKind = 'github-app' | 'forgejo-oauth' | 'gitlab-oauth' | 'forgejo-token' | 'gitlab-token'
@@ -157,8 +157,10 @@ export async function startGithubManifest(input: { base_url: string, org?: strin
     name: `Scanoria ${host}`.slice(0, 34),
     url: input.consoleUrl,
     hook_attributes: { url: `${input.consoleUrl}/api/forges/${forgeId}/webhook`, active: input.reachable },
-    redirect_url: `${input.consoleUrl}/api/forges/github/callback`,
-    setup_url: `${input.consoleUrl}/api/forges/github/setup`,
+    // Pages de la console (et non l'API) : le cookie de session est SameSite=Strict,
+    // il n'accompagne pas la redirection depuis GitHub ; la page rappelle l'API.
+    redirect_url: `${input.consoleUrl}/forges/github`,
+    setup_url: `${input.consoleUrl}/forges/github`,
     setup_on_update: true,
     public: false,
     default_permissions: GITHUB_APP_PERMISSIONS,
@@ -276,6 +278,22 @@ export async function addInstallation(db: Queryable, forgeId: string, installati
   if (!r.rowCount) return false
   await writeAudit(db, { actor, action: 'forge.app-install', outcome: 'success', targetType: 'forge', targetId: forgeId, details: { installation_id: installationId } })
   return true
+}
+
+/**
+ * Installation annoncée par le retour de setup_url (paramètre d'adresse, donc
+ * non fiable) : retenue seulement si GitHub confirme, avec le JWT de
+ * l'application, qu'elle appartient bien à cette application.
+ */
+export async function verifyInstallation(db: Queryable, forge: { id: string, base_url: string }, installationId: string): Promise<boolean> {
+  if (!/^\d{1,20}$/.test(installationId)) return false
+  const app = await getForgeApp(db, forge.id)
+  if (app?.kind !== 'github-app' || !app.app_id || !app.key_credential_id) return false
+  const pem = (await decryptSecret(db, app.key_credential_id)).value
+  const { data } = await forgeGetJson<{ app_id?: unknown, id?: unknown }>(`${githubApiBase(forge.base_url)}/app/installations/${installationId}`, {
+    token: appJwt(app.app_id, pem), authScheme: 'Bearer', accept: 'application/vnd.github+json', headers: { 'x-github-api-version': '2022-11-28' },
+  })
+  return String(data?.app_id) === app.app_id && String(data?.id) === installationId
 }
 
 /**

@@ -18,9 +18,10 @@ import { gitlabPublisher } from './publish-gitlab'
 import { sanitizeForForge } from './sanitize'
 import type { ForgeAccess } from './types'
 
+import { MAX_ANNOTATIONS, MAX_CHANGED_FILES, SHA_RE, type ForgePublisherImpl } from './pr-types'
+
 export { sanitizeForForge, escapeInline, codeBlock } from './sanitize'
 export * from './pr-types'
-import type { Annotation, CommitState, ForgePublisherImpl, PullRequestRef } from './pr-types'
 
 export type ForgePublisher = Omit<ForgePublisherImpl, 'createComment' | 'updateComment'> & {
   /** Commentaire de synthèse mis à jour en place (un seul par PR) ; rend son identifiant. */
@@ -34,10 +35,7 @@ export interface PublisherOptions {
   consoleUrl: string | null
 }
 
-export const MAX_ANNOTATIONS = 30
-export const MAX_CHANGED_FILES = 3000
 const CONTEXT_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/
-const SHA_RE = /^[0-9a-f]{40,64}$/
 
 /** Description d'un statut : une ligne de texte brut, sans contrôle, bornée. */
 export function statusDescription(text: string): string {
@@ -96,4 +94,3 @@ export function forgePublisher(access: ForgeAccess, opts: PublisherOptions): For
     ensureWebhook: (repo, url, secret) => withForgeRetry(() => impl.ensureWebhook(repo, url, secret)),
   }
 }
-

@@ -196,7 +196,7 @@ describe.skipIf(!DATABASE_URL)('forges et projets (PostgreSQL, faux serveurs)', 
       await expect(createForge(db.pool, { kind: 'forgejo', name: 'Mauvais jeton', base_url: `https://${FORGEJO}`, token: 'scn_faux', discovery: true }, actor))
         .rejects.toMatchObject({ statusCode: 422, data: { code: 'E_FORGE_AUTH' } })
       await expect(createForge(db.pool, { kind: 'gitlab', name: 'GitLab', base_url: 'https://injoignable.exemple.test', discovery: true }, actor))
-        .rejects.toMatchObject({ statusCode: 422, data: { code: 'E_FORGE_UNREACHABLE' } })
+        .rejects.toMatchObject({ statusCode: 502, data: { code: 'E_FORGE_UNREACHABLE' } })
       await expect(createForge(db.pool, { kind: 'forgejo', name: 'Boucle', base_url: 'https://127.0.0.1', discovery: true }, actor))
         .rejects.toMatchObject({ statusCode: 400, data: { code: 'E_FORGE_URL' } })
 

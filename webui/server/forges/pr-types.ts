@@ -5,6 +5,10 @@
 
 import { ForgeError } from './http'
 
+export const MAX_ANNOTATIONS = 30
+export const MAX_CHANGED_FILES = 3000
+export const SHA_RE = /^[0-9a-f]{40,64}$/
+
 export interface PullRequestRef {
   number: number
   head_sha: string

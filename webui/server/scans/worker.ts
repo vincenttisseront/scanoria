@@ -18,10 +18,11 @@ import { logExcerpt, MAX_AI_EXCERPT } from '../health/log'
 import { FAILED_MODULE_STATUSES } from '../health/scans'
 import { gitRef, scanJobSchema, type JobCredential, type RunnerError, type ScanJob, type ScanResult } from './contract'
 import { checkEarlyFailure } from './early'
+import { isPullRequestScan } from '../gates/pr-baseline'
 import { copyModuleLog, jobPending, listIncomingJobs, readResult, readRunnerState, resultDir, withdrawJob, writeJob } from './files'
 import { defaultIntegrations, pendingGate, type Integrations } from './integrations'
 import {
-  PLAN_VERSION, parsePlan, planHistory, planTimeout, readPlanCatalog, replayAvailability, resolveProfile,
+  PLAN_VERSION, incrementalFiles, parsePlan, planHistory, planTimeout, readPlanCatalog, replayAvailability, resolveProfile,
   type PlannedModule, type ScanPlan,
 } from './plan'
 import { EFFECTIVE_PRIORITY_SQL, retryDelayS } from './priority'
@@ -160,6 +161,7 @@ export class ScanWorker {
     const client = await this.pool.connect()
     let finished: { scanId: string, error: RunnerError | null } | null = null
     let jobId: string | null = null
+    let dispatchedScan: string | null = null
     try {
       await client.query('BEGIN')
       await client.query(`SELECT pg_advisory_xact_lock(hashtextextended('scanoria:dispatch', 0))`)
@@ -221,6 +223,7 @@ export class ScanWorker {
         else {
           const job = await this.buildJob(client, scan, plan, runnable)
           jobId = job.id
+          dispatchedScan = scan.id
           await writeJob(this.cfg.scansDir, job)
           await client.query(
             `UPDATE scans SET plan = $2, coverage = COALESCE(coverage, '{}'::jsonb) || $3::jsonb, status = 'dispatched',
@@ -253,6 +256,10 @@ export class ScanWorker {
       return 'finished'
     }
     this.log(`dispatched job ${jobId}`)
+    // 0.7 (D, contrat 30) : statut « en cours » dans la forge, sans attendre (ne lève jamais).
+    if (dispatchedScan && this.integrations.publishScan) {
+      void this.integrations.publishScan(this.pool, dispatchedScan, { phase: 'pending' }).catch(() => {})
+    }
     return 'dispatched'
   }
 

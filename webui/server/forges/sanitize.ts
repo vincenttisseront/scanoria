@@ -58,7 +58,7 @@ export function allowedLink(url: string, consoleUrl?: string | null): boolean {
 
 /** Caractères de contrôle (hors \n et \t), bidirectionnels et de largeur nulle hostiles. */
 // eslint-disable-next-line no-control-regex
-const CONTROL_RE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F؜‌-‏‪-‮⁦-⁩﻿]/g
+const CONTROL_RE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200C-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g
 
 function stripControls(s: string): string {
   return s.replace(/\r\n?/g, '\n').replace(CONTROL_RE, '')

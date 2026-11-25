@@ -8,6 +8,7 @@ import { prepareMigrations } from '../../migrate.mjs'
 import { setBuildInfo } from '../utils/appliance'
 import { closePool } from '../utils/db'
 import { startConsole, stopConsole } from '../utils/runtime'
+import { registerForgeVerdictHook } from '../forges/verdict-hook'
 
 export default defineNitroPlugin((nitroApp) => {
   const config = useRuntimeConfig()
@@ -25,6 +26,8 @@ export default defineNitroPlugin((nitroApp) => {
   }
 
   void startConsole(loadMigrations)
+  // 0.7 (D) : republication dans la forge après une exception approuvée (contrat 27).
+  registerForgeVerdictHook()
 
   nitroApp.hooks.hook('close', async () => {
     stopConsole()

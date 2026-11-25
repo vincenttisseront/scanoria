@@ -65,3 +65,9 @@ export async function applyPullRequestBaseline(db: Queryable, scanId: string): P
     [scanId, [...old]])
   return true
 }
+
+/** Analyse d'une PR (scans.pull_request renseigné). */
+export async function isPullRequestScan(db: Queryable, scanId: string): Promise<boolean> {
+  const r = await db.query('SELECT 1 FROM scans WHERE id = $1 AND pull_request IS NOT NULL', [scanId])
+  return !!r.rowCount
+}

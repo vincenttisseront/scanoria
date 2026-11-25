@@ -63,7 +63,7 @@ export async function forgeAccess(db: Queryable, forge: ForgeRow): Promise<Forge
     const app = await getForgeApp(db, forge.id)
     if (app?.kind === 'github-app') {
       const token = await installationToken(db, forge.base_url, app)
-      if (token) return { kind: forge.kind, base_url: forge.base_url, token }
+      if (token) return { kind: forge.kind, base_url: forge.base_url, token, installation: true }
     }
   }
   const token = forge.credential_id ? (await decryptSecret(db, forge.credential_id)).value : null

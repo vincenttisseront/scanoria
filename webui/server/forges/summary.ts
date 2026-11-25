@@ -148,8 +148,11 @@ function link(label: string, url: string | null): string {
 /** Commentaire de synthèse d'une PR (Markdown, avant sanitizeForForge). */
 export function buildSummary(input: SummaryInput): string {
   const t = T[input.locale]
-  const head = input.phase === 'pending' ? t.pending : input.phase === 'early' ? t.early
-    : input.verdict === 'passed' ? t.passed : input.verdict === 'failed' ? t.failed : t.inconclusive
+  const head = input.phase === 'pending'
+    ? t.pending
+    : input.phase === 'early'
+      ? t.early
+      : input.verdict === 'passed' ? t.passed : input.verdict === 'failed' ? t.failed : t.inconclusive
   const out: string[] = [
     `### ${t.title} · ${head}`,
     '',

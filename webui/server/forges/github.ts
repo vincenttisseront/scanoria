@@ -56,6 +56,17 @@ export function githubClient(access: ForgeAccess): ForgeClient {
       // Sans jeton, GitHub ne permet pas de lister « ses » dépôts : un dépôt
       // public s'ajoute alors par son nom.
       if (!access.token) return []
+      if (access.installation) {
+        // Application GitHub (J1) : dépôts accordés à l'installation.
+        const out: unknown[] = []
+        for (let page = 1; out.length < MAX_REPOS; page++) {
+          const { data } = await forgeGetJson<{ repositories?: unknown }>(`${api}/installation/repositories?per_page=${PAGE}&page=${page}`, req)
+          const items = Array.isArray(data?.repositories) ? data.repositories : []
+          out.push(...items)
+          if (items.length < PAGE) break
+        }
+        return out.slice(0, MAX_REPOS).map(toRepo).filter((r): r is ForgeRepo => !!r)
+      }
       const raw = await pages<unknown>(p => `${api}/user/repos?per_page=${PAGE}&page=${p}&sort=full_name`, MAX_REPOS)
       return raw.map(toRepo).filter((r): r is ForgeRepo => !!r)
     },

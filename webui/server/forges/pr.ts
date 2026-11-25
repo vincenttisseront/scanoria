@@ -15,7 +15,7 @@ import type pg from 'pg'
 import type { Queryable } from '../utils/db'
 import { enqueueScan } from '../scans/enqueue'
 import { MAX_CHANGED_FILES, type PullRequestRef } from './pr-types'
-import { projectForge, type ProjectForge } from './context'
+import type { ProjectForge } from './context'
 import { parseScanoriaCommand, type CommandError } from './command'
 import { requestPrException } from './exceptions-bridge'
 import { forgeLocale } from './publish'
@@ -56,7 +56,7 @@ export async function enqueuePullRequestScan(db: Db, ctx: ProjectForge, pr: Pull
     changed = c.truncated ? undefined : c.files
   }
   catch {
-    changed = undefined     // forge muette : analyse complète (jamais moins)
+    changed = undefined // forge muette : analyse complète (jamais moins)
   }
   const pullRequest = {
     number: pr.number, base_sha: pr.base_sha, base_ref: pr.base_ref, head_sha: pr.head_sha, head_ref: pr.head_ref, author: pr.author,
@@ -94,7 +94,8 @@ const HELP: Record<'fr' | 'en', Record<CommandError | 'usage', string>> = {
   },
 }
 
-const REPLY: Record<'fr' | 'en', Record<string, string>> = {
+type ReplyKey = 'requested' | 'approve' | 'note' | 'notFound' | 'ambiguous' | 'malicious' | 'locked' | 'invalid' | 'bot'
+const REPLY: Record<'fr' | 'en', Record<ReplyKey, string>> = {
   fr: {
     requested: 'Demande d\'exception enregistrée pour le résultat',
     approve: 'Un administrateur l\'approuve ou la refuse dans la console',
@@ -146,6 +147,9 @@ async function resolveFinding(db: Queryable, scanId: string, ref: string): Promi
   return r.rows.length > 1 ? 'ambiguous' : r.rows[0]!
 }
 
+/** Marque des commentaires déjà traités (webhook_deliveries, hors calcul du mode). */
+export const COMMENT_SEEN = 'comment-seen'
+
 export interface CommentInput {
   number: number
   comment: { id: string, author: string | null, author_is_bot: boolean, body: string }
@@ -167,6 +171,12 @@ export async function handlePrComment(db: Queryable, ctx: ProjectForge, input: C
   if (input.comment.author_is_bot || !input.comment.author || input.comment.author.toLowerCase() === (await serviceLogin(db, ctx))?.toLowerCase()) {
     return 'ignored'
   }
+  // Un commentaire n'est traité qu'une fois, qu'il arrive par webhook ou par interrogation.
+  if (!/^[0-9]{1,20}$/.test(input.comment.id)) return 'ignored'
+  const once = await db.query(
+    `INSERT INTO webhook_deliveries (forge_id, delivery_id, event, status, detail) VALUES ($1, $2, '${COMMENT_SEEN}', 'ignored', NULL)
+     ON CONFLICT (forge_id, delivery_id) DO NOTHING`, [ctx.forge.id, `comment:${input.comment.id}`])
+  if (!once.rowCount) return 'ignored'
   if (cmd.kind === 'help') {
     await reply([cmd.error ? HELP[locale][cmd.error] : '', HELP[locale].usage].filter(Boolean).join(' '))
     return 'help'
@@ -189,7 +199,7 @@ export async function handlePrComment(db: Queryable, ctx: ProjectForge, input: C
     commitAuthors: authors,
   })
   if (outcome.ok) {
-    const url = ctx.consoleUrl ? `${ctx.consoleUrl}/findings/exceptions?status=requested&project=${ctx.projectId}` : null
+    const url = ctx.consoleUrl ? `${ctx.consoleUrl}/findings/exceptions?project_id=${ctx.projectId}` : null
     await reply(`${t.requested} \`${shortId(found.id)}\` (${cmd.until}). ${t.approve}${url ? ` : [${url}](${url})` : '.'}\n\n${t.note}`)
     return 'requested'
   }
