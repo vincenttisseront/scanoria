@@ -192,6 +192,13 @@ expect "AC contenant une clé privée" "$(code)" E_AI_CA
 p=$(jq -cn '{enabled: true, url: "https://ollama.exemple.test:11434", ca_pem: ("-----BEGIN CERTIFICATE-----\n" + ("QUJD" * 20) + "\n-----END CERTIFICATE-----\n")}')
 hx "$p"
 expect "AC illisible" "$(code)" E_AI_CA
+hx '{"enabled": true, "url": "http://ollama.exemple.test:11434", "allow_insecure": true, "skip_tls_verify": true}'
+expect "vérification désactivée refusée en http (schéma)" "$(code)" E_SCHEMA
+p=$(jq -cn --rawfile ca "$TMP/ca.pem" '{enabled: true, url: "https://ollama.exemple.test:11434", ca_pem: $ca, skip_tls_verify: true}')
+hx "$p"
+expect "vérification désactivée refusée avec une AC (schéma)" "$(code)" E_SCHEMA
+hx '{"enabled": false, "skip_tls_verify": true}'
+expect "skip_tls_verify sans connecteur : refusé par le schéma" "$(code)" E_SCHEMA
 
 # --- 4. Épinglage ----------------------------------------------------------------------------
 : > "$CALLS"
@@ -214,6 +221,21 @@ expect "nft -c avant nft -f" "$(jq -r 'select(.[0] == "nft") | .[1]' "$CALLS" | 
 grep -qF '["systemctl","restart","scanoria-ai.service"]' "$CALLS" && ok "scanoria-ai redémarré" || ko "scanoria-ai non redémarré"
 expect "ai-status.json après activation" "$(valid ai-status "$STATUS")" ok
 grep -q '"token"\|secret' <<< "$(jq -c .output <<< "$R" | jq -c 'del(.token)')" && ko "secret dans la sortie" || ok "aucun secret dans la sortie"
+expect "certificat vérifié par défaut" "$(jq -r .tls_verify "$CONF")" true
+
+# --- 4 bis. Vérification du certificat désactivée (certificat autosigné) --------------------
+hx '{"enabled": true, "url": "https://ollama.exemple.test:11434", "skip_tls_verify": true}'
+expect "connecteur activé sans vérification" "$(code)" OK
+expect "ai.json : tls_verify false" "$(jq -r .tls_verify "$CONF")" false
+expect "sortie : tls_verify false" "$(jq -r .output.tls_verify <<< "$R")" false
+expect "ai.json sans vérification conforme au schéma" "$(valid ai-endpoint "$CONF")" ok
+[[ ! -e "$T/etc/scanoria/ai-ca.pem" ]] && ok "aucune AC gardée sans vérification" || ko "AC gardée sans vérification"
+jq 'del(.tls_verify)' "$CONF" > "$TMP/old-ai.json"
+expect "ai.json antérieur (sans tls_verify) toujours conforme" "$(valid ai-endpoint "$TMP/old-ai.json")" ok
+p=$(jq -cn --rawfile ca "$TMP/ca.pem" '{enabled: true, url: "https://ollama.exemple.test:11434", token: true, ca_pem: $ca}')
+hx "$p"
+expect "retour à la vérification avec AC" "$(code)" OK
+expect "ai.json : tls_verify true" "$(jq -r .tls_verify "$CONF")" true
 
 # --- 5. Échec de nft : configuration précédente rétablie ---------------------------------
 before=$(conf_hash)

@@ -3,7 +3,7 @@
   "$id": "urn:scanoria:schema:request:set-ai-endpoint:1",
   "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront. Contrat : docs/ARCHITECTURE.md.",
   "title": "Brancher ou retirer le serveur Ollama externe (connecteur IA)",
-  "description": "Valide l'adresse (https, ou http avec allow_insecure et sans jeton), résout le nom côté helper, refuse toute adresse de bouclage, de lien local, de multidiffusion, réservée ou de l'appliance, épingle les adresses dans /etc/scanoria/ai.json (schemas/ai-endpoint.schema.json) et ouvre dans nftables (table inet scanoria_ai) la sortie vers ces adresses et ce port pour l'UID de scanoria-ai seulement. enabled: false referme la règle. Le jeton porteur n'est jamais transmis : token indique seulement qu'il existe (chiffré en base), ce qui impose https. CLAUDE.md § 3.5.",
+  "description": "Valide l'adresse (https, ou http avec allow_insecure et sans jeton), résout le nom côté helper, refuse toute adresse de bouclage, de lien local, de multidiffusion, réservée ou de l'appliance, épingle les adresses dans /etc/scanoria/ai.json (schemas/ai-endpoint.schema.json) et ouvre dans nftables (table inet scanoria_ai) la sortie vers ces adresses et ce port pour l'UID de scanoria-ai seulement. enabled: false referme la règle. Le jeton porteur n'est jamais transmis : token indique seulement qu'il existe (chiffré en base), ce qui impose https. skip_tls_verify (https seulement, jamais avec ca_pem) accepte le certificat du serveur sans le vérifier, par exemple un certificat autosigné ; la vérification reste la règle par défaut. CLAUDE.md § 3.5.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -80,6 +80,9 @@
           "minLength": 64,
           "maxLength": 16384,
           "pattern": "^-----BEGIN CERTIFICATE-----\\r?\\n"
+        },
+        "skip_tls_verify": {
+          "type": "boolean"
         }
       },
       "if": {
@@ -117,10 +120,41 @@
               "required": [
                 "allow_insecure"
               ]
+            },
+            {
+              "required": [
+                "skip_tls_verify"
+              ]
             }
           ]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "skip_tls_verify"
+            ],
+            "properties": {
+              "skip_tls_verify": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "url": {
+                "pattern": "^https://"
+              }
+            },
+            "not": {
+              "required": [
+                "ca_pem"
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

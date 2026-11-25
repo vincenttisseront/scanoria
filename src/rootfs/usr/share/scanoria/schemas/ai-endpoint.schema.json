@@ -85,6 +85,10 @@
         "ca": {
           "type": "boolean"
         },
+        "tls_verify": {
+          "type": "boolean",
+          "description": "false : certificat du serveur accepté sans vérification (skip_tls_verify). Absent : vérification active (fichiers antérieurs)."
+        },
         "literal": {
           "type": "boolean"
         },

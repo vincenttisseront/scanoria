@@ -23,7 +23,7 @@ interface TaskState {
 }
 interface AiStatusResponse {
   enabled: boolean
-  endpoint: { url: string | null, host: string | null, port: number | null, addresses: string[], insecure: boolean, token: boolean, ca: boolean, pinned_at: string | null }
+  endpoint: { url: string | null, host: string | null, port: number | null, addresses: string[], insecure: boolean, token: boolean, ca: boolean, tls_verify: boolean, pinned_at: string | null }
   token_stored: boolean
   token_supported: boolean
   check: {
@@ -76,6 +76,7 @@ async function refresh(quiet = false) {
     // Le formulaire n'est prérempli qu'au chargement, jamais par le suivi périodique.
     if (!quiet && !form.url && s.endpoint.url) form.url = s.endpoint.url
     if (!quiet && s.endpoint.insecure) form.insecure = true
+    if (!quiet && s.endpoint.url && !s.endpoint.tls_verify) form.skipVerify = true
   }
   catch (err) {
     if (!quiet) toast.add({ title: errorMessage(err), color: 'error', icon: 'i-lucide-circle-x' })
@@ -96,13 +97,15 @@ onBeforeUnmount(() => {
 })
 
 // --- Connecteur ---
-const form = reactive({ url: '', insecure: false, token: '', removeToken: false, ca: '' })
+const form = reactive({ url: '', insecure: false, token: '', removeToken: false, ca: '', skipVerify: false })
 const isHttp = computed(() => form.url.trim().startsWith('http:'))
+/** Vérification du certificat désactivée : https seulement, et l'AC fournie n'a alors plus d'usage. */
+const skipVerify = computed(() => !isHttp.value && form.skipVerify)
 const urlValid = computed(() => URL_RE.test(form.url.trim().toLowerCase()))
 const formValid = computed(() => urlValid.value
   && (!isHttp.value || form.insecure)
   && !(isHttp.value && form.token.trim())
-  && (!form.ca.trim() || form.ca.trim().startsWith('-----BEGIN CERTIFICATE-----')))
+  && (skipVerify.value || !form.ca.trim() || form.ca.trim().startsWith('-----BEGIN CERTIFICATE-----')))
 
 function pickCandidate() {
   const c = info.value?.check?.candidate
@@ -118,7 +121,8 @@ const connectParams = computed(() => {
   if (isHttp.value) body.allow_insecure = true
   if (form.token.trim()) body.token = form.token.trim()
   else if (form.removeToken) body.token = null
-  if (form.ca.trim()) body.ca_pem = `${form.ca.trim()}\n`
+  if (skipVerify.value) body.skip_tls_verify = true
+  else if (form.ca.trim()) body.ca_pem = `${form.ca.trim()}\n`
   return body
 })
 async function connect() {
@@ -358,12 +362,20 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
             {{ t('ai.connector.pinnedAt') }}
           </dt>
           <dd>{{ formatDate(info.endpoint.pinned_at) }}</dd>
-          <template v-if="info.endpoint.token || info.endpoint.ca">
+          <template v-if="info.endpoint.token || info.endpoint.ca || !info.endpoint.tls_verify">
             <dt class="text-muted">
               {{ t('ai.connector.options') }}
             </dt>
             <dd>
               {{ [info.endpoint.token ? t('ai.connector.withToken') : '', info.endpoint.ca ? t('ai.connector.withCa') : ''].filter(Boolean).join(', ') }}
+              <UBadge
+                v-if="!info.endpoint.tls_verify"
+                color="warning"
+                variant="subtle"
+                icon="i-lucide-shield-alert"
+                :label="t('ai.connector.noVerify')"
+                data-testid="ai-no-verify"
+              />
             </dd>
           </template>
         </dl>
@@ -427,11 +439,34 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
             v-model="form.removeToken"
             :label="t('ai.connector.tokenRemove')"
           />
-          <UFormField :label="t('ai.connector.ca')">
+          <div v-if="!isHttp">
+            <UCheckbox
+              v-model="form.skipVerify"
+              :label="t('ai.connector.skipVerify')"
+              data-testid="ai-skip-verify"
+            />
+            <p
+              v-if="form.skipVerify"
+              class="mt-1 text-xs text-warning"
+            >
+              {{ t('ai.connector.skipVerifyWarning') }}
+            </p>
+            <p
+              v-else
+              class="mt-1 text-xs text-muted"
+            >
+              {{ t('ai.connector.skipVerifyHelp') }}
+            </p>
+          </div>
+          <UFormField
+            :label="t('ai.connector.ca')"
+            :help="skipVerify ? t('ai.connector.caIgnored') : undefined"
+          >
             <UTextarea
               v-model="form.ca"
               :rows="3"
               class="w-full font-mono text-xs"
+              :disabled="skipVerify"
             />
           </UFormField>
           <div class="flex flex-wrap items-center gap-3">
@@ -895,6 +930,12 @@ const resolution = computed(() => info.value?.check?.resolution ?? null)
           class="text-warning"
         >
           {{ t('ai.connector.insecureWarning') }}
+        </p>
+        <p
+          v-if="skipVerify"
+          class="text-warning"
+        >
+          {{ t('ai.connector.skipVerifyWarning') }}
         </p>
       </div>
     </ConfirmModal>

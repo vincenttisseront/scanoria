@@ -21,6 +21,8 @@ export interface OllamaTarget {
   addresses: string[]
   token?: string | null
   caPem?: string | null
+  /** false : certificat du serveur accepté sans vérification (autosigné). Absent : vérifié. */
+  verifyTls?: boolean
 }
 
 export class OllamaError extends Error {
@@ -116,8 +118,11 @@ export class OllamaClient {
     }
     if (t.scheme === 'https') {
       options.servername = isIP(t.host) ? undefined : t.host
-      options.ca = t.caPem ? [...rootCertificates, t.caPem] : undefined
-      options.rejectUnauthorized = true
+      // Vérification du certificat sauf choix explicite de l'administrateur
+      // (skip_tls_verify) : le chiffrement reste, l'identité du serveur n'est plus prouvée.
+      const verify = t.verifyTls !== false
+      options.ca = verify && t.caPem ? [...rootCertificates, t.caPem] : undefined
+      options.rejectUnauthorized = verify
       options.minVersion = 'TLSv1.2'
     }
     const mod = t.scheme === 'https' ? https : http

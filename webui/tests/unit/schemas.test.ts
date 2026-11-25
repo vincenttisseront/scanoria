@@ -168,6 +168,7 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
       { enabled: true, url: 'https://ollama.exemple.test:11434' },
       { enabled: true, url: 'http://192.0.2.10:11434', allow_insecure: true },
       { enabled: true, url: 'https://[2001:db8::10]:11434/', token: true },
+      { enabled: true, url: 'https://ollama.exemple.test:11434', skip_tls_verify: true },
     ],
     invalid: [
       { enabled: true },
@@ -177,6 +178,10 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
       { enabled: true, url: 'https://ollama.exemple.test/api' },
       { enabled: true, url: 'https://ollama.exemple.test', ca_pem: 'not a certificate' },
       { enabled: true, url: 'https://ollama.exemple.test', model: 'x' },
+      { enabled: false, skip_tls_verify: true },
+      { enabled: true, url: 'https://ollama.exemple.test', skip_tls_verify: 'yes' },
+      { enabled: true, url: 'http://192.0.2.10:11434', allow_insecure: true, skip_tls_verify: true },
+      { enabled: true, url: 'https://ollama.exemple.test', skip_tls_verify: true, ca_pem: `-----BEGIN CERTIFICATE-----\n${'Q'.repeat(80)}\n` },
     ],
   },
   'backup-module': {

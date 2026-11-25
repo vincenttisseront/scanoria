@@ -29,7 +29,7 @@ const URL_INPUT = 'input[data-testid="ai-url"], [data-testid="ai-url"] input'
 function aiStatus(patch: Record<string, unknown> = {}) {
   return {
     enabled: false,
-    endpoint: { url: null, host: null, port: null, addresses: [], insecure: false, token: false, ca: false, pinned_at: null },
+    endpoint: { url: null, host: null, port: null, addresses: [], insecure: false, token: false, ca: false, tls_verify: true, pinned_at: null },
     token_stored: false,
     token_supported: false,
     check: null,
@@ -51,7 +51,7 @@ function activeStatus(patch: Record<string, unknown> = {}) {
   const choice = { model: 'qwen-test:14b', digest: DIGEST, reason: 'best-balance' }
   return aiStatus({
     enabled: true,
-    endpoint: { url: 'https://ollama.exemple.test:11434', host: 'ollama.exemple.test', port: 11434, addresses: ['192.0.2.10'], insecure: false, token: true, ca: true, pinned_at: '2026-11-24T09:00:00Z' },
+    endpoint: { url: 'https://ollama.exemple.test:11434', host: 'ollama.exemple.test', port: 11434, addresses: ['192.0.2.10'], insecure: false, token: true, ca: true, tls_verify: true, pinned_at: '2026-11-24T09:00:00Z' },
     probe: { status: 'done', error: null, at: '2026-11-24T09:05:00Z', version: '0.12.3' },
     models: [
       { name: 'qwen-test:14b', capabilities: ['completion'] },
@@ -140,6 +140,39 @@ describe('page Système › IA', () => {
     expect(document.body.querySelector('[role="dialog"]')).toBeNull()
     expect(w.text()).toContain('Actif')
     expect(w.text()).toContain('192.0.2.10')
+  })
+
+  it('certificat autosigné : vérification désactivable en https, avertie partout, AC alors ignorée', async () => {
+    setUser('admin')
+    let enabled = false
+    route('GET', '/api/ai/status', () => (enabled
+      ? activeStatus({ endpoint: { url: 'https://ollama.exemple.test:11434', host: 'ollama.exemple.test', port: 11434, addresses: ['192.0.2.10'], insecure: false, token: false, ca: false, tls_verify: false, pinned_at: '2026-11-24T09:00:00Z' } })
+      : aiStatus()))
+    route('GET', '/api/ai/calls', () => ({ calls: [] }))
+    helperRoute('/api/ai/connector', 'c2')
+    const w = await mountIn(AiPage)
+    await settle()
+    await w.find(URL_INPUT).setValue('http://192.0.2.10:11434')
+    expect(w.find('[data-testid="ai-skip-verify"]').exists()).toBe(false)
+    await w.find(URL_INPUT).setValue('https://ollama.exemple.test:11434')
+    expect(w.text()).toContain('Vérification active par défaut')
+    expect(w.text()).not.toContain('rien ne prouve que le serveur')
+    await w.find('textarea').setValue(`-----BEGIN CERTIFICATE-----\n${'Q'.repeat(80)}\n-----END CERTIFICATE-----`)
+    await click(w.find('[data-testid="ai-skip-verify"] [role="checkbox"], [data-testid="ai-skip-verify"][role="checkbox"]').element)
+    expect(w.text()).toContain('rien ne prouve que le serveur')
+    expect(w.text()).toContain('Sans objet tant que la vérification du certificat est désactivée.')
+    expect((w.find('textarea').element as HTMLTextAreaElement).disabled).toBe(true)
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] })
+    await click(button('Activer le connecteur'))
+    expect(bodyText()).toContain('rien ne prouve que le serveur')
+    await click(document.body.querySelector('[role="dialog"] [role="checkbox"]')!)
+    enabled = true
+    button('Activer').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await drive()
+    expect(callsTo('POST', '/api/ai/connector')[0]!.body).toEqual({ url: 'https://ollama.exemple.test:11434', skip_tls_verify: true, confirmed: true })
+    expect(w.find('[data-testid="ai-no-verify"]').exists()).toBe(true)
+    expect(w.text()).toContain('certificat non vérifié')
   })
 
   it('connecteur actif : modèles et pourquoi, banc d’essai, santé, journal, choix d’un modèle', async () => {

@@ -220,6 +220,20 @@ describe.skipIf(!DATABASE_URL)('API du connecteur IA (h3, PostgreSQL réel)', ()
     expect(audit.rows[0]?.details).toMatchObject({ url: 'http://192.0.2.10:11434', confirmed: true })
   })
 
+  it('vérification du certificat : active par défaut, désactivable en https seulement, jamais avec une AC', async () => {
+    const pem = `-----BEGIN CERTIFICATE-----\n${'Q'.repeat(80)}\n-----END CERTIFICATE-----\n`
+    const httpSkip = await call('/api/ai/connector', { method: 'POST', client: admin, json: { url: 'http://192.0.2.10:11434', allow_insecure: true, skip_tls_verify: true, confirmed: true } })
+    expect(httpSkip.status).toBe(400)
+    const caSkip = await call('/api/ai/connector', { method: 'POST', client: admin, json: { url: 'https://ollama.exemple.test:11434', ca_pem: pem, skip_tls_verify: true, confirmed: true } })
+    expect(caSkip.status).toBe(400)
+    const ok = await call('/api/ai/connector', { method: 'POST', client: admin, json: { url: 'https://ollama.exemple.test:11434', skip_tls_verify: true, confirmed: true } })
+    expect(ok.status, JSON.stringify(ok.data)).toBe(202)
+    const reqs = (await incoming('set-ai-endpoint')).filter(r => (r.params as Record<string, unknown>).skip_tls_verify !== undefined)
+    expect(reqs.map(r => r.params)).toEqual([{ enabled: true, url: 'https://ollama.exemple.test:11434', skip_tls_verify: true }])
+    const audit = await db.pool.query(`SELECT details FROM audit_log WHERE action = 'system.set-ai-endpoint.request' ORDER BY id DESC LIMIT 1`)
+    expect(audit.rows[0]?.details).toMatchObject({ url: 'https://ollama.exemple.test:11434', tls_verify: false })
+  })
+
   it('jeton : enregistré par le magasin injecté, signalé au helper, retiré sur demande', async () => {
     const saved: string[] = []
     setTokenStore({

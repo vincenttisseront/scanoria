@@ -184,7 +184,9 @@ export const requestParamSchemas = {
       allow_insecure: z.boolean().optional(),
       token: z.boolean().optional(),
       ca_pem: z.string().min(64).max(16384).regex(CERT_PEM_RE).optional(),
-    }),
+      /** https seulement, jamais avec ca_pem : certificat du serveur accepté sans vérification. */
+      skip_tls_verify: z.boolean().optional(),
+    }).refine(p => !p.skip_tls_verify || (p.url.startsWith('https:') && p.ca_pem === undefined), { message: 'skip_tls_verify requires https and no ca_pem', path: ['skip_tls_verify'] }),
     z.strictObject({ enabled: z.literal(false) }),
   ]),
   'backup-module': z.strictObject({ id: z.string().regex(MODULE_ID_RE) }),

@@ -29,6 +29,7 @@ export default defineEventHandler(async (event) => {
     ...(body.allow_insecure ? { allow_insecure: true } : {}),
     ...(hasToken ? { token: true } : {}),
     ...(body.ca_pem ? { ca_pem: body.ca_pem } : {}),
+    ...(body.skip_tls_verify ? { skip_tls_verify: true } : {}),
   }
   // Un nouveau jeton est scellé AVANT le dépôt : la clé dédiée existe quand le
   // helper la copie pour scanoria-ai. Si le dépôt est refusé, il est retiré.
@@ -36,7 +37,7 @@ export default defineEventHandler(async (event) => {
   let submitted
   try {
     submitted = await submitHelperAction(event, 'set-ai-endpoint', params, {
-      auditDetails: { url: body.url, token: hasToken, ca: Boolean(body.ca_pem), confirmed: true },
+      auditDetails: { url: body.url, token: hasToken, ca: Boolean(body.ca_pem), tls_verify: !body.skip_tls_verify, confirmed: true },
     })
   }
   catch (err) {

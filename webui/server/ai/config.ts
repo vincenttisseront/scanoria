@@ -27,6 +27,8 @@ export const AiEndpoint = z.discriminatedUnion('enabled', [
     insecure: z.boolean(),
     token: z.boolean(),
     ca: z.boolean(),
+    /** false : certificat du serveur accepté sans vérification ; absent (fichier antérieur) : vérifié. */
+    tls_verify: z.boolean().optional(),
     literal: z.boolean(),
     pinned_at: z.string().regex(TS_RE),
   }),
