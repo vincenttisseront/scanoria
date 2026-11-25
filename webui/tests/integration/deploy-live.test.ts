@@ -47,7 +47,9 @@ describe.skipIf(!FORGEJO)('b40-live : déploiement contre un vrai Forgejo et le 
   const ca = readFileSync(process.env.SCANORIA_DEPLOY_CA ?? '/dev/null', 'utf8')
   const helperRoot = process.env.SCANORIA_DEPLOY_HELPER_ROOT ?? ''
   const out = process.env.SCANORIA_DEPLOY_OUT ?? ''
-  const REG = new URL(FORGEJO).host
+  // Appels directs du test (préparation, vérifications) : même AC jetable que la console.
+  const forgeHttps = createHttpsTransport({ ca, refuseAddress: () => false })
+  const REG = FORGEJO ? new URL(FORGEJO).host : 'forge.exemple.test'
   const CANDIDATE = `${REG}/scanoria-bot/candidat-app`
   const VALIDATED = `${REG}/scanoria-bot/valide-app`
   const requestsDir = join(helperRoot, 'var/lib/scanoria/requests')
@@ -59,10 +61,10 @@ describe.skipIf(!FORGEJO)('b40-live : déploiement contre un vrai Forgejo et le 
   let candidateDigest: string
 
   async function fj(token: string, method: string, path: string, body?: unknown): Promise<Json | null> {
-    const res = await fetch(`${FORGEJO}/api/v1${path}`, {
+    const res = await forgeHttps(`${FORGEJO}/api/v1${path}`, {
       method,
       headers: { 'authorization': `token ${token}`, 'content-type': 'application/json', 'accept': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
     const text = await res.text()
     if (!res.ok && res.status !== 404) throw new Error(`Forgejo ${method} ${path} : HTTP ${res.status} ${text.slice(0, 300)}`)
@@ -101,7 +103,7 @@ describe.skipIf(!FORGEJO)('b40-live : déploiement contre un vrai Forgejo et le 
       NUXT_MODULES_STATE_FILE: join(dir, 'absent-state.json'),
     }))
     // Forge et registre sur 127.0.0.1 derrière l'AC jetable : seules différences avec l'appliance.
-    setForgeTransport(createHttpsTransport({ ca, refuseAddress: () => false }))
+    setForgeTransport(forgeHttps)
     setRegistryTransport(createRegistryTransport({ ca, refuseAddress: () => false }))
     setConsoleUrl('https://analyse.exemple.test')
     adminId = Number((await createUser(db.pool, { username: 'admin-b40', role: 'admin', password: randomBytes(12).toString('hex') })).id)
