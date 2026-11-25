@@ -172,6 +172,93 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
     })
   })
 
+  describe('socle 0.8 (018 release)', () => {
+    const fixture = async (slug: string) => {
+      const q = db.pool
+      const p = (await q.query<{ id: string }>(`SELECT id FROM profiles WHERE slug = 'release'`)).rows[0]!.id
+      const g = (await q.query<{ id: string }>(`SELECT id FROM gates WHERE slug = 'defaut'`)).rows[0]!.id
+      const project = (await q.query<{ id: string, release_mode: string, release_patterns: string[], autonomous_chain: boolean }>(
+        `INSERT INTO projects (slug, name, source_kind, profile_id, gate_id) VALUES ($1, $1, 'archive', $2, $3)
+         RETURNING id, release_mode, release_patterns, autonomous_chain`, [slug, p, g])).rows[0]!
+      const scan = (await q.query<{ id: string }>(
+        `INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id) VALUES ($1, 1, 'release', 1, 'v1.0.0', $2, $3) RETURNING id`,
+        [project.id, p, g])).rows[0]!.id
+      return { project, scan }
+    }
+    const sha = 'a'.repeat(40)
+    const sig = 'A'.repeat(86) + '=='
+
+    it('mode de release par défaut tiré, motifs v*, chaîne autonome désactivée', async () => {
+      const { project } = await fixture('socle18a')
+      expect(project).toMatchObject({ release_mode: 'pull', release_patterns: ['v*'], autonomous_chain: false })
+      await expect(db.pool.query(`UPDATE projects SET release_mode = 'auto' WHERE id = $1`, [project.id])).rejects.toThrow(/release_mode/)
+      await db.pool.query(`INSERT INTO release_candidates (project_id, tag, commit_sha, source) VALUES ($1, 'v1.0.0', $2, 'pull')`, [project.id, sha])
+      await expect(db.pool.query(`INSERT INTO release_candidates (project_id, tag, commit_sha, source) VALUES ($1, 'v1.0.0', $2, 'push')`, [project.id, sha])).rejects.toThrow(/release_candidates_pkey/)
+      await db.pool.query('DELETE FROM projects WHERE id = $1', [project.id])
+    })
+
+    it('rapport de release : signé complet, puis immuable', async () => {
+      const q = db.pool
+      const { project, scan } = await fixture('socle18b')
+      const ins = (status: string, signature: string | null) => q.query(
+        `INSERT INTO release_reports (scan_id, project_id, tag, commit_sha, report, report_sha256, status, signature, key_fingerprint, signed_at)
+         VALUES ($1, $2, 'v1.0.0', $3, '{"verdict":"passed"}', $4, $5, $6, $7, $8)`,
+        [scan, project.id, sha, 'b'.repeat(64), status, signature, signature ? 'c'.repeat(64) : null, signature ? new Date() : null])
+      await expect(ins('signed', null)).rejects.toThrow(/release_reports_signed/)
+      await expect(ins('pending', 'pas-une-signature')).rejects.toThrow(/release_reports_signature_check/)
+      await ins('pending', null)
+      await q.query(`UPDATE release_reports SET status = 'signed', signature = $2, key_fingerprint = $3, signed_at = now() WHERE scan_id = $1`, [scan, sig, 'c'.repeat(64)])
+      await expect(q.query(`UPDATE release_reports SET report = '{"verdict":"failed"}' WHERE scan_id = $1`, [scan])).rejects.toThrow(/immutable/)
+      await q.query('DELETE FROM projects WHERE id = $1', [project.id])
+      expect((await q.query('SELECT 1 FROM release_reports WHERE scan_id = $1', [scan])).rowCount).toBe(0)
+    })
+
+    it('VEX : statuts OpenVEX, not_affected justifié, source cohérente', async () => {
+      const q = db.pool
+      const { project } = await fixture('socle18c')
+      const ins = (status: string, justification: string | null, source = 'import') => q.query(
+        `INSERT INTO vex_statements (project_id, vuln_id, product, status, justification, source) VALUES ($1, 'CVE-2026-0001', 'pkg:npm/exemple@1.0.0', $2, $3, $4)`,
+        [project.id, status, justification, source])
+      await expect(ins('not_affected', null)).rejects.toThrow(/vex_not_affected_justified/)
+      await expect(ins('ignored', null)).rejects.toThrow(/vex_statements_status_check/)
+      await expect(ins('affected', null, 'exception')).rejects.toThrow(/vex_exception_source/)
+      await ins('not_affected', 'vulnerable_code_not_in_execute_path')
+      await ins('under_investigation', null)
+      await expect(q.query(`UPDATE exceptions SET vex_status = 'ignored' WHERE false`)).resolves.toBeDefined()
+      const def = (await q.query<{ def: string }>(`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'exceptions_vex_status_check'`)).rows[0]!.def
+      expect(def).toContain(`'not_affected'`)
+      await q.query('DELETE FROM projects WHERE id = $1', [project.id])
+    })
+
+    it('simulation de gate, OIDC, intégration, attestations et déploiements', async () => {
+      const q = db.pool
+      const { project, scan } = await fixture('socle18d')
+      await expect(q.query(`INSERT INTO gate_simulations (project_id, rules, since, origin, status) VALUES ($1, '{}', now(), 'manual', 'done')`, [project.id])).rejects.toThrow(/gate_simulations_done/)
+      await q.query(`INSERT INTO gate_simulations (project_id, rules, since, origin, status) VALUES ($1, '{}', now(), 'ai', 'pending')`, [project.id])
+      await expect(q.query(`INSERT INTO oidc_issuers (kind, issuer, audience) VALUES ('github', 'http://ci.exemple.test', 'scanoria')`)).rejects.toThrow(/oidc_issuers_issuer_check/)
+      const issuer = (await q.query<{ id: string }>(`INSERT INTO oidc_issuers (kind, issuer, audience) VALUES ('forgejo', 'https://forge.exemple.test/api/actions', 'scanoria') RETURNING id`)).rows[0]!.id
+      await q.query(`INSERT INTO oidc_bindings (issuer_id, project_id, repository) VALUES ($1, $2, 'equipe/depot')`, [issuer, project.id])
+      await expect(q.query(`INSERT INTO integration_requests (project_id, kind, state) VALUES ($1, 'branch-protection', 'applied')`, [project.id])).rejects.toThrow(/integration_protection_decided/)
+      await q.query(`INSERT INTO integration_requests (project_id, kind, state) VALUES ($1, 'ci-pr', 'open')`, [project.id])
+      await expect(q.query(`INSERT INTO integration_requests (project_id, kind, state) VALUES ($1, 'ci-pr', 'proposed')`, [project.id])).rejects.toThrow(/integration_requests_active/)
+      await expect(q.query(`INSERT INTO attestations (scan_id, subject_name, subject_digest, predicate_type, status) VALUES ($1, 'registre.exemple.test/app', $2, 'https://in-toto.io/attestation/scai/v0.3', 'signed')`, [scan, 'sha256:' + 'd'.repeat(64)])).rejects.toThrow(/attestations_signed/)
+      await expect(q.query(`INSERT INTO deploy_targets (project_id, kind, environment, config, auto_merge) VALUES ($1, 'cd-trigger', 'production', '{}', true)`, [project.id])).rejects.toThrow(/deploy_auto_merge_gitops/)
+      const target = (await q.query<{ id: string }>(`INSERT INTO deploy_targets (project_id, kind, environment, config) VALUES ($1, 'cd-trigger', 'production', '{"workflow":"deploy.yml"}') RETURNING id`, [project.id])).rows[0]!.id
+      await expect(q.query(`INSERT INTO deployments (target_id, scan_id, status) VALUES ($1, $2, 'refused')`, [target, scan])).rejects.toThrow(/deployments_refused/)
+      await expect(q.query(`INSERT INTO deployments (target_id, scan_id, status, external_url) VALUES ($1, $2, 'running', 'http://ci.exemple.test/1')`, [target, scan])).rejects.toThrow(/deployments_external_url_check/)
+      await q.query(`INSERT INTO deployments (target_id, scan_id, status, refused_reason) VALUES ($1, $2, 'refused', 'verdict-not-passed')`, [target, scan])
+      await q.query('DELETE FROM projects WHERE id = $1', [project.id])
+      await q.query('DELETE FROM oidc_issuers WHERE id = $1', [issuer])
+    })
+
+    it('demandes de signature, jetons de CD et sujets IA (018)', async () => {
+      const def = async (n: string) => (await db.pool.query<{ def: string }>(`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = $1`, [n])).rows[0]!.def
+      for (const t of ['sign-release-report', 'sign-attestation', 'validate-ruleset', 'set-hostname']) expect(await def('helper_requests_type_check')).toContain(`'${t}'`)
+      for (const k of ['deploy-token', 'registry-token', 'oauth-secret']) expect(await def('credentials_kind_check')).toContain(`'${k}'`)
+      for (const t of ['release', 'gate', 'query']) expect(await def('ai_tasks_subject_type_check')).toContain(`'${t}'`)
+    })
+  })
+
   describe('socle 0.6 (012)', () => {
     it('essais, résultats externes, statut not-applicable et réutilisation', async () => {
       const q = db.pool
@@ -213,13 +300,13 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
         `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1`,
       )
       expect(rows.map(r => r.table_name)).toEqual([
-        'agent_inventories', 'ai_cache', 'ai_calls', 'ai_embeddings', 'ai_feedback', 'ai_tasks', 'api_tokens', 'appliance_settings', 'audit_log', 'canary_runs', 'content_detection', 'credentials', 'exceptions',
-        'findings', 'forge_apps', 'forge_publications', 'forges', 'gates', 'helper_requests', 'license_policies', 'module_samples', 'module_trials', 'offline_bundles', 'owner_mappings', 'profile_rulesets', 'profiles', 'project_module_pins', 'projects', 'result_cache', 'roles', 'ruleset_versions', 'rulesets', 'sbom_components', 'scan_findings', 'scan_modules',
-        'scans', 'schema_migrations', 'self_vulns', 'sessions', 'severity_maps', 'triage_rules', 'trusted_keys', 'update_history', 'users', 'vuln_intel', 'webhook_deliveries',
+        'agent_inventories', 'ai_cache', 'ai_calls', 'ai_embeddings', 'ai_feedback', 'ai_tasks', 'api_tokens', 'appliance_settings', 'attestations', 'audit_log', 'canary_runs', 'content_detection', 'credentials', 'deploy_targets', 'deployments', 'exceptions',
+        'findings', 'forge_apps', 'forge_publications', 'forges', 'gate_simulations', 'gates', 'helper_requests', 'integration_requests', 'license_policies', 'module_samples', 'module_trials', 'offline_bundles', 'oidc_bindings', 'oidc_issuers', 'owner_mappings', 'profile_rulesets', 'profiles', 'project_module_pins', 'projects', 'release_candidates', 'release_reports', 'result_cache', 'roles', 'ruleset_versions', 'rulesets', 'sbom_components', 'scan_findings', 'scan_modules',
+        'scans', 'schema_migrations', 'self_vulns', 'sessions', 'severity_maps', 'triage_rules', 'trusted_keys', 'update_history', 'users', 'vex_statements', 'vuln_intel', 'webhook_deliveries',
       ])
       const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       const files = loadMigrationsFromDir(MIGRATIONS_DIR)
-      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql', '012_offline.sql', '013_triage_forges.sql', '014_profiles.sql', '015_forges.sql', '016_agent_inventories.sql', '017_validate_ruleset.sql'])
+      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql', '012_offline.sql', '013_triage_forges.sql', '014_profiles.sql', '015_forges.sql', '016_agent_inventories.sql', '017_validate_ruleset.sql', '018_release.sql'])
       expect(mig.rows).toEqual(files.map((f, i) => ({ version: i + 1, name: f.name, checksum: f.checksum })))
     })
 
