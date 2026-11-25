@@ -1192,6 +1192,7 @@ export default {
       module: 'Module {module} non utilisé : {reason}.',
       notApplicable: 'Module {module} non lancé : aucun fichier du dépôt ne le concerne (décidé automatiquement, jamais compté comme absent).',
       sbomFallback: 'Module {module} : SBOM de l’analyse absent ou invalide, le dépôt a été analysé directement.',
+      aiModuleFailed: 'Module d’analyse par IA {module} en échec ({code}) : ses résultats manquent, sans effet sur le verdict.',
     },
     gapKind: {
       'skipped-files': 'Fichiers ignorés',
@@ -1201,6 +1202,7 @@ export default {
       'package-dates-unknown': 'Dates de publication inconnues (quarantaine non vérifiée)',
       'not-applicable': 'Non applicable',
       'sbom-fallback': 'SBOM absent, dépôt analysé',
+      'ai-module-failed': 'Module d’IA en échec',
     },
     gapReason: {
       'no-module': 'aucun module installé et actif',

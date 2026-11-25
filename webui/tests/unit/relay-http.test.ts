@@ -10,7 +10,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { request } from 'node:https'
 import type { Server } from 'node:https'
 import { tmpdir } from 'node:os'
@@ -80,12 +80,12 @@ describe('relais IA en HTTPS sur socket Unix (startRelay)', () => {
   beforeAll(async () => {
     dir = await mkdtemp(join(tmpdir(), 'relay-https-'))
     tokens = join(dir, 'tokens')
-    execFileSync('mkdir', ['-p', tokens])
+    await mkdir(tokens, { recursive: true })
     openssl(['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-keyout', 'ca.key', '-out', 'ca.crt', '-days', '2', '-subj', '/CN=Scanoria CA test'], dir)
     openssl(['req', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-keyout', 'relay.key', '-out', 'relay.csr', '-subj', `/CN=${HOST}`], dir)
     await writeFile(join(dir, 'ext.cnf'), `subjectAltName = DNS:${HOST}\nextendedKeyUsage = serverAuth\n`)
     openssl(['x509', '-req', '-in', 'relay.csr', '-CA', 'ca.crt', '-CAkey', 'ca.key', '-CAcreateserial', '-out', 'relay.crt', '-days', '2', '-extfile', 'ext.cnf'], dir)
-    ca = execFileSync('cat', [join(dir, 'ca.crt')]).toString()
+    ca = await readFile(join(dir, 'ca.crt'), 'utf8')
     await writeFile(join(dir, 'ai.json'), JSON.stringify({ version: 1, enabled: true, literal: false, url: 'https://ollama.exemple.test:11434', scheme: 'https', host: 'ollama.exemple.test', port: 11434, addresses: ['192.0.2.10'], insecure: false, token: false, ca: false, pinned_at: '2026-11-25T08:00:00Z' }))
     const rec = (expiresIn: number): RelayToken => ({ v: 1, purpose: 'scan', module_id: 'pr-agent', project_id: projectId, scan_id: randomUUID(), expires_at: Math.floor(Date.now() / 1000) + expiresIn })
     await writeFile(join(tokens, `${tokenHash(good)}.json`), JSON.stringify(rec(600)))

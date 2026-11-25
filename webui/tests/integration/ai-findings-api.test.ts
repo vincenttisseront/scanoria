@@ -20,6 +20,7 @@ import { closePool } from '../../server/utils/db'
 import { createUser } from '../../server/utils/users'
 import { finalizeScanFindings, ingestModuleOutputs } from '../../server/findings/ingest'
 import { aiModuleAgreement } from '../../server/findings/ai-findings'
+import { toolHealth } from '../../server/health/scans'
 import { evaluateGate } from '../../server/gates/evaluate'
 import { CircuitBreaker } from '../../server/ai/service'
 import { Relay, type RelayToken } from '../../server/ai/relay'
@@ -205,5 +206,12 @@ describe.skipIf(!DATABASE_URL)('résultats des modules d’analyse par IA (Postg
   it('I24 : accord par module (confirmé contre faux positif)', async () => {
     await db.pool.query(`UPDATE findings SET status = 'false-positive', status_by = $2, status_at = now() WHERE id = $1`, [ids.ssrf, users.operator])
     expect(await aiModuleAgreement(db.pool, 90)).toEqual([{ module: 'fraim', total: 2, confirmed: 1, rejected: 1, pending: 0, rate: 0.5 }])
+  })
+
+  it('G20 : une panne de module d’IA (skipped, classe infra ou tool) compte dans la santé, pas un opt-out', async () => {
+    await db.pool.query(`UPDATE scan_modules SET status = 'skipped', error_class = 'infra', finished_at = now() WHERE scan_id = $1 AND module_id = 'fraim'`, [scanId])
+    await db.pool.query(`UPDATE scan_modules SET status = 'skipped', error_class = 'input', finished_at = now() WHERE scan_id = $1 AND module_id = 'bandit'`, [scanId])
+    const health = await toolHealth(db.pool, 7)
+    expect(health.map(h => [h.module_id, h.failures])).toEqual([['fraim', 1]])
   })
 })

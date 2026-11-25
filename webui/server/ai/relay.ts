@@ -29,7 +29,8 @@
 //     projets) et du modèle.
 
 import { createHash, randomBytes } from 'node:crypto'
-import { lstat, open } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { open } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -102,10 +103,11 @@ export function fileTokenLookup(dir = RELAY_TOKEN_DIR): TokenLookup {
     if (!TOKEN_RE.test(token)) return null
     const path = join(dir, `${tokenHash(token)}.json`)
     try {
-      const st = await lstat(path)
-      if (!st.isFile() || st.size > 4096) return null
-      const fh = await open(path, 'r')
+      // Un seul accès au chemin : ouverture sans suivre de lien, puis contrôles sur le descripteur.
+      const fh = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
       try {
+        const st = await fh.stat()
+        if (!st.isFile() || st.size > 4096) return null
         const text = (await fh.readFile({ encoding: 'utf8' })).slice(0, 4096)
         const parsed = RelayToken.safeParse(JSON.parse(text))
         return parsed.success ? parsed.data : null
@@ -481,8 +483,10 @@ export function relayHandler(relay: Relay, log: (msg: string) => void = () => {}
     const path = (req.url ?? '').split('?')[0]
     const auth = req.headers.authorization
     try {
+      // Jeton vérifié avant toute route et avant de lire le corps : la décision ne
+      // dépend que du jeton éphémère (portée lue côté serveur), jamais de la requête.
+      await relay.authorize(auth)
       if (req.method === 'GET' && path === '/v1/models') {
-        await relay.authorize(auth)
         send(res, 200, { object: 'list', data: [{ id: RELAY_MODEL_ALIAS, object: 'model', created: 0, owned_by: 'scanoria' }] })
         return
       }
@@ -491,8 +495,6 @@ export function relayHandler(relay: Relay, log: (msg: string) => void = () => {}
         return
       }
       if (req.method === 'POST' && path === '/v1/chat/completions') {
-        // Jeton contrôlé avant de lire le corps : un appelant inconnu n'envoie rien.
-        await relay.authorize(auth)
         const out = await relay.chat(auth, await readJson(req))
         const created = Math.floor(Date.now() / 1000)
         const id = completionId()
@@ -517,7 +519,6 @@ export function relayHandler(relay: Relay, log: (msg: string) => void = () => {}
         return
       }
       if (req.method === 'POST' && path === '/v1/embeddings') {
-        await relay.authorize(auth)
         const out = await relay.embed(auth, await readJson(req))
         send(res, 200, {
           object: 'list', model: RELAY_MODEL_ALIAS,

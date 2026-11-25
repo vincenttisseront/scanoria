@@ -11,6 +11,7 @@ import { computeVerdict, type GateFinding, type GateInput } from '../../server/g
 import { excludeUnconfirmedAi, isUnconfirmedAi } from '../../server/findings/ai-findings'
 import { modelLabel, parseModelLabel } from '../../server/ai/models'
 import { GateRules } from '#shared/analysis'
+import { orchestrationGaps } from '../../server/scans/orchestration'
 
 function finding(p: Partial<GateFinding> = {}): GateFinding {
   return {
@@ -67,5 +68,15 @@ describe('résultats IA et verdict', () => {
     expect(label).toBe(`qwen:7b@${'a'.repeat(12)}`)
     expect(parseModelLabel(label)).toEqual({ model: 'qwen:7b', digest: 'a'.repeat(12) })
     expect(parseModelLabel(null)).toBeNull()
+  })
+
+  it('couverture : une panne de module d’IA est signalée, un choix (aucun envoi, sans connecteur) ne l’est pas', () => {
+    const mod = (id: string, status: string, error: unknown, ai = true) => ({ id, version: '1', status, error, image_digest: null, feeds: [], outputs: {}, log: null, ...(ai ? { ai_relay: true } : {}) })
+    const gaps = orchestrationGaps({ modules: [
+      mod('fraim', 'skipped', { code: 'E_TOOL_EXIT', class: 'tool', message: 'AI module, outside the verdict: x' }),
+      mod('pr-agent', 'skipped', { code: 'E_RELAY_OPT_OUT', class: 'input', message: 'opt-out' }),
+      mod('sbom-only', 'skipped', { code: 'E_TOOL_EXIT', class: 'tool', message: 'x' }, false),
+    ] } as never)
+    expect(gaps).toEqual([{ kind: 'ai-module-failed', module: 'fraim', code: 'E_TOOL_EXIT' }])
   })
 })

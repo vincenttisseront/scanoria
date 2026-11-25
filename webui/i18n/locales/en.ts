@@ -1192,6 +1192,7 @@ export default {
       module: 'Module {module} not used: {reason}.',
       notApplicable: 'Module {module} not run: no file of the repository concerns it (decided automatically, never counted as missing).',
       sbomFallback: 'Module {module}: the SBOM of the scan is missing or invalid, the repository was scanned directly.',
+      aiModuleFailed: 'AI analysis module {module} failed ({code}): its findings are missing, with no effect on the verdict.',
     },
     gapKind: {
       'skipped-files': 'Skipped files',
@@ -1201,6 +1202,7 @@ export default {
       'package-dates-unknown': 'Unknown publication dates (quarantine not checked)',
       'not-applicable': 'Not applicable',
       'sbom-fallback': 'SBOM missing, repository scanned',
+      'ai-module-failed': 'AI module failed',
     },
     gapReason: {
       'no-module': 'no installed and enabled module',

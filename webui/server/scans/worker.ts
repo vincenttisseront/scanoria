@@ -36,6 +36,7 @@ import { TRIAL_TRIGGER, concludeTrial, isTrialScan, recordTrialModule } from '..
 import { needsPrefetch, requestPrefetch } from './execution'
 import { loadDurations, orderModules } from './order'
 import { recordOrchestration } from './orchestration'
+import { mergeCoverageGaps } from '../findings/coverage'
 
 export interface WorkerPaths {
   modulesStateFile: string
@@ -553,7 +554,11 @@ export class ScanWorker {
         }
       }
       // 0.7 (§ 3.5) : la sortie d'un module d'IA ne rend jamais un verdict non concluant.
-      if (status === 'invalid-output' && m.ai_relay === true) status = 'skipped'
+      if (status === 'invalid-output' && m.ai_relay === true) {
+        status = 'skipped'
+        await mergeCoverageGaps(this.pool, scan.id, [{ kind: 'ai-module-failed', module: m.id, code: 'E_OUTPUT_INVALID' }], ['ai-module-failed'], m.id)
+          .catch((e: unknown) => this.log(`scan ${scan.id} module ${m.id}: coverage update failed: ${(e as Error).message}`))
+      }
       if (status !== 'ok' && status !== 'skipped' && status !== 'not-applicable') complete = false
       let logPath: string | null = null
       if (m.log) {

@@ -49,7 +49,9 @@ export async function toolHealth(db: Queryable, days: HealthWindow): Promise<Too
             percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) FILTER (WHERE status = 'ok') AS duration_p95_ms,
             max(COALESCE(finished_at, started_at)) FILTER (WHERE status <> 'ok') AS last_failure_at
        FROM scan_modules
-      WHERE status IN ('ok', 'error', 'timeout', 'oom', 'invalid-output')
+      WHERE (status IN ('ok', 'error', 'timeout', 'oom', 'invalid-output')
+             -- 0.7 (§ 3.5) : panne d'un module d'IA, « skipped » pour le verdict, comptée ici (G20).
+             OR (status = 'skipped' AND error_class IN ('infra', 'tool')))
         AND NOT EXISTS (SELECT 1 FROM scans t WHERE t.id = scan_id AND t.trigger = 'trial')
         AND COALESCE(finished_at, started_at) >= now() - make_interval(days => $1)
       GROUP BY module_id
@@ -94,7 +96,8 @@ export async function recentFailures(db: Queryable, limit = 50): Promise<FailedS
                                          'has_log', m.log_path IS NOT NULL) ORDER BY m.module_id) AS modules
        FROM scans s
        JOIN projects p ON p.id = s.project_id AND p.archived_at IS NULL
-       JOIN scan_modules m ON m.scan_id = s.id AND m.status IN ('error', 'timeout', 'oom', 'invalid-output')
+       JOIN scan_modules m ON m.scan_id = s.id AND (m.status IN ('error', 'timeout', 'oom', 'invalid-output')
+                                                    OR (m.status = 'skipped' AND m.error_class IN ('infra', 'tool')))
       WHERE s.status IN ('done', 'error') AND s.trigger <> 'trial' AND s.finished_at >= now() - interval '30 days'
       GROUP BY s.id, p.name
       ORDER BY s.finished_at DESC
