@@ -25,7 +25,7 @@ ALTER TABLE exceptions
     ADD COLUMN expiry_notified_at timestamptz;
 -- Exceptions d'avant la 0.7 : décision datée de leur création, décideur
 -- inconnu (NULL). Toute nouvelle décision porte son décideur (console).
-UPDATE exceptions SET decided_at = created_at;
+UPDATE exceptions SET decided_at = created_at WHERE status = 'approved';
 -- Personne n'approuve ni ne refuse sa propre demande. Le reste de J15 (auteur
 -- du commit, identité non humaine, rôle) est appliqué par la console.
 ALTER TABLE exceptions ADD CONSTRAINT exceptions_not_self_decided
