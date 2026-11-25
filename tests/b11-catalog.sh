@@ -318,7 +318,7 @@ pd_build() {
 }
 pending_tree
 if pd_build > "$TMP/log" 2>&1; then ok "image en attente : construction acceptée"; else ko "image en attente : construction"; sed 's/^/     /' "$TMP/log" | head -n 10; fi
-grep -q "en attente d'image, hors de l'index : zz-pending" "$TMP/log" && ok "image en attente : annoncée par build.py" || ko "image en attente : non annoncée"
+grep -qE "en attente d'image, hors de l'index : (.*, )?zz-pending" "$TMP/log" && ok "image en attente : annoncée par build.py" || ko "image en attente : non annoncée"
 jq -e '[.modules[].id] | index("zz-pending") == null' "$TMP/pd-out/catalog-index.json" > /dev/null \
 	&& ok "image en attente : module absent de l'index" || ko "image en attente : module présent dans l'index"
 pd_archives=("$TMP"/pd-out/testbed-zz-pending*)

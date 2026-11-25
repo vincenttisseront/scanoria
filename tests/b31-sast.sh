@@ -22,7 +22,7 @@
 #   - registres : type et codes déclarés partout (helper, console, schémas).
 # Dépendances : bash, python3 (≥ 3.10), python3-yaml, python3-jsonschema, jq.
 
-# shellcheck disable=SC2016
+# shellcheck disable=SC2015,SC2016
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 

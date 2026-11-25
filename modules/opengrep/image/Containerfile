@@ -13,7 +13,7 @@ FROM docker.io/library/python@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239
 
 ARG SOURCE_DATE_EPOCH
 ARG OPENGREP_VERSION=v2.0.0
-ARG OPENGREP_SHA256=0000000000000000000000000000000000000000000000000000000000000000
+ARG OPENGREP_SHA256=37e93f4da5fd04a18c5c1febbdd12f7e98dfccd4d0c9cf2593bcb25eeb462da0
 
 LABEL org.opencontainers.image.source="https://github.com/opengrep/opengrep" \
       org.opencontainers.image.revision="v2.0.0" \
