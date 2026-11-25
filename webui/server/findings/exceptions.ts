@@ -26,6 +26,7 @@ import { writeAudit, type AuditActor } from '../utils/audit'
 import { redact } from './redact'
 import { moduleLocked, projectLocks, secretsLocked } from './locks'
 import { evaluateGate } from '../gates/evaluate'
+import { applyApprovedAcceptance, findingAuthors } from './triage'
 
 /** Durée maximale d'une exception : elle doit être revue au moins une fois par an. */
 export const MAX_EXCEPTION_DAYS = 366
@@ -281,6 +282,30 @@ export async function requestException(db: Queryable, input: ExceptionRequestInp
   return row
 }
 
+/**
+ * « Accepter » un résultat depuis la console : une demande d'exception de type
+ * « finding » (requested_via « console »), jamais un statut posé directement.
+ * Les auteurs des commits où le résultat a été vu sont exclus de l'approbation.
+ * Une demande déjà en attente pour ce résultat est renvoyée telle quelle.
+ */
+export async function requestFindingAcceptance(db: Queryable, findingId: string, user: { id: number, username: string },
+  body: { reason: string, until: string }, today = isoDay()): Promise<{ request: ExceptionRow, created: boolean }> {
+  const f = await db.query<{ project_id: string }>('SELECT project_id FROM findings WHERE id = $1 FOR UPDATE', [findingId])
+  if (!f.rows[0]) throw new ExceptionError('E_NOT_FOUND')
+  const pending = await db.query<{ id: string }>(
+    `SELECT id FROM exceptions
+      WHERE project_id = $1 AND kind = 'finding' AND target->>'finding_id' = $2 AND status = 'requested' AND revoked_at IS NULL
+      ORDER BY created_at LIMIT 1`, [f.rows[0].project_id, findingId])
+  if (pending.rows[0]) return { request: (await getException(db, pending.rows[0].id))!, created: false }
+  const request = await requestException(db, {
+    project_id: f.rows[0].project_id, kind: 'finding', target: { finding_id: findingId },
+    reason: body.reason, expires_on: body.until, requested_via: 'console',
+    requester_label: user.username, requester_is_human: true, requester_user_id: user.id,
+    commit_authors: await findingAuthors(db, findingId),
+  }, today)
+  return { request, created: true }
+}
+
 // ---------------------------------------------------------------- décision
 
 export interface Decider {
@@ -340,6 +365,7 @@ interface PendingRow {
   created_by_id: number | null
   requester_label: string | null
   commit_authors: string[]
+  reason: string
 }
 
 export async function decideException(db: Queryable, id: string, input: DecisionInput, today = isoDay()): Promise<ExceptionRow> {
@@ -348,7 +374,7 @@ export async function decideException(db: Queryable, id: string, input: Decision
   if (input.decision !== 'approved' && input.decision !== 'refused') throw new ExceptionError('E_VALIDATION', 'decision')
   const cur = await db.query<PendingRow>(
     `SELECT project_id, kind, target, status, revoked_at IS NOT NULL AS revoked, to_char(expires_on, 'YYYY-MM-DD') AS expires_on,
-            created_by::int AS created_by_id, requester_label, commit_authors
+            created_by::int AS created_by_id, requester_label, commit_authors, reason
        FROM exceptions WHERE id = $1 FOR UPDATE`, [id])
   const ex = cur.rows[0]
   if (!ex) throw new ExceptionError('E_NOT_FOUND')
@@ -375,6 +401,18 @@ export async function decideException(db: Queryable, id: string, input: Decision
       requested_by: row.created_by ?? row.requester_label, requested_via: row.requested_via, decision_reason: row.decision_reason,
     },
   })
+  // Seul chemin qui pose « accepted » sur un résultat : l'approbation d'une demande.
+  if (input.decision === 'approved' && ex.kind === 'finding') {
+    const findingId = String(ex.target.finding_id)
+    const applied = await applyApprovedAcceptance(db, findingId, { until: ex.expires_on, reason: ex.reason, deciderId: decider.id })
+    if (applied) {
+      await writeAudit(db, {
+        actor: { type: 'user', userId: decider.id, username: decider.username, ip: input.ip ?? null },
+        action: 'finding.status', outcome: 'success', targetType: 'finding', targetId: findingId,
+        details: { project_id: ex.project_id, from: applied.before.status, to: 'accepted', until: ex.expires_on, exception_id: id },
+      })
+    }
+  }
   return row
 }
 
@@ -388,7 +426,17 @@ export async function auditDecisionDenied(db: Queryable, id: string, actor: Audi
 
 /** Révocation (l'historique est gardé). Sans effet sur une exception déjà révoquée. */
 export async function revokeException(db: Queryable, id: string, userId: number | null): Promise<ExceptionRow> {
-  await db.query('UPDATE exceptions SET revoked_at = now(), revoked_by = $2 WHERE id = $1 AND revoked_at IS NULL', [id, userId])
+  const r = await db.query<{ kind: string, target: Record<string, unknown>, status: string, expires_on: string }>(
+    `UPDATE exceptions SET revoked_at = now(), revoked_by = $2 WHERE id = $1 AND revoked_at IS NULL
+     RETURNING kind, target, status, to_char(expires_on, 'YYYY-MM-DD') AS expires_on`, [id, userId])
+  const ex = r.rows[0]
+  // Révoquer l'approbation d'un résultat accepté le rend de nouveau bloquant.
+  if (ex && ex.kind === 'finding' && ex.status === 'approved') {
+    await db.query(
+      `UPDATE findings SET status = 'new', status_reason = NULL, status_until = NULL, status_by = $3, status_at = now(), updated_at = now()
+        WHERE id::text = $1 AND status = 'accepted' AND status_until = $2::date`,
+      [String(ex.target.finding_id), ex.expires_on, userId])
+  }
   const row = await getException(db, id)
   if (!row) throw new ExceptionError('E_NOT_FOUND')
   return row
