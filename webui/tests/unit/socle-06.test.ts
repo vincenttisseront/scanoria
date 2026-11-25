@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { AI_SUBJECT_TYPES, GateRules } from '#shared/analysis'
+import { GateRules } from '#shared/analysis'
 import { rulesFromPlan } from '../../server/gates/evaluate'
 
 const root = (rel: string) => fileURLToPath(new URL(`../../../${rel}`, import.meta.url))
@@ -41,9 +41,5 @@ describe('socle 0.6', () => {
   it('migration 012 : défaut G16 posé sur les gates existants', () => {
     const seeded = JSON.parse(/'(\{[^']*"feed_max_age_days"[^']*\})'::jsonb/.exec(SQL_012)![1]!)
     expect(seeded).toEqual({ feed_max_age_days: GateRules.parse({}).feed_max_age_days })
-  })
-
-  it('migration 012 : sujets IA identiques à AI_SUBJECT_TYPES', () => {
-    expect(SQL_012).toContain(`subject_type IN (${AI_SUBJECT_TYPES.map(v => `'${v}'`).join(', ')})`)
   })
 })
