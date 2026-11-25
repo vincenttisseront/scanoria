@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scanoria:schema:bundle-schedule:1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront.",
+  "title": "Export périodique des lots hors ligne (/etc/scanoria/bundle-export.json)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["enabled", "every_days", "keep", "modules", "last_run_at"],
+  "properties": {
+    "enabled": { "type": "boolean" },
+    "every_days": { "type": "integer", "minimum": 1, "maximum": 31 },
+    "keep": { "type": "integer", "minimum": 1, "maximum": 10 },
+    "modules": {
+      "type": "array", "maxItems": 64, "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,40}$" }
+    },
+    "last_run_at": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" }
+      ]
+    }
+  }
+}

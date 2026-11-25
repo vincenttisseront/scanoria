@@ -10,7 +10,10 @@
 //   bloquant, sauf exception datée de type « module » ;
 // - secrets au-delà de max_secrets, vulnérabilités, SAST et IaC à partir des
 //   seuils *_block_from ; nouveau code seulement si new_code_only ;
-// - trou de couverture signalé, sans bloquer (0.3).
+// - trou de couverture signalé, sans bloquer (0.3) ;
+// - G16 (0.6) : base de vulnérabilités plus vieille que feed_max_age_days au
+//   début de l'analyse = non concluant, sauf exception datée « module » ;
+//   feed_max_age_days null = seulement signalé au-delà de 7 jours (§ 9).
 // Les raisons sont ordonnées : malveillant, secrets, résultats bloquants du plus
 // grave au moins grave, modules en échec, puis informations non bloquantes.
 // L'IA (I9) ne fait que rédiger à partir de cette sortie : elle n'y entre jamais.
@@ -18,7 +21,7 @@
 import type { z } from 'zod'
 import type { Queryable } from '../utils/db'
 import {
-  ExceptionTargets, GateRules, SEVERITIES, SEVERITY_RANK, VerdictDetails,
+  ExceptionTargets, FEED_ALERT_DAYS, GateRules, SEVERITIES, SEVERITY_RANK, VerdictDetails,
   type ExceptionKind, type ScanModuleStatus, type Severity,
 } from '#shared/analysis'
 import { collapseCorrelated } from '../findings/correlation'
@@ -57,6 +60,8 @@ export interface GateFinding {
 export interface GateModule {
   module_id: string
   status: ScanModuleStatus | string
+  /** G16 (0.6) : bases lues par le module, [{id, version, updated_at}] (scan_modules.feeds). */
+  feeds?: unknown
 }
 
 export interface GateException {
@@ -92,6 +97,12 @@ export interface GateInput {
   trigger?: string
   /** 0.5 (B) : composants du SBOM de l'analyse, avec leur décision de licence (F8). */
   components?: GateComponent[]
+  /**
+   * G16 (0.6) : instant de référence de la fraîcheur, celui du début de
+   * l'analyse figé dans le plan (plan.created_at) : un rejeu (G11) juge l'âge
+   * des bases comme à l'époque. Absent : contrôle de fraîcheur non appliqué.
+   */
+  freshnessAt?: string
 }
 
 /** Composant du SBOM vu par le gate (F8, H5). */
@@ -341,6 +352,15 @@ export function computeVerdict(input: GateInput): VerdictDetails {
     moduleReasons.push({ code: r.code, blocking: !ex, count: 1, severity: null, module: m.module_id, finding_ids: [], actions: ex ? [] : r.actions })
   }
 
+  // 5 bis. G16 (0.6) : fraîcheur des bases, bloc distinct et additif.
+  const fresh = freshnessReasons(input, rules, exceptions)
+  for (const id of fresh.applied) {
+    const ex = exceptions.find(e => e.source.id === id)
+    if (ex) applied.set(id, ex.source)
+  }
+  moduleReasons.push(...fresh.blocking)
+  infoReasons.push(...fresh.info)
+
   // 6. G15 : trous de couverture, signalés sans bloquer.
   const gaps = coverageGaps(input.coverage)
   if (gaps > 0) infoReasons.push({ code: 'coverage-gap', blocking: false, count: gaps, severity: null, module: null, finding_ids: [], actions: ['install-module'] })
@@ -368,6 +388,64 @@ export function computeVerdict(input: GateInput): VerdictDetails {
       .sort((a, b) => a.expires_on.localeCompare(b.expires_on) || a.id.localeCompare(b.id))
       .map(e => ({ id: e.id, reason: e.reason, expires_on: e.expires_on })),
   })
+}
+
+const DAY_MS = 86_400_000
+
+interface FeedUse { module: string, feed: string, updatedAt: number | null }
+
+function feedUses(modules: GateModule[]): FeedUse[] {
+  const out: FeedUse[] = []
+  for (const m of modules) {
+    if (!Array.isArray(m.feeds)) continue
+    for (const raw of m.feeds) {
+      const f = raw as { id?: unknown, updated_at?: unknown } | null
+      if (typeof f?.id !== 'string') continue
+      const t = typeof f.updated_at === 'string' ? Date.parse(f.updated_at) : Number.NaN
+      out.push({ module: m.module_id, feed: f.id, updatedAt: Number.isFinite(t) ? t : null })
+    }
+  }
+  return out.sort((a, b) => a.module.localeCompare(b.module) || a.feed.localeCompare(b.feed))
+}
+
+/**
+ * G16 (0.6, contrat 20) : une raison « feed-stale » par module dont une base
+ * dépasse l'âge permis à l'instant de référence (début de l'analyse). Seuil
+ * feed_max_age_days : bloquante (verdict non concluant, comme G13), levée par
+ * une exception datée « module » ; null : signalée au-delà de 7 jours, sans
+ * bloquer. Une date de base illisible compte comme trop ancienne (échec par
+ * défaut, G13). count = âge en jours de la base la plus ancienne du module.
+ */
+export function freshnessReasons(input: GateInput, rules: GateRules, exceptions: CompiledException[] = []): { blocking: Reason[], info: Reason[], applied: string[] } {
+  const blocking: Reason[] = []
+  const info: Reason[] = []
+  const applied: string[] = []
+  const at = input.freshnessAt ? Date.parse(input.freshnessAt) : Number.NaN
+  if (!Number.isFinite(at)) return { blocking, info, applied }
+  const limitDays = rules.feed_max_age_days ?? FEED_ALERT_DAYS
+  const enforced = rules.feed_max_age_days !== null
+  const oldest = new Map<string, number>()
+  // Un module « not-applicable » (V6) n'a jamais lu sa base : son âge ne compte pas.
+  for (const u of feedUses(applicableModules(input.modules))) {
+    const ageDays = u.updatedAt === null ? Number.POSITIVE_INFINITY : (at - u.updatedAt) / DAY_MS
+    if (ageDays <= limitDays) continue
+    oldest.set(u.module, Math.max(oldest.get(u.module) ?? 0, ageDays))
+  }
+  for (const [module, age] of oldest) {
+    const count = Number.isFinite(age) ? Math.floor(age) : 0
+    const ex = enforced ? exceptions.find(e => e.module === module) : undefined
+    if (ex) applied.push(ex.source.id)
+    const isBlocking = enforced && !ex
+    const r: Reason = { code: 'feed-stale', blocking: isBlocking, count, severity: null, module, finding_ids: [], actions: isBlocking ? ['refresh-feed', 'request-exception'] : (ex ? [] : ['refresh-feed']) }
+    ;(isBlocking ? blocking : info).push(r)
+  }
+  return { blocking, info, applied }
+}
+
+/** G16 : instant de référence figé dans le plan (plan.created_at), sinon null. */
+export function planFreshnessAt(plan: unknown): string | null {
+  const at = (plan as { created_at?: unknown } | null)?.created_at
+  return typeof at === 'string' && Number.isFinite(Date.parse(at)) ? at : null
 }
 
 /**
@@ -508,7 +586,7 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
   const rules = rulesFromPlan(row.plan) ?? GateRules.parse(row.gate_rules)
 
   const [modules, findings, exceptions] = await Promise.all([
-    db.query<GateModule>('SELECT module_id, status FROM scan_modules WHERE scan_id = $1', [scanId]),
+    db.query<GateModule>('SELECT module_id, status, feeds FROM scan_modules WHERE scan_id = $1', [scanId]),
     db.query<GateFinding>(
       `SELECT f.id, f.tool, f.rule_id, f.category, f.severity, f.path, f.vuln_ids,
               f.package->>'name' AS package_name, f.malicious, f.secret_type, f.secret_state, f.status,
@@ -541,5 +619,6 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
     evaluatedAt: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
     trigger: row.trigger,
     components: await loadGateComponents(db, scanId, row.sbom_source, row.project_id),
+    freshnessAt: planFreshnessAt(row.plan) ?? now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
   })
 }

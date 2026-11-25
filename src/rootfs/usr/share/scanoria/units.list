@@ -19,6 +19,7 @@ scanoria-worker.service
 scanoria-ai.service
 scanoria-ai-check.timer
 scanoria-feeds-refresh.timer
+scanoria-bundle-export.timer
 scanoria-canaries.timer
 scanoria-self-sbom.timer
 scanoria-prefetch-images.timer

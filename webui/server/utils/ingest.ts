@@ -13,6 +13,7 @@ import type pg from 'pg'
 import { withTransaction, type Queryable } from './db'
 import { writeAudit } from './audit'
 import { REQUEST_FILE_RE, VERSION_RE, resultSchema, type HelperResult } from '#shared/schemas'
+import { recordOffline } from '../offline/ingest'
 
 const MAX_RESULT_BYTES = 1024 * 1024
 const INVALID_FILE_RE = /^invalid-[A-Za-z0-9._-]{1,120}\.json$/
@@ -146,6 +147,7 @@ async function ingestOne(pool: pg.Pool, fileName: string, result: HelperResult):
       details: { origin: result.origin, status: result.status, code: result.code, message: result.message },
     })
     await recordUpdateHistory(client, result, row)
+    await recordOffline(client, result, row)
     return 'ingested'
   })
 }

@@ -68,6 +68,7 @@ REQUEST_TYPES = (
     "backup-module", "restore-module",
     "reset-service-admin",
     "package-dates",
+    "export-bundle", "import-bundle", "set-mirror", "trust-key",
     "self-sbom", "run-canaries", "start-trial",
     "prefetch-images",
 )
@@ -87,6 +88,11 @@ ERROR_CODES = frozenset((
     "E_SONAR_UNAVAILABLE", "E_SONAR_ADMIN", "E_SONAR_API",
     "E_DTRACK_UNAVAILABLE", "E_DTRACK_ADMIN", "E_DTRACK_API",
     "E_EXPORT_FAILED",
+    "E_BUNDLE_INVALID", "E_BUNDLE_SIGNATURE", "E_BUNDLE_UNTRUSTED", "E_BUNDLE_CHECKSUM",
+    "E_BUNDLE_ARCHIVE", "E_BUNDLE_IMAGE", "E_BUNDLE_FEED", "E_BUNDLE_SOURCE",
+    "E_MIRROR_URL", "E_MIRROR_UNRESOLVED", "E_MIRROR_FORBIDDEN_ADDRESS", "E_MIRROR_CA",
+    "E_MIRROR_UNTRUSTED", "E_MIRROR_UNREACHABLE",
+    "E_KEY_INVALID",
     "E_CANARY_FAILED", "E_TRIAL_INVALID", "E_TRIAL_IMAGE", "E_SELFSBOM_IMAGE", "E_SELFSBOM_OUTPUT",
     "E_PREFETCH_FAILED", "E_PREFETCH_UNKNOWN_IMAGE",
 ))
@@ -253,6 +259,23 @@ def scanoria_ids():
     return (pw.pw_uid, pw.pw_gid)
 
 
+def web_gid():
+    """Groupe de nginx (www-data) : les fichiers servis lui sont réservés (0640/0750)."""
+    if TEST_ROOT:
+        return os.getgid()
+    import grp
+    return grp.getgrnam("www-data").gr_gid
+
+
+def web_readable(path, directory=False):
+    """root:www-data, 0750 pour un répertoire, 0640 pour un fichier ; jamais un lien."""
+    if os.path.islink(path):
+        raise Fail("E_INTERNAL", "refusing a symbolic link: %s" % path)
+    os.chmod(path, 0o750 if directory else 0o640)
+    if not TEST_ROOT:
+        os.chown(path, 0, web_gid())
+
+
 def shared_dir(path):
     """Crée ou rétablit un répertoire d'état lu par la console : root:scanoria 0750.
 
@@ -345,6 +368,7 @@ SYSTEM_CMDS = {
     "resolvectl": "/usr/bin/resolvectl",
     "podman": "/usr/bin/podman",
     "sysctl": "/usr/sbin/sysctl",
+    "skopeo": "/usr/bin/skopeo",
     # 0.6 (V9) : tmpfs de l'espace de travail d'une analyse.
     "mount": "/usr/bin/mount",
     "umount": "/usr/bin/umount",

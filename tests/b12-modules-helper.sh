@@ -106,6 +106,8 @@ cat > "$STUBS/podman" <<-EOF
 	jq -cn '["podman"] + \$ARGS.positional' --args -- "\$@" >> "$CALLS"
 	case "\$1" in
 	pull) [[ -e "$FIX/podman-fail-pull" ]] && exit 125; exit 0 ;;
+	# Image absente du stockage quand le registre la refuse (repli hors ligne, 0.6).
+	image) [[ "\$2" == exists && -e "$FIX/podman-fail-pull" ]] && exit 1; exit 0 ;;
 	run)
 		out=""
 		prev=""

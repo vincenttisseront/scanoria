@@ -72,6 +72,27 @@ function severityModel(key: string) {
 }
 const severityModels = Object.fromEntries(fields.filter(f => f.kind === 'severity').map(f => [f.key, severityModel(f.key)]))
 
+/**
+ * Nombre facultatif (G16, feed_max_age_days) : la valeur null a son propre
+ * libellé (« seulement signaler »), proposé quand gates.fields.<clé>_null existe.
+ */
+const lastNumber: Record<string, number> = {}
+function nullToggle(key: string, min: number) {
+  return computed({
+    get: () => rules.value[key] === null,
+    set: (isNull: boolean) => {
+      if (isNull) {
+        if (typeof rules.value[key] === 'number') lastNumber[key] = rules.value[key] as number
+        rules.value[key] = null
+      }
+      else {
+        rules.value[key] = lastNumber[key] ?? Math.max(min, 7)
+      }
+    },
+  })
+}
+const nullModels = Object.fromEntries(fields.flatMap(f => f.kind === 'number' && f.nullable && te(`gates.fields.${f.key}_null`) ? [[f.key, nullToggle(f.key, f.min)]] : []))
+
 const parsed = computed(() => GateRules.safeParse(rules.value))
 const dirty = computed(() => !!gate.value && JSON.stringify(GateRules.parse(gate.value.rules)) !== JSON.stringify(parsed.value.success ? parsed.value.data : null))
 const saving = ref(false)
@@ -218,6 +239,23 @@ async function remove() {
               v-model="(rules[f.key] as boolean)"
               :disabled="!canEdit"
             />
+            <div
+              v-else-if="f.kind === 'number' && nullModels[f.key]"
+              class="flex flex-wrap items-center gap-3"
+            >
+              <UInputNumber
+                v-if="rules[f.key] !== null"
+                v-model="(rules[f.key] as number)"
+                :min="f.min"
+                :disabled="!canEdit"
+              />
+              <UCheckbox
+                v-model="nullModels[f.key]!.value"
+                :label="t(`gates.fields.${f.key}_null`)"
+                :disabled="!canEdit"
+                :data-testid="`rule-${f.key}-null`"
+              />
+            </div>
             <UInputNumber
               v-else-if="f.kind === 'number'"
               v-model="(rules[f.key] as number)"

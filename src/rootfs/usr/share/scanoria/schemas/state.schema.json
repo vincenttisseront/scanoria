@@ -540,6 +540,32 @@
           }
         }
       }
+    },
+    "appliance_key": {
+      "description": "Clé Ed25519 de l'appliance qui signe ses lots hors ligne (0.6, chantier A) : clé publique brute en base64 et empreinte SHA-256. null tant qu'elle n'est pas créée. La clé privée n'est jamais publiée.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "public_key",
+            "fingerprint"
+          ],
+          "properties": {
+            "public_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9+/]{43}=$"
+            },
+            "fingerprint": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      ]
     }
   }
 }

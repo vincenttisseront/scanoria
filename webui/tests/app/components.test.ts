@@ -178,7 +178,7 @@ describe('mise en page principale', () => {
       ['Tableau de bord'],
       ['Analyse', 'Projets', 'Analyses', 'Résultats', 'Composants', 'Quality gates', 'Licences', 'Santé'],
       ['Modules', 'Catalogue', 'Dependency-Track', 'SonarQube'],
-      ['Administration', 'Système', 'Certificats TLS', 'Utilisateurs', 'IA', 'Journal d’audit', 'Mises à jour', 'À propos'],
+      ['Administration', 'Système', 'Certificats TLS', 'Utilisateurs', 'IA', 'Hors ligne', 'Journal d’audit', 'Mises à jour', 'À propos'],
     ])
     expect(lists.slice(1).every(l => l[0]!.type === 'label')).toBe(true)
     const sonar = lists[2]!.find(i => i.label === 'SonarQube')!

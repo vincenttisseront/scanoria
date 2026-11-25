@@ -4,7 +4,7 @@
 
   scanoria-helper run
   scanoria-helper exec --origin timer|firstboot|cli --type <type> --params '<json>'
-  scanoria-helper scheduled update-check|update-apply|cert-renew
+  scanoria-helper scheduled update-check|update-apply|cert-renew|bundle-export
 
 Choix de Python 3 (bibliothèque standard) plutôt que bash pour ce service :
 validation JSON Schema réelle (liste fermée, additionalProperties: false),
@@ -27,7 +27,7 @@ import tempfile
 import time
 import uuid
 
-from . import aiendpoint, common, modules, netutil, pkgdates, prefetch, provision, schema, vigilance
+from . import aiendpoint, bundle, common, mirror, modules, netutil, offline, pkgdates, prefetch, provision, schema, vigilance
 from . import dns as dnscheck
 from .common import Fail
 
@@ -44,6 +44,7 @@ TIMEOUTS = {
     "backup-module": 3300, "restore-module": 3300,
     "reset-service-admin": 360,
     "package-dates": 360,
+    "export-bundle": 3300, "import-bundle": 3300, "set-mirror": 180, "trust-key": 60,
     "self-sbom": 3300, "run-canaries": 3300, "start-trial": 1200,
     "prefetch-images": 3300,
 }
@@ -496,6 +497,10 @@ ACTIONS = {
     "restore-module": modules.act_restore_module,
     "reset-service-admin": provision.act_reset_service_admin,
     "package-dates": pkgdates.act_package_dates,
+    "export-bundle": bundle.act_export_bundle,
+    "import-bundle": bundle.act_import_bundle,
+    "set-mirror": mirror.act_set_mirror,
+    "trust-key": offline.act_trust_key,
     "self-sbom": vigilance.act_self_sbom,
     "run-canaries": vigilance.act_run_canaries,
     "start-trial": vigilance.act_start_trial,
@@ -594,6 +599,7 @@ def cmd_run():
     with Lock(wait=3300):
         recover_work()
         provision.purge_oneshot()   # valeurs à lecture unique échues (mot de passe admin d'un service)
+        ensure_appliance_key()
         for _ in range(10000):
             names = sorted(os.listdir(os.path.join(common.REQ, "incoming")))
             if not names:
@@ -610,6 +616,15 @@ def cmd_run():
     return 0
 
 
+def ensure_appliance_key():
+    """Clé Ed25519 de l'appliance (lots hors ligne) : créée au premier passage si absente."""
+    try:
+        if offline.ensure_key():
+            offline.publish_status()
+    except (Fail, OSError) as e:
+        common.log("appliance key not created: %s" % getattr(e, "message", e))
+
+
 def cmd_exec(origin, rtype, params_text):
     received = common.now()
     rid = str(uuid.uuid4())
@@ -622,6 +637,7 @@ def cmd_exec(origin, rtype, params_text):
         req = {"version": 1, "id": rid, "type": rtype, "created_at": common.iso(received),
                "requested_by": {"user_id": 0, "username": "system"}, "params": params}
         with Lock(wait=TIMEOUTS.get(rtype, 60) + 60):
+            ensure_appliance_key()
             t, err = validate(req)
             if err is not None:
                 res = make_result(rid, t, origin, err[0], err[1], received, None)
@@ -665,8 +681,21 @@ def cmd_scheduled(job):
         if pol.get("auto_check") is not True:
             return 0
         return cmd_exec("timer", "check-update", "{}")
+    if job == "bundle-export":
+        # Rien à faire (ni résultat écrit) tant que l'export périodique n'est pas activé.
+        if not offline.load_schedule().get("enabled"):
+            return 0
+        return cmd_exec("timer", "export-bundle", '{"scheduled": true}')
     if job == "cert-renew":
-        if tls_mode() != "internal" or appliance_fqdn() is None:
+        if appliance_fqdn() is None:
+            return 0
+        # Certificat du miroir des bases (feeds.<nom>), quel que soit le mode TLS.
+        try:
+            from . import dtmirror
+            dtmirror.refresh_tls()
+        except Fail as e:
+            common.log("feeds mirror certificate not renewed: %s" % e.message)
+        if tls_mode() != "internal":
             return 0
         return cmd_exec("timer", "issue-certificate", '{"force": false}')
     if job == "update-apply":
@@ -713,7 +742,7 @@ def cmd_scheduled(job):
 
 USAGE = """usage: scanoria-helper run
        scanoria-helper exec --origin timer|firstboot|cli --type TYPE --params JSON
-       scanoria-helper scheduled update-check|update-apply|cert-renew
+       scanoria-helper scheduled update-check|update-apply|cert-renew|bundle-export
 """
 
 

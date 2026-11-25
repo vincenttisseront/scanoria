@@ -9,6 +9,12 @@
 #   scanoria-ca import --fqdn NOM --cert F --key F [--chain F]
 #                                             certificat importé (contrôles § 7.3)
 #   scanoria-ca status                        état TLS (JSON)
+#   scanoria-ca issue-feeds --fqdn NOM [--force]
+#                                             certificat interne feeds.NOM du miroir
+#                                             des bases servi aux modules permanents
+#                                             (Dependency-Track, 0.6), quel que soit le
+#                                             mode TLS de la console ; renouvelé à
+#                                             moins de 30 jours
 #
 # Appelé par scanoria-helper, qui a validé les paramètres. Réponse sur la
 # sortie standard : {"code", "message", "output"} ; jamais de clé privée.
@@ -239,6 +245,61 @@ cmd_issue() {
 }
 
 # Sépare un fichier PEM en certificats (un fichier par certificat, ré-encodés).
+# Certificat du miroir des bases (port interne, lu par Dependency-Track) :
+# toujours émis par l'AC interne, que la console soit en mode interne ou importé.
+feeds_ok() {
+	local d="$PKI/feeds"
+	[[ -f "$d/fullchain.pem" && -f "$d/privkey.pem" ]] || return 1
+	openssl x509 -in "$d/fullchain.pem" -noout -checkend "$RENEW_SECONDS" > /dev/null 2>&1 || return 1
+	grep -qxF -- "feeds.$FQDN" <<< "$(san_list "$d/fullchain.pem")" || return 1
+	openssl verify -x509_strict -CAfile "$CA_DIR/ca.crt" "$d/fullchain.pem" > /dev/null 2>&1 || return 1
+	[[ "$(pub_sha x509 "$d/fullchain.pem")" == "$(pub_sha pkey "$d/privkey.pem")" ]]
+}
+
+cmd_issue_feeds() {
+	local name="feeds.$FQDN"
+	[[ -f "$CA_DIR/ca.crt" && -f "$CA_DIR/ca.key" ]] || emit E_PRECONDITION "internal CA missing"
+	openssl x509 -in "$CA_DIR/ca.crt" -noout -subject -nameopt RFC2253 \
+		| grep -qxF "subject=CN=Scanoria CA $FQDN" \
+		|| emit E_PRECONDITION "internal CA does not match the appliance name"
+	if [[ $FORCE -eq 0 ]] && feeds_ok; then
+		emit OK "certificate still valid" "$(cert_json "$PKI/feeds/fullchain.pem" | jq -c '. + {issued: false}')"
+	fi
+	openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$WORK/privkey.pem" 2>/dev/null
+	openssl req -new -key "$WORK/privkey.pem" -subj "/CN=$name" -out "$WORK/req.csr"
+	cat > "$WORK/ext.cnf" <<-EOF
+		[v3]
+		basicConstraints = critical,CA:FALSE
+		keyUsage = critical,digitalSignature
+		extendedKeyUsage = serverAuth
+		subjectAltName = DNS:$name
+		subjectKeyIdentifier = hash
+		authorityKeyIdentifier = keyid:always
+	EOF
+	openssl x509 -req -in "$WORK/req.csr" -CA "$CA_DIR/ca.crt" -CAkey "$CA_DIR/ca.key" \
+		-set_serial "$(serial)" -days "$CERT_DAYS" -sha256 \
+		-extfile "$WORK/ext.cnf" -extensions v3 -out "$WORK/cert.pem" 2>/dev/null
+	openssl verify -x509_strict -CAfile "$CA_DIR/ca.crt" "$WORK/cert.pem" > /dev/null \
+		|| emit E_INTERNAL "issued certificate does not verify"
+	rm -rf "$PKI/feeds.new"
+	install -d -m 0700 "$PKI/feeds.new"
+	own root:root 0600 "$WORK/privkey.pem"
+	own root:root 0600 "$WORK/cert.pem"
+	mv "$WORK/privkey.pem" "$PKI/feeds.new/privkey.pem"
+	mv "$WORK/cert.pem" "$PKI/feeds.new/fullchain.pem"
+	swap_in feeds
+	# Site du miroir déjà en place : rechargé, sinon routing.apply le contrôlera.
+	if [[ -e "$R/etc/nginx/scanoria.d/10-feeds-mirror.conf" ]]; then
+		if ! { sys nginx -t -q && sys systemctl try-reload-or-restart nginx.service; }; then
+			swap_back feeds
+			sys nginx -t -q && sys systemctl try-reload-or-restart nginx.service || true
+			emit E_INTERNAL "nginx rejected the new certificate, previous state restored"
+		fi
+	fi
+	rm -rf "${PKI:?}/feeds.old"
+	emit OK "certificate issued" "$(cert_json "$PKI/feeds/fullchain.pem" | jq -c '. + {issued: true}')"
+}
+
 split_certs() { # fichier préfixe -> nombre de certificats
 	local n
 	awk -v p="$2" '
@@ -318,6 +379,7 @@ case "$cmd" in
 	init) parse_opts "$@"; cmd_init ;;
 	issue) parse_opts "$@"; cmd_issue ;;
 	import) parse_opts "$@"; cmd_import ;;
+	issue-feeds) parse_opts "$@"; cmd_issue_feeds ;;
 	status) [[ $# -eq 0 ]] || emit E_INVALID_PARAM "no option expected"; cmd_status ;;
-	*) echo "usage: scanoria-ca init|issue|import|status [options]" >&2; exit 2 ;;
+	*) echo "usage: scanoria-ca init|issue|import|issue-feeds|status [options]" >&2; exit 2 ;;
 esac

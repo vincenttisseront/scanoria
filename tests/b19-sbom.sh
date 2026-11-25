@@ -68,8 +68,9 @@ expect "grype-db : préparée par l'image épinglée de grype" "$(jq -r .feed.hy
 expect "dependency-track : libellé dtrack" "$(jq -r .hostname "$TMP/dependency-track.json")" dtrack
 expect "dependency-track : PostgreSQL" "$(jq -r .needs.postgres "$TMP/dependency-track.json")" true
 expect "dependency-track : télémétrie coupée" "$(jq -r .service.env.TELEMETRY_SUBMISSION_ENABLED_DEFAULT "$TMP/dependency-track.json")" false
-jq -e '.service.egress | length > 0 and all(test("^[a-z0-9.-]+$"))' "$TMP/dependency-track.json" > /dev/null \
-	&& ok "dependency-track : sortie Internet déclarée (miroirs)" || ko "dependency-track : sortie Internet non déclarée"
+jq -e '(.service.egress // []) | length == 0' "$TMP/dependency-track.json" > /dev/null \
+	&& ok "dependency-track : aucune sortie Internet (hors ligne, 0.6)" || ko "dependency-track : sortie Internet encore déclarée"
+expect "dependency-track : base OSV de l'appliance requise" "$(jq -c .requires.feeds "$TMP/dependency-track.json")" '["osv-db"]'
 jq -e '.resources.min_ram_mb >= 4096' "$TMP/dependency-track.json" > /dev/null && ok "dependency-track : mémoire déclarée (≥ 4 Go)" || ko "dependency-track : mémoire sous-estimée"
 expect "dtrack-upload : réseau du service seulement" "$(jq -r .scan.network "$TMP/dtrack-upload.json")" "service:dependency-track"
 expect "dtrack-upload : facultatif, SBOM requis" "$(jq -c '[.scan.service_optional, .scan.requires_sbom]' "$TMP/dtrack-upload.json")" '[true,true]'

@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Généré par scanoria.routing (appliance miroir F17, 0.6) : ne pas modifier.
+# Dernier lot hors ligne signé, découpé par fichier (catalogue, bases, images,
+# bancs d'essai), servi en lecture seule. Aucune session, aucun cookie : seul
+# le manifeste signé fait foi, vérifié par l'appliance cliente.
+# scanoria-route: id=mirror mode=static host=@HOST@ port=443 fqdn=@FQDN@
+server {
+	listen 443 ssl http2;
+	listen [::]:443 ssl http2;
+	server_name @HOST@;
+	server_tokens off;
+@TLS@
+	add_header X-Frame-Options DENY always;
+	root /var/lib/scanoria-mirror/v1;
+	autoindex off;
+	client_max_body_size 1k;
+
+	location ~ /\. {
+		return 404;
+	}
+	location / {
+		limit_except GET HEAD {
+			deny all;
+		}
+		default_type application/octet-stream;
+		try_files $uri =404;
+	}
+}

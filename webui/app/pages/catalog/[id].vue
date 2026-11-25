@@ -9,6 +9,7 @@ irréversible : garder ou supprimer les données).
 -->
 
 <script setup lang="ts">
+import { FEED_ALERT_DAYS } from '#shared/analysis'
 import { managesAdmin } from '#shared/admin-access'
 import type { DnsStatus, FeedStatus, InstallPlan, InstalledModule, ModuleOperation, ModuleSummary } from '~/composables/useCatalog'
 
@@ -418,6 +419,15 @@ const testbedDetails = computed(() => {
               {{ t('catalog.feed.missing') }}
             </template>
           </p>
+          <UAlert
+            v-if="feedAgeDays !== null && feedAgeDays > FEED_ALERT_DAYS"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-clock-alert"
+            :title="t('catalog.feed.tooOld', { days: feedAgeDays, max: FEED_ALERT_DAYS })"
+            :description="t('catalog.feed.tooOldHelp')"
+            data-feed-too-old
+          />
           <p
             v-if="detail.feed.status === 'stale' || detail.feed.status === 'failed'"
             class="text-sm text-warning"

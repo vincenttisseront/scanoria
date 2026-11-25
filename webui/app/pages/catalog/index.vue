@@ -11,6 +11,13 @@ est dans le journal d'audit) et graphe des dépendances (G1).
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import { isRunningOperation, type CatalogEntry, type CatalogPack, type ModuleOperation } from '~/composables/useCatalog'
+import { FEED_ALERT_DAYS, feedAgeDays } from '#shared/analysis'
+
+/** § 9 : base plus vieille que le seuil d'alerte (7 jours), signalée dans la liste. */
+function feedTooOld(updatedAt: string | null | undefined): boolean {
+  const d = feedAgeDays(updatedAt)
+  return d !== null && d > FEED_ALERT_DAYS
+}
 
 const { t } = useI18n()
 useHead({ title: computed(() => t('catalog.title')) })
@@ -430,9 +437,15 @@ const packResourcesOk = (p: CatalogPack) => !p.plan || p.plan.checks.every(c => 
             <p
               v-if="row.original.feed"
               class="mt-1 text-xs"
-              :class="row.original.feed.status === 'ok' ? 'text-muted' : 'text-warning'"
+              :class="row.original.feed.status === 'ok' && !feedTooOld(row.original.feed.updated_at) ? 'text-muted' : 'text-warning'"
               data-feed-age
             >
+              <UIcon
+                v-if="feedTooOld(row.original.feed.updated_at)"
+                name="i-lucide-clock-alert"
+                class="align-middle"
+                data-feed-too-old
+              />
               {{ row.original.feed.updated_at
                 ? t('catalog.feed.age', { date: fmt.date(row.original.feed.updated_at) })
                 : t('catalog.feed.none') }}

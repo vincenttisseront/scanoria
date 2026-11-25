@@ -15,10 +15,9 @@ mise à jour, restauration), sur le port local publié par le moteur :
 reset_admin : nouveau mot de passe admin (demande reset-service-admin).
 
 Dependency-Track n'a pas d'inscription libre ; aucun fournisseur externe n'est
-configuré (OIDC en 1.0). Ses miroirs de vulnérabilités (NVD, OSV, EPSS) et ses
-analyseurs de dépôts de paquets utilisent la sortie Internet déclarée par le
-manifeste (service.egress) ; sans Internet, ils restent vides jusqu'au mode
-hors ligne de la 0.6.
+configuré (OIDC en 1.0). Depuis la 0.6, le module n'a plus d'accès sortant :
+ses miroirs OSV et EPSS sont réglés sur les bases servies par l'appliance, les
+autres sources sont coupées (dtmirror.configure, appelé ici au mieux).
 """
 
 import json
@@ -224,6 +223,8 @@ def provision(m, info):
             return {"version": version, "token_renewed": False, "admin_known": False}
         raise
     renewed = scan_key(http, jwt, scan_team(http, jwt), sdir)
+    from . import dtmirror
+    dtmirror.configure(http, jwt)
     common.log("provision: Dependency-Track %s ready (phase %s%s)" % (version or "?", info.get("phase", "?"),
                                                                      ", API key renewed" if renewed else ""))
     return {"version": version, "token_renewed": renewed, "admin_known": True}

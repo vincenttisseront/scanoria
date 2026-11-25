@@ -167,6 +167,15 @@ class H(BaseHTTPRequestHandler):
             st["left"] = st.get("processing", 0)
             save(st)
             return self.reply(200, {"token": str(uuid.uuid4())})
+        if p == "api/v1/configProperty/aggregate" and method == "POST":
+            # 0.6 (chantier A) : sources de vulnérabilités servies par l'appliance.
+            if kind != "admin" or not isinstance(body, list):
+                return self.reply(401 if kind != "admin" else 400)
+            cfg = st.setdefault("config", {})
+            for e in body:
+                cfg["%s/%s" % (e["groupName"], e["propertyName"])] = e["propertyValue"]
+            save(st)
+            return self.reply(200, body)
         if p.startswith("api/v1/event/token/"):
             if kind is None:
                 return self.reply(401)
