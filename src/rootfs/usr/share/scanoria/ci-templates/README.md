@@ -1,3 +1,7 @@
+<!--
+SPDX-License-Identifier: AGPL-3.0-or-later
+Copyright (C) 2026 Vincent Tisseront
+-->
 # Modèles CI officiels de Scanoria (J3)
 
 Chaque modèle tient en une ligne d'appel et enveloppe `scanoria-scan` par

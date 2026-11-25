@@ -131,5 +131,5 @@ export function appendGitlabInclude(existing: string | null, ctx: RenderContext)
   const block = gitlabInclude(ctx)
   if (existing === null) return `# Scanoria (J2) : étape d'analyse et verdict du quality gate.\n${block}`
   if (/^include\s*:/m.test(existing)) return null
-  return `${existing.replace(/\s*$/, '\n')}\n# Scanoria (J2) : étape d'analyse et verdict du quality gate.\n${block}`
+  return `${existing.trimEnd()}\n\n# Scanoria (J2) : étape d'analyse et verdict du quality gate.\n${block}`
 }

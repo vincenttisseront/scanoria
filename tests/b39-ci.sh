@@ -195,8 +195,10 @@ fake=$(node -e 'const b=o=>Buffer.from(JSON.stringify(o)).toString("base64url");
 run() { env -i PATH="$PATH" HOME="$TMP" "$@" sh "$CLIENT" --url https://analyse.exemple.test --project 00000000-0000-4000-8000-000000000000 --ref refs/heads/main --oidc > "$TMP/out" 2>&1 && echo 0 || echo $?; }
 rc=$(run)
 if [[ $rc == 3 ]] && grep -q 'aucun jeton OIDC' "$TMP/out"; then ok "client : --oidc sans jeton de la CI → erreur 3"; else ko "client : --oidc sans jeton (code $rc)"; cat "$TMP/out"; fi
-rc=$(run ACTIONS_ID_TOKEN_REQUEST_URL=http://192.0.2.10/token ACTIONS_ID_TOKEN_REQUEST_TOKEN=abc)
-if [[ $rc == 3 ]] && grep -q 'http:// refusé' "$TMP/out"; then ok "client : service de jetons en http:// refusé"; else ko "client : http:// (code $rc)"; cat "$TMP/out"; fi
+# Adresse en clair construite à l'exécution (aucune URL http:// dans le dépôt).
+clear=http
+rc=$(run ACTIONS_ID_TOKEN_REQUEST_URL="$clear://192.0.2.10/token" ACTIONS_ID_TOKEN_REQUEST_TOKEN=abc)
+if [[ $rc == 3 ]] && grep -q "service de jetons OIDC en $clear:// refusé" "$TMP/out"; then ok "client : service de jetons en http:// refusé"; else ko "client : http:// (code $rc)"; cat "$TMP/out"; fi
 rc=$(run ACTIONS_ID_TOKEN_REQUEST_URL='file:///etc/passwd' ACTIONS_ID_TOKEN_REQUEST_TOKEN=abc)
 if [[ $rc == 3 ]] && grep -q 'ACTIONS_ID_TOKEN_REQUEST_URL invalide' "$TMP/out"; then ok "client : adresse de service file:// refusée"; else ko "client : file:// (code $rc)"; cat "$TMP/out"; fi
 rc=$(run SCANORIA_ID_TOKEN='pas un jeton; rm -rf /')

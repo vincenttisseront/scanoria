@@ -41,7 +41,7 @@ async function load() {
   }
 }
 onMounted(() => {
-  if (session.can('admin')) load()
+  if (session.can('admin')) void load()
 })
 
 const kinds = [{ label: 'Forgejo', value: 'forgejo' }, { label: 'GitHub', value: 'github' }, { label: 'GitLab', value: 'gitlab' }]

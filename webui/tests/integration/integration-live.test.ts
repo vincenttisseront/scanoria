@@ -20,7 +20,7 @@
 import { spawn } from 'node:child_process'
 import { createHash, createSign, generateKeyPairSync, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:https'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -119,6 +119,7 @@ describe.skipIf(!DATABASE_URL || !FORGEJO)('b39-live : vrai Forgejo, PR d’int�
     dir = await mkdtemp(join(tmpdir(), 'scanoria-b39-'))
     process.env.NUXT_SECRET_KEY_FILE = join(dir, 'secret.key')
     process.env.NUXT_SCANORIA_SCAN_CLIENT = CLIENT
+    process.env.NUXT_CI_TEMPLATES_DIR = join(ROOT, 'src/rootfs/usr/share/scanoria/ci-templates')
     setConfig(loadConfig({
       NUXT_DATABASE_URL: db.url,
       NUXT_UPLOADS_DIR: join(dir, 'uploads'),
@@ -185,6 +186,7 @@ describe.skipIf(!DATABASE_URL || !FORGEJO)('b39-live : vrai Forgejo, PR d’int�
     setConsoleUrl()
     setForgeTransport()
     delete process.env.NUXT_SCANORIA_SCAN_CLIENT
+    delete process.env.NUXT_CI_TEMPLATES_DIR
     await new Promise(r => consoleServer?.close(r))
     await new Promise(r => oidcServer?.close(r))
     stopConsole()
@@ -267,6 +269,8 @@ describe.skipIf(!DATABASE_URL || !FORGEJO)('b39-live : vrai Forgejo, PR d’int�
       ACTIONS_ID_TOKEN_REQUEST_URL: `${oidcUrl}/token?api-version=2.0`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: runnerSecret, SCANORIA_OIDC_CACERT: caFile,
       GITHUB_REF_NAME: 'main', GITHUB_OUTPUT: join(dir, 'output'),
     }
+    // Le runner crée le fichier des sorties de l'étape avant le job.
+    await writeFile(join(dir, 'output'), '')
     const seen = new Set<string>()
     // Le worker n'est pas lancé ici : l'analyse créée par l'étape est terminée à la main.
     async function runAndPass(extra: Record<string, string> = {}) {

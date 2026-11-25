@@ -204,8 +204,9 @@ if [ "$OIDC" = 1 ]; then
     die 3 "--oidc : aucun jeton OIDC fourni par la CI (SCANORIA_ID_TOKEN, ou ACTIONS_ID_TOKEN_REQUEST_URL et _TOKEN)" "--oidc: no OIDC token provided by the CI (SCANORIA_ID_TOKEN, or ACTIONS_ID_TOKEN_REQUEST_URL and _TOKEN)"
   fi
   unset SCANORIA_ID_TOKEN
-  [ "${#TOKEN}" -le 8192 ] && printf '%s' "$TOKEN" | grep -Eq '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' \
-    || die 3 "jeton OIDC mal formé" "malformed OIDC token"
+  if [ "${#TOKEN}" -gt 8192 ] || ! printf '%s' "$TOKEN" | grep -Eq '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$'; then
+    die 3 "jeton OIDC mal formé" "malformed OIDC token"
+  fi
 fi
 printf 'Authorization: Bearer %s\n' "$TOKEN" > "$TMP/auth"
 TOKEN=
