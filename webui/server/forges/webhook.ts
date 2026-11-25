@@ -11,11 +11,12 @@
 // identifiant aléatoire : un faux ne peut pas « brûler » un vrai identifiant).
 // Le contenu n'est jamais cru sur parole : la PR est relue dans la forge.
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import type { IncomingMessage } from 'node:http'
 import type pg from 'pg'
 import type { Queryable } from '../utils/db'
 import { getForge, isSafeRef } from './index'
-import { webhookSecret, addInstallation, refreshAppCredential } from './apps'
+import { webhookSecret, addInstallation, refreshAppCredential, removeInstallation } from './apps'
 import { deliveryId, MAX_WEBHOOK_BYTES, verifyWebhookSignature, webhookEvent, type HeaderBag, type WebhookEvent } from './signature'
 import { projectForge } from './context'
 import { enqueuePullRequestScan, handlePrComment, projectForRepo } from './pr'
@@ -32,14 +33,37 @@ export interface WebhookOutcome {
   work?: Promise<string>
 }
 
+/** Corps lu au plus max octets ; 'too-large' au-delà ou si content-length est invalide. */
+export async function readBounded(req: IncomingMessage, max: number): Promise<Buffer | 'too-large'> {
+  const declared = req.headers['content-length']
+  if (declared !== undefined && (!/^\d{1,12}$/.test(declared) || Number(declared) > max)) return 'too-large'
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length
+    if (size > max) {
+      req.destroy()
+      return 'too-large'
+    }
+    chunks.push(chunk as Buffer)
+  }
+  return Buffer.concat(chunks)
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SHA_RE = /^[0-9a-f]{40,64}$/
 const ZERO_RE = /^0+$/
 
+/** Rejets gardés en base par forge et par heure ; au-delà, seulement journalisés (flot non signé). */
+export const MAX_REJECTS_PER_HOUR = 200
+
 async function reject(db: Queryable, forgeId: string, event: string, detail: string): Promise<void> {
   await db.query(
-    `INSERT INTO webhook_deliveries (forge_id, delivery_id, event, status, detail) VALUES ($1, $2, $3, 'rejected', $4)`,
-    [forgeId, `x-${randomUUID()}`, (event || 'unknown').slice(0, 64), detail.slice(0, 500)]).catch(() => {})
+    `INSERT INTO webhook_deliveries (forge_id, delivery_id, event, status, detail)
+     SELECT $1, $2, $3, 'rejected', $4
+      WHERE (SELECT count(*) FROM webhook_deliveries
+              WHERE forge_id = $1 AND status = 'rejected' AND received_at > now() - interval '1 hour') < $5`,
+    [forgeId, `x-${randomUUID()}`, (event || 'unknown').slice(0, 64), detail.slice(0, 500), MAX_REJECTS_PER_HOUR]).catch(() => {})
 }
 
 /** Reçoit un webhook ; ne lève jamais vers la forge (codes HTTP seulement). */
@@ -74,11 +98,20 @@ export async function receiveWebhook(db: Db, forgeId: string, headers: HeaderBag
     await reject(db, forge.id, raw, 'payload')
     return { status: 400, code: 'E_WEBHOOK_PAYLOAD' }
   }
+  // L'identifiant de livraison n'est pas couvert par la signature : le corps
+  // signé l'est, donc un même corps présenté sous un autre identifiant est
+  // aussi un rejeu (empreinte du corps, ligne « body-seen »).
+  const bodyKey = `body:${createHash('sha256').update(body).digest('hex')}`
   const ins = await db.query(
-    `INSERT INTO webhook_deliveries (forge_id, delivery_id, event, status, detail) VALUES ($1, $2, $3, $4, NULL)
+    `WITH seen AS (
+       INSERT INTO webhook_deliveries (forge_id, delivery_id, event, status, detail) VALUES ($1, $5, 'body-seen', 'ignored', NULL)
+       ON CONFLICT (forge_id, delivery_id) DO NOTHING RETURNING 1)
+     INSERT INTO webhook_deliveries (forge_id, delivery_id, event, status, detail)
+     SELECT $1, $2, $3, $4, NULL WHERE EXISTS (SELECT 1 FROM seen)
      ON CONFLICT (forge_id, delivery_id) DO NOTHING`,
-    [forge.id, delivery, (raw || 'unknown').slice(0, 64), event ? 'accepted' : 'ignored'])
+    [forge.id, delivery, (raw || 'unknown').slice(0, 64), event ? 'accepted' : 'ignored', bodyKey])
   if (!ins.rowCount) {
+    // L'empreinte a pu être inscrite seule (identifiant déjà vu) : on la laisse, le corps est connu.
     await reject(db, forge.id, raw, `replay ${delivery}`)
     return { status: 409, code: 'E_WEBHOOK_REPLAY' }
   }
@@ -88,8 +121,11 @@ export async function receiveWebhook(db: Db, forgeId: string, headers: HeaderBag
       if (what !== 'ok') await db.query('UPDATE webhook_deliveries SET detail = $3 WHERE forge_id = $1 AND delivery_id = $2', [forge.id, delivery, what.slice(0, 500)]).catch(() => {})
       return what
     })
-    .catch((err: unknown) => {
+    .catch(async (err: unknown) => {
       log(`webhook ${delivery}: ${(err as Error)?.message}`)
+      // Échec de traitement (forge momentanément injoignable…) : la livraison
+      // est oubliée, pour que la redélivrance de la forge soit acceptée.
+      await db.query('DELETE FROM webhook_deliveries WHERE forge_id = $1 AND delivery_id = ANY($2::text[])', [forge.id, [delivery, bodyKey]]).catch(() => {})
       return 'error'
     })
   return { status: 202, code: 'accepted', work }
@@ -113,7 +149,10 @@ async function handleEvent(db: Db, forgeId: string, event: WebhookEvent, payload
     const inst = p.installation as { id?: unknown } | undefined
     const id = typeof inst?.id === 'number' ? String(inst.id) : null
     if (!id) return 'no-installation'
-    if (p.action === 'deleted' || p.action === 'suspend') return `installation ${String(p.action).slice(0, 20)}`
+    if (p.action === 'deleted' || p.action === 'suspend') {
+      await removeInstallation(db, forgeId, id, String(p.action), { type: 'system' })
+      return `installation ${String(p.action).slice(0, 20)}`
+    }
     await addInstallation(db, forgeId, id, { type: 'system' })
     await refreshAppCredential(db, forge)
     // Les dépôts de l'installation sont enrôlés à la prochaine découverte (immédiate).

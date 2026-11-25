@@ -268,15 +268,31 @@ export async function installationToken(db: Queryable, baseUrl: string, app: For
   return data.token
 }
 
-/** Installation reçue (webhook « installation » ou retour de setup_url) : retenue une fois. */
+/**
+ * Installation reçue (webhook « installation » ou retour de setup_url) :
+ * retenue une fois, en tête de liste (la plus récente sert aux jetons).
+ */
 export async function addInstallation(db: Queryable, forgeId: string, installationId: string, actor: AuditActor): Promise<boolean> {
   if (!/^\d{1,20}$/.test(installationId)) return false
   const r = await db.query(
-    `UPDATE forge_apps SET installation_ids = array_append(installation_ids, $2)
+    `UPDATE forge_apps SET installation_ids = array_prepend($2, installation_ids)
       WHERE forge_id = $1 AND kind = 'github-app' AND NOT ($2 = ANY(installation_ids)) AND cardinality(installation_ids) < 50`,
     [forgeId, installationId])
   if (!r.rowCount) return false
   await writeAudit(db, { actor, action: 'forge.app-install', outcome: 'success', targetType: 'forge', targetId: forgeId, details: { installation_id: installationId } })
+  return true
+}
+
+/** Installation désinstallée ou suspendue dans GitHub : retirée, jeton oublié, tracé. */
+export async function removeInstallation(db: Queryable, forgeId: string, installationId: string, reason: string, actor: AuditActor): Promise<boolean> {
+  if (!/^\d{1,20}$/.test(installationId)) return false
+  const r = await db.query(
+    `UPDATE forge_apps SET installation_ids = array_remove(installation_ids, $2)
+      WHERE forge_id = $1 AND kind = 'github-app' AND $2 = ANY(installation_ids)`,
+    [forgeId, installationId])
+  tokenCache.delete(`${forgeId}:${installationId}`)
+  if (!r.rowCount) return false
+  await writeAudit(db, { actor, action: 'forge.app-uninstall', outcome: 'success', targetType: 'forge', targetId: forgeId, details: { installation_id: installationId, reason: reason.slice(0, 20) } })
   return true
 }
 

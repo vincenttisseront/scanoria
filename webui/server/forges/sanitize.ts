@@ -71,7 +71,8 @@ function stripControls(s: string): string {
 export function escapeInline(text: unknown, max = 300): string {
   let s = stripControls(typeof text === 'string' ? text : String(text ?? '')).replace(/\s+/g, ' ').trim()
   if (s.length > max) s = `${s.slice(0, max - 1)}…`
-  return s.replace(/[\\`*_{}[\]()<>#+\-!|~@&:]/g, c => `\\${c}`)
+  // <, > et & ne sont pas échappés ici : sanitizeForForge les rend en entités.
+  return s.replace(/[\\`*_{}[\]()#+\-!|~@:]/g, c => `\\${c}`)
 }
 
 /** Bloc de code sûr : la clôture est plus longue que toute suite de « ` » du texte. */

@@ -88,8 +88,9 @@ describe('sanitizeForForge (contrat 30)', () => {
   it('escapeInline : une ligne, bornée, sans HTML', () => {
     const out = escapeInline('a\nb <i>c</i> @d', 10)
     expect(out).not.toContain('\n')
-    expect(out).not.toMatch(/(?<!\\)</)
     expect(out.endsWith('…')).toBe(true)
+    // < > & restent tels quels : sanitizeForForge les rend en entités, sans double échappement.
+    expect(sanitizeForForge(escapeInline('a<b & c'))).toBe('a&lt;b &amp; c')
     expect(escapeInline('@admin')).toBe('\\@admin')
   })
 

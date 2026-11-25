@@ -47,7 +47,7 @@ export async function enqueuePullRequestScan(db: Db, ctx: ProjectForge, pr: Pull
   // Déjà analysée ou en file pour ce commit de tête : rien de plus.
   const seen = await db.query(
     `SELECT 1 FROM scans WHERE project_id = $1 AND commit_sha = $2 AND pull_request IS NOT NULL
-        AND (pull_request ->> 'number')::bigint = $3 AND status <> 'cancelled' LIMIT 1`,
+        AND (pull_request ->> 'number')::bigint = $3 AND status NOT IN ('cancelled', 'error') LIMIT 1`,
     [ctx.projectId, pr.head_sha, pr.number])
   if (seen.rowCount) return null
   let changed: string[] | undefined

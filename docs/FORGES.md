@@ -1,3 +1,7 @@
+<!--
+SPDX-License-Identifier: AGPL-3.0-or-later
+Copyright (C) 2026 Vincent Tisseront
+-->
 # Forges : connexion, webhooks, retour dans les PR (0.7)
 
 Ce document décrit comment l'appliance se raccorde à une forge (Forgejo, GitHub,

@@ -10,8 +10,10 @@
 
 import { createHmac, createPublicKey, randomBytes, randomUUID, verify } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
+import type { IncomingMessage } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { DATABASE_URL, createTestDatabase, type TestDatabase } from '../helpers/db'
 import { addComment, addPr, addRepo, startFakePrForge, type FakePrForge, type FakeRepoState } from '../helpers/fake-pr-forge'
@@ -21,14 +23,14 @@ import { createForge } from '../../server/projects/forges'
 import { discoverForge } from '../../server/projects/discover'
 import { getForge } from '../../server/forges'
 import { setConsoleUrl } from '../../server/forges/context'
-import { receiveWebhook } from '../../server/forges/webhook'
+import { MAX_REJECTS_PER_HOUR, readBounded, receiveWebhook } from '../../server/forges/webhook'
 import { publishScan } from '../../server/forges/publish'
 import { shortId } from '../../server/forges/summary'
 import { forgeMode, forgeIntegration } from '../../server/forges/status'
 import { nightlyFullScans, pollPullRequests, resetPullRequestPolling } from '../../server/forges/poll'
 import { applyPullRequestBaseline, isPullRequestScan, pullRequestBaseline } from '../../server/gates/pr-baseline'
 import {
-  addInstallation, appJwt, clearInstallationTokens, convertManifest, getForgeApp, installationToken, manifestTarget,
+  addInstallation, removeInstallation, appJwt, clearInstallationTokens, convertManifest, getForgeApp, installationToken, manifestTarget,
   refreshAppCredential, saveGithubApp, startGithubManifest, verifyInstallation, verifyManifestState, webhookSecret,
 } from '../../server/forges/apps'
 
@@ -165,10 +167,45 @@ describe.skipIf(!DATABASE_URL)('forges, PR et webhooks (chantier D, PostgreSQL)'
       expect(s.rows[0]).toMatchObject({ ref: 'refs/pull/1/head', commit_sha: pr.head, incremental: true, trigger: 'webhook' })
       expect(s.rows[0].pull_request).toMatchObject({ number: 1, base_sha: pr.base, changed_files: ['src/a.ts', 'package.json'], author: 'dev-une' })
       expect((await hook('pull_request', prEvent(1), { delivery })).status).toBe(409)
+      // Même corps signé sous un autre identifiant (non signé) : rejeu aussi.
+      expect((await hook('pull_request', prEvent(1))).status).toBe(409)
       // Même tête : aucune seconde analyse.
       await hook('pull_request', { ...prEvent(1), action: 'synchronized' })
       expect((await db.pool.query(`SELECT count(*)::int AS n FROM scans WHERE project_id = $1 AND pull_request IS NOT NULL`, [projectId])).rows[0].n).toBe(1)
       expect(await forgeMode(db.pool, forgeId)).toBe('push')
+    })
+
+    it('traitement en échec (forge injoignable) : la livraison est oubliée, la redélivrance est acceptée', async () => {
+      addPr(app, { number: 7 })
+      const delivery = randomUUID()
+      const token = fake.token
+      fake.token = 'jeton-change-0000000000000000'
+      const first = await hook('pull_request', prEvent(7), { delivery })
+      fake.token = token
+      expect(first.status).toBe(202)
+      expect(first.work).toBe('error')
+      const again = await hook('pull_request', prEvent(7), { delivery })
+      expect(again.status).toBe(202)
+      expect(again.work).toBe('ok')
+    })
+
+    it('flot de rejets : au plus MAX_REJECTS_PER_HOUR lignes par forge et par heure', async () => {
+      await db.pool.query(
+        `INSERT INTO webhook_deliveries (forge_id, delivery_id, event, status, detail)
+         SELECT $1, 'x-flot-' || g, 'push', 'rejected', 'signature' FROM generate_series(1, $2) g`, [forgeId, MAX_REJECTS_PER_HOUR])
+      const count = async () => (await db.pool.query(`SELECT count(*)::int AS n FROM webhook_deliveries WHERE forge_id = $1 AND status = 'rejected'`, [forgeId])).rows[0].n as number
+      const before = await count()
+      expect((await hook('push', { ref: 'refs/heads/main' }, { sig: sign('autre') })).status).toBe(401)
+      expect(await count()).toBe(before)
+      await db.pool.query(`DELETE FROM webhook_deliveries WHERE forge_id = $1 AND delivery_id LIKE 'x-flot-%'`, [forgeId])
+    })
+
+    it('corps lu en flux : borne appliquée sans content-length (chunked), content-length invalide refusé', async () => {
+      const req = (chunks: Buffer[], headers: Record<string, string> = {}) => Object.assign(Readable.from(chunks), { headers }) as unknown as IncomingMessage
+      expect(await readBounded(req([Buffer.alloc(600), Buffer.alloc(600)]), 1000)).toBe('too-large')
+      expect((await readBounded(req([Buffer.from('{"a":'), Buffer.from('1}')]), 1000) as Buffer).toString()).toBe('{"a":1}')
+      expect(await readBounded(req([Buffer.from('{}')], { 'content-length': 'abc' }), 1000)).toBe('too-large')
+      expect(await readBounded(req([Buffer.from('{}')], { 'content-length': '5000' }), 1000)).toBe('too-large')
     })
 
     it('évènements ignorés : action inutile, dépôt inconnu, branche non suivie', async () => {
@@ -184,7 +221,7 @@ describe.skipIf(!DATABASE_URL)('forges, PR et webhooks (chantier D, PostgreSQL)'
     let fid: string
 
     beforeAll(async () => {
-      scanId = (await db.pool.query<{ id: string }>(`SELECT id FROM scans WHERE project_id = $1 AND pull_request IS NOT NULL`, [projectId])).rows[0]!.id
+      scanId = (await db.pool.query<{ id: string }>(`SELECT id FROM scans WHERE project_id = $1 AND (pull_request ->> 'number')::int = 1`, [projectId])).rows[0]!.id
       fid = await finding(scanId)
       await db.pool.query(`UPDATE scans SET status = 'done', finished_at = now(), verdict = 'failed', verdict_details = $2 WHERE id = $1`, [scanId, JSON.stringify({
         verdict: 'failed', gate_id: randomUUID(), rules: {}, evaluated_at: new Date().toISOString(), new_code_only: true,
@@ -225,7 +262,7 @@ describe.skipIf(!DATABASE_URL)('forges, PR et webhooks (chantier D, PostgreSQL)'
       expect(ex.rows[0]).toMatchObject({ status: 'requested', requested_via: 'pr-comment', requester_label: 'forgejo:relectrice', requester_is_human: false, created_by: null })
       expect(ex.rows[0].commit_authors).toEqual(expect.arrayContaining(['dev-une']))
       // Le même commentaire, relu par l'interrogation : traité une seule fois.
-      expect((await hook('issue_comment', commentEvent(1, c2))).work).toBe('ignored')
+      expect((await hook('issue_comment', { ...commentEvent(1, c2), sender: { login: 'relance' } })).work).toBe('ignored')
       const replies = (app.comments.get(1) ?? []).filter(x => x.user.login === fake.login)
       expect(replies.at(-1)!.body).toMatch(/Demande d.exception enregistrée/)
     })
@@ -317,6 +354,12 @@ describe.skipIf(!DATABASE_URL)('forges, PR et webhooks (chantier D, PostgreSQL)'
       expect(await verifyInstallation(db.pool, forge, '99')).toBe(true)
       expect(await addInstallation(db.pool, id, '99', actor)).toBe(true)
       expect(await addInstallation(db.pool, id, '99', actor)).toBe(false)
+      // Réinstallation : la plus récente passe en tête ; une désinstallation la retire.
+      expect(await addInstallation(db.pool, id, '100', actor)).toBe(true)
+      expect((await getForgeApp(db.pool, id))!.installation_ids).toEqual(['100', '99'])
+      expect(await removeInstallation(db.pool, id, '100', 'deleted', actor)).toBe(true)
+      expect(await removeInstallation(db.pool, id, '100', 'deleted', actor)).toBe(false)
+      expect((await getForgeApp(db.pool, id))!.installation_ids).toEqual(['99'])
       clearInstallationTokens()
       expect(await installationToken(db.pool, forge.base_url, (await getForgeApp(db.pool, id))!)).toBe(fake.token)
       expect(await refreshAppCredential(db.pool, forge)).toBe(true)

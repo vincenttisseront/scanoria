@@ -236,7 +236,9 @@ export async function publishScan(db: Queryable, scanId: string, opts: PublishOp
       await setPublication(db, scan.id, 'pr-comment', 'published', { external_id: id })
 
       const kind = ctx.forge.kind === 'github' ? 'check-run' : 'pr-review'
-      if (phase === 'final' && (await publication(db, scan.id, kind))?.state !== 'published' && pr.head_sha && pr.head_ref && pr.base_ref) {
+      // GitHub sans droit check-run retombe sur une revue : les deux clés valent « déjà publié ».
+      const done = (await publication(db, scan.id, 'check-run'))?.state === 'published' || (await publication(db, scan.id, 'pr-review'))?.state === 'published'
+      if (phase === 'final' && !done && pr.head_sha && pr.head_ref && pr.base_ref) {
         const all = await newFindings(db, scan.id, locale, 200)
         const changed = Array.isArray(pr.changed_files) ? new Set(pr.changed_files) : null
         const annotations = buildAnnotations(all.items, changed, locale, MAX_ANNOTATIONS)

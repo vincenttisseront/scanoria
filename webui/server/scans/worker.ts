@@ -784,7 +784,8 @@ export class ScanWorker {
     }
     await this.requestDiagnosis(scanId, r.rows[0].project_id)
     // 0.7 (D, contrat 30) : statut de commit, commentaire de PR et annotations ; ne lève jamais.
-    await this.integrations.publishScan?.(this.pool, scanId, { phase: 'final' })
+    // Retour dans la forge sans attendre (appels réseau) : la fin d'analyse n'en dépend pas.
+    if (this.integrations.publishScan) void this.integrations.publishScan(this.pool, scanId, { phase: 'final' }).catch(() => {})
       .catch((e: unknown) => this.log(`scan ${scanId}: forge publication: ${(e as Error).message}`))
     await reportRecorrelation(this.pool, scanId).catch((e: unknown) => this.log(`scan ${scanId}: recorrelation report: ${(e as Error).message}`))
   }

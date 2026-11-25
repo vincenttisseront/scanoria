@@ -18,7 +18,7 @@ export type ForgeMode = 'push' | 'pull'
 /** Mode courant d'une forge : poussé si un webhook signé a été accepté récemment. */
 export async function forgeMode(db: Queryable, forgeId: string): Promise<ForgeMode> {
   const r = await db.query(
-    `SELECT 1 FROM webhook_deliveries WHERE forge_id = $1 AND status IN ('accepted', 'ignored') AND event NOT IN ('comment-seen', 'poll')
+    `SELECT 1 FROM webhook_deliveries WHERE forge_id = $1 AND status IN ('accepted', 'ignored') AND event NOT IN ('comment-seen', 'body-seen', 'poll')
         AND received_at > now() - make_interval(mins => $2) LIMIT 1`, [forgeId, PUSH_WINDOW_MINUTES])
   return r.rowCount ? 'push' : 'pull'
 }
@@ -26,7 +26,7 @@ export async function forgeMode(db: Queryable, forgeId: string): Promise<ForgeMo
 export async function forgeIntegration(db: Queryable, forgeId: string) {
   const app = await getForgeApp(db, forgeId)
   const d = await db.query<{ accepted_at: Date | null, rejected: string }>(
-    `SELECT max(received_at) FILTER (WHERE status IN ('accepted', 'ignored') AND event NOT IN ('comment-seen', 'poll')) AS accepted_at,
+    `SELECT max(received_at) FILTER (WHERE status IN ('accepted', 'ignored') AND event NOT IN ('comment-seen', 'body-seen', 'poll')) AS accepted_at,
             count(*) FILTER (WHERE status = 'rejected' AND received_at > now() - interval '30 days') AS rejected
        FROM webhook_deliveries WHERE forge_id = $1`, [forgeId])
   const kind = app?.kind ?? null

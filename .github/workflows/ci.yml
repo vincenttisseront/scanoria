@@ -402,7 +402,7 @@ jobs:
       - name: Dépendances (podman, PostgreSQL 16, jq)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends jq podman netavark postgresql-16 curl openssl
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark postgresql-16 curl openssl skopeo
           sudo podman --version
       # Machine jetable : le helper tourne en root avec le vrai podman, le vrai
       # générateur Quadlet de systemd et le vrai PostgreSQL (modules « service »).
@@ -580,10 +580,12 @@ jobs:
         run: |
           skopeo list-tags docker://codeberg.org/forgejo/forgejo | jq -r '.Tags[]' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 8
           last=$(skopeo list-tags docker://codeberg.org/forgejo/forgejo | jq -r '.Tags[]' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
-          echo "dernière : $last sha256:$(skopeo inspect --raw "docker://codeberg.org/forgejo/forgejo:$last" | sha256sum | cut -d' ' -f1)"
+          digest=$(skopeo inspect --raw "docker://codeberg.org/forgejo/forgejo:$last" | sha256sum | cut -d' ' -f1)
+          echo "dernière : $last sha256:$digest"
+          echo "SCANORIA_FORGEJO_IMAGE=codeberg.org/forgejo/forgejo@sha256:$digest" >> "$GITHUB_ENV"
       # Machine jetable : Forgejo en conteneur, PostgreSQL réel, /etc/hosts modifié.
       - name: tests/b34-live.sh
-        run: sudo env "PATH=$PATH" bash tests/b34-live.sh
+        run: sudo env "PATH=$PATH" "SCANORIA_FORGEJO_IMAGE=${SCANORIA_FORGEJO_IMAGE:-}" bash tests/b34-live.sh
 
   ci-ok:
     name: ci-ok

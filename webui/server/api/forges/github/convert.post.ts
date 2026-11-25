@@ -11,7 +11,7 @@ import { z } from 'zod'
 import { clientAddress, readValidated, requireRole } from '../../../utils/http'
 import { convertManifest, installUrl, saveGithubApp, verifyManifestState } from '../../../forges/apps'
 import { getForge } from '../../../forges'
-import { getPool } from '../../../utils/db'
+import { getPool, withTransaction } from '../../../utils/db'
 import { writeAudit } from '../../../utils/audit'
 import { mapProjectError, projectError } from '../../../projects/errors'
 
@@ -34,7 +34,8 @@ export default defineEventHandler(async (event) => {
   if (await getForge(pool, state.forge_id)) throw projectError(409, 'E_FORGEAPP_STATE')
   try {
     const conv = await convertManifest(state.base_url, body.code)
-    const forgeId = await saveGithubApp(pool, state, conv, actor)
+    // Secrets, forge et application ensemble ou pas du tout.
+    const forgeId = await withTransaction(pool, c => saveGithubApp(c, state, conv, actor))
     setResponseStatus(event, 201)
     return { forge_id: forgeId, slug: conv.slug, install_url: installUrl(state.base_url, conv.slug) }
   }

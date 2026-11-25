@@ -86,6 +86,16 @@ export async function nightlyFullScans(db: Db, now = new Date()): Promise<number
                           AND s.ref = p.default_branch AND s.queued_at > $1::timestamptz - interval '20 hours')
       LIMIT 100`, [now.toISOString()])
   // G9 : profil nocturne du projet (migration 014), sinon son profil par défaut.
-  for (const p of rows) await enqueueScan(db, { projectId: p.id, ref: p.default_branch, trigger: 'schedule', ...(p.profile ? { profileSlug: p.profile } : {}) })
-  return rows.length
+  let n = 0
+  for (const p of rows) {
+    // Un projet en erreur (profil retiré, branche refusée) n'arrête pas les autres.
+    try {
+      await enqueueScan(db, { projectId: p.id, ref: p.default_branch, trigger: 'schedule', ...(p.profile ? { profileSlug: p.profile } : {}) })
+      n++
+    }
+    catch (err) {
+      console.error(`[nightly] ${p.id} ${(err as { code?: string })?.code ?? 'error'}`)
+    }
+  }
+  return n
 }
