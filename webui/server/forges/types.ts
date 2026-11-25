@@ -49,6 +49,8 @@ export interface ForgeAccess {
   kind: 'forgejo' | 'github' | 'gitlab'
   base_url: string
   token?: string | null
+  /** GitHub : jeton d'installation d'une application (J1) ; les dépôts se listent alors par /installation/repositories. */
+  installation?: boolean
 }
 
 export const MAX_REPOS = 5000

@@ -402,7 +402,7 @@ jobs:
       - name: Dépendances (podman, PostgreSQL 16, jq)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends jq podman netavark postgresql-16 curl openssl
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark postgresql-16 curl openssl skopeo
           sudo podman --version
       # Machine jetable : le helper tourne en root avec le vrai podman, le vrai
       # générateur Quadlet de systemd et le vrai PostgreSQL (modules « service »).
@@ -552,10 +552,45 @@ jobs:
       - name: tests/b29-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b29-live.sh
 
+  forges-live:
+    # Forges et PR de la 0.7 (chantier D) contre un vrai Forgejo en conteneur :
+    # webhooks signés livrés à la console, échec anticipé, commentaire,
+    # annotation, /scanoria accept, vert après approbation (tests/b34-live.sh).
+    name: forges-live (vrai Forgejo, PR et webhooks, b34-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+      - name: Dépendances (podman, PostgreSQL 16, jq, console)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark aardvark-dns postgresql-16 curl openssl
+          sudo podman --version
+          cd webui && npm ci --ignore-scripts && npm run postinstall
+      - name: Image Forgejo (relevé de l'empreinte)
+        run: |
+          skopeo list-tags docker://codeberg.org/forgejo/forgejo | jq -r '.Tags[]' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 8
+          last=$(skopeo list-tags docker://codeberg.org/forgejo/forgejo | jq -r '.Tags[]' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          digest=$(skopeo inspect --raw "docker://codeberg.org/forgejo/forgejo:$last" | sha256sum | cut -d' ' -f1)
+          echo "dernière : $last sha256:$digest"
+          echo "SCANORIA_FORGEJO_IMAGE=codeberg.org/forgejo/forgejo@sha256:$digest" >> "$GITHUB_ENV"
+      # Machine jetable : Forgejo en conteneur, PostgreSQL réel, /etc/hosts modifié.
+      - name: tests/b34-live.sh
+        run: sudo env "PATH=$PATH" "SCANORIA_FORGEJO_IMAGE=${SCANORIA_FORGEJO_IMAGE:-}" bash tests/b34-live.sh
+
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live, forges-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

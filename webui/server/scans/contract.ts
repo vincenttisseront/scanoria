@@ -43,6 +43,12 @@ const sshCredential = z.strictObject({
 export const jobCredential = z.union([z.null(), tokenCredential, sshCredential])
 export type JobCredential = z.infer<typeof jobCredential>
 
+/** 0.7 (contrat 33) : chemin relatif d'un fichier modifié, sans « . », « .. » ni contrôle. */
+export const MAX_CHANGED_FILES = 3000
+// eslint-disable-next-line no-control-regex
+const changedFile = z.string().min(1).max(1024).regex(/^[^/\u0000-\u001F\u007F][^\u0000-\u001F\u007F]*$/)
+  .refine(p => !p.split('/').some(s => s === '' || s === '.' || s === '..'))
+
 export const scanJobSchema = z.strictObject({
   schema: z.literal(1),
   id: uuid,
@@ -67,6 +73,8 @@ export const scanJobSchema = z.strictObject({
   ]),
   // 0.6 (V4, contrat 21) : le runner peut reprendre une sortie du cache de résultats.
   cache: z.boolean().optional(),
+  // 0.7 (D, contrat 33) : fichiers modifiés d'une PR, lus par les modules scan.incremental (G18).
+  changed_files: z.array(changedFile).max(MAX_CHANGED_FILES).optional(),
   modules: z.array(z.strictObject({
     id: moduleId,
     version: z.string().min(1).max(64),
