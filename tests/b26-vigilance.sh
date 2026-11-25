@@ -206,6 +206,9 @@ PINS="$T/var/lib/scanoria/pins/pins.json"
 pins_count() { py "p = vigilance.read_pins(); print('illisible' if p is None else len(p))"; }
 echo "{\"version\": 1, \"pins\": [{\"module\": \"gitleaks\", \"version\": \"8.30.0\", \"image_digest\": \"$D1\"}, {\"module\": \"../x\", \"version\": \"1\", \"image_digest\": \"$D1\"}, {\"module\": \"gitleaks\", \"version\": \"8.30.0\", \"image_digest\": \"sha256:court\"}]}" > "$PINS"
 expect "pins.json : entrées invalides écartées" "$(pins_count)" 1
+mv "$PINS" "$TMP/pins.saved"
+expect "pins.json absent : aucune version figée" "$(pins_count)" 0
+mv "$TMP/pins.saved" "$PINS"
 cp "$PINS" "$TMP/pins.ok"
 ln -sf "$TMP/pins.ok" "$PINS.lnk" && mv -f "$PINS.lnk" "$PINS"
 expect "pins.json : lien symbolique ignoré" "$(pins_count)" illisible
@@ -248,8 +251,8 @@ import datetime
 reg = install('8.30.1', '$D2')   # essai adopté : la candidate est désormais installée
 r = {'kept': vigilance.gc_retained(reg)}
 later = common.now() + datetime.timedelta(days=15)
-# pins.json absent (restauration) : échec fermé, la version figée reste.
-os.unlink('$PINS')
+# pins.json illisible : échec fermé, la version figée reste.
+open('$PINS', 'w').write('pas du json')
 r['no-pins'] = [x['version'] for x in vigilance.list_retained() if x['kind'] == 'pin' and x['version'] not in vigilance.gc_retained(reg, later)]
 r['no-pins-left'] = sorted(x['version'] for x in vigilance.list_retained())
 # Plus aucun projet ne fige 8.30.0, et l'essai a plus de 14 jours.
@@ -259,7 +262,7 @@ r['left'] = [x['version'] for x in vigilance.list_retained()]
 print(json.dumps(r))
 ")
 expect "ménage : essai récent et version figée gardés" "$(jq -c .kept <<< "$R")" '[]'
-expect "ménage sans pins.json : version figée gardée (échec fermé)" "$(jq -c '."no-pins-left"' <<< "$R")" '["8.30.0"]'
+expect "ménage, pins.json illisible : version figée gardée (échec fermé)" "$(jq -c '."no-pins-left"' <<< "$R")" '["8.30.0"]'
 expect "ménage : version libérée retirée" "$(jq -c .released <<< "$R")" '["gitleaks@8.30.0"]'
 expect "ménage : plus aucune image retenue" "$(jq -c .left <<< "$R")" '[]'
 if grep -q "\"rmi\",\"--ignore\",\"ghcr.io/exemple/gitleaks@$D1\"" "$CALLS"; then ok "ménage : ancienne image retirée"; else ko "ménage : ancienne image retirée"; fi

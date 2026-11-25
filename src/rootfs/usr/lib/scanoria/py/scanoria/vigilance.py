@@ -196,12 +196,15 @@ def release(reg, mid, ver, remove_image=True):
 def read_pins():
     """{(module, version, digest)} figés par au moins un projet.
 
-    None si le fichier est absent ou illisible : l'appelant échoue alors fermé
-    (aucune image figée n'est retirée, une ancienne version est gardée)."""
+    Fichier absent : aucune version figée (la console ne l'a encore jamais
+    publié). None s'il est illisible : l'appelant échoue alors fermé (aucune
+    image figée n'est retirée, une ancienne version est gardée)."""
     try:
         st = os.lstat(PINS_FILE)
+    except FileNotFoundError:
+        return set()
     except OSError:
-        common.log("pins file missing: pinned images are kept")
+        common.log("pins file unreadable: pinned images are kept")
         return None
     if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > MAX_PINS_BYTES:
         common.log("pins file ignored: not a regular file or too large")
@@ -235,6 +238,8 @@ def keep_pinned(old_manifest):
     """Mise à jour d'un module : l'ancienne version figée par un projet est retenue.
 
     Retourne True si l'image doit être gardée."""
+    if old_manifest.get("type") != "scanner":
+        return False   # seuls les scanners se figent (G6)
     key = (old_manifest.get("id"), old_manifest.get("version"), image_digest(old_manifest.get("image")))
     pins = read_pins()
     # pins.json illisible : l'ancienne version est gardée par précaution, gc_retained

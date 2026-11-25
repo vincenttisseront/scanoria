@@ -769,7 +769,7 @@ SHA-256 est gardée). `POST /api/projects/:id/scans {ref, profile?}` → `202
   strict). À la mise à jour d'un module, l'ancienne version figée est retenue.
   Les versions qu'aucun projet ne fige plus et les essais de plus de 14 jours
   sont retirés lors des passages `run-canaries` et `self-sbom`. Si `pins.json`
-  est absent ou illisible, le helper échoue fermé : aucune version figée n'est
+  est illisible (absent : aucune version figée), le helper échoue fermé : aucune version figée n'est
   retirée et l'ancienne version d'un module mis à jour est gardée.
 - **Essais et versions figées au runner** : une candidate d'essai ne sert qu'une
   tâche marquée `trial` (le rejeu d'une analyse d'essai est refusé par la
