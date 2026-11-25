@@ -30,7 +30,7 @@ export const TRIAGE_OPS: Record<string, Record<string, Op>> = {
   '/api/projects/{id}/exception-requests': { post: { summary: 'Request an exception from CI (J15): project API token (scope scan:create, non-human identity: it requests, never decides) or operator session; commit_authors are excluded from the decision', role: 'operator', body: 'ExceptionRequest', status: 201, token: true } },
   '/api/triage-rules': {
     get: { summary: 'Bulk triage rules (F4), query project_id, all=true includes expired and revoked', role: 'viewer' },
-    post: { summary: 'Save a triage rule and apply it to matching new findings (reason and end date required; accepted and global rules need admin; never on malicious packages)', role: 'operator', body: 'TriageRule', status: 201 },
+    post: { summary: 'Save a triage rule and apply it to matching new findings (reason and end date required; action false-positive or confirmed, accepted refused: accepting goes through an approved exception; global rules need admin; never on malicious packages)', role: 'operator', body: 'TriageRule', status: 201 },
   },
   '/api/triage-rules/simulate': { post: { summary: 'Simulate a triage rule: findings that would be affected, nothing written', role: 'operator', body: 'TriageRule' } },
   '/api/triage-rules/{id}': { delete: { summary: 'Revoke a triage rule: findings it set and nobody changed since become new again', role: 'operator' } },

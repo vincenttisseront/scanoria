@@ -101,6 +101,7 @@ export default {
     // 0.7 (B): exception approval flow (F5, J15).
     E_LOCKED: 'Refused: a profile lock forbids this exception (required module, category or secrets).',
     E_NOT_PENDING: 'This request has already been decided or withdrawn.',
+    E_TRIAGE_NOT_ALLOWED: 'Refused: a non-human account, or the author of the commit concerned, cannot mark this finding as a false positive. Request an exception instead.',
     E_DECIDER_NOT_ALLOWED: 'You cannot decide this request: it is your own, you authored the scanned commit, or the account is not human.',
     E_EXPIRED: 'This request has expired: it can no longer be approved.',
   },
@@ -1408,7 +1409,7 @@ export default {
     actions: {
       confirm: 'Confirm',
       falsePositive: 'False positive',
-      accept: 'Accept temporarily',
+      accept: 'Request acceptance',
       reopen: 'Reopen',
       revoked: 'Mark revoked',
       secretFalsePositive: 'Not a secret',
@@ -1417,14 +1418,15 @@ export default {
     },
     modal: {
       falsePositiveTitle: 'Mark as false positive',
-      acceptTitle: 'Accept temporarily',
-      acceptHelp: 'The finding no longer blocks the quality gate until the end date, then becomes new again by itself.',
+      acceptTitle: 'Request temporary acceptance',
+      acceptHelp: 'An exception request is sent for approval. The finding keeps blocking until an administrator, neither you nor the commit author, approves it; it becomes new again by itself at the end date.',
       reason: 'Reason (required)',
       until: 'End date (one year at most)',
       revokedTitle: 'Mark the secret as revoked',
       revokedBody: 'Confirm that this secret was revoked or rotated with its issuer. The action is recorded with your name.',
     },
     saved: 'Finding updated.',
+    requestSent: 'Exception request sent: awaiting approval by an administrator.',
     exceptions: {
       title: 'Exceptions',
       help: 'An exception has a reason and an end date (one year at most); it stops applying by itself on its end date. A malicious package can never be exempted.',

@@ -151,22 +151,23 @@ describe('page Résultats', () => {
     await settle()
     expect(bodyText()).toContain('il bloque toujours la release')
     expect(buttons('Faux positif')).toHaveLength(0)
-    expect(buttons('Accepter temporairement')).toHaveLength(0)
+    expect(buttons('Demander une acceptation')).toHaveLength(0)
     expect(buttons('Créer une exception')).toHaveLength(0)
     expect(buttons('Confirmer').length).toBeGreaterThan(0)
   })
 
-  it('acceptation : motif et date de fin requis, envoyés au serveur', async () => {
+  it('demande d\'acceptation : motif et date de fin requis, envoyés au serveur ; le statut attend l\'approbation', async () => {
     setUser('operator')
     listRoutes()
-    route('POST', `/api/findings/${F3}/status`, (_e, body) => detailOf(ROWS[2]!, { status: 'accepted', status_by: 'alice', status_at: '2026-11-24T09:00:00Z', status_until: (body as { until: string }).until, status_reason: (body as { reason: string }).reason }))
+    // Le serveur dépose une demande d'exception (202) : le résultat reste « nouveau ».
+    route('POST', `/api/findings/${F3}/status`, (_e, body) => ({ ...detailOf(ROWS[2]!), exception_request: { id: 'e1', status: 'requested', expires_on: (body as { until: string }).until } }))
     const w = await mountIn(FindingsPage)
     await settle()
     await w.findAll('tbody tr')[2]!.trigger('click')
     await settle()
     expect(bodyText()).toContain('corrigé en 1.2.6')
-    await click(button('Accepter temporairement'))
-    expect(bodyText()).toContain('redevient nouveau de lui-même')
+    await click(button('Demander une acceptation'))
+    expect(bodyText()).toContain('envoyée pour approbation')
     expect(button('Confirmer').disabled).toBe(true)
     setInput(dialogField('textarea')[0]!, 'Montée de version planifiée')
     await settle()
@@ -181,8 +182,8 @@ describe('page Résultats', () => {
     await click(button('Confirmer'))
     expect(callsTo('POST', `/api/findings/${F3}/status`)[0]!.body).toEqual({ status: 'accepted', reason: 'Montée de version planifiée', until: soon })
     expect(callsTo('POST', `/api/findings/${F3}/status`)[0]!.csrf).toBe('csrf-test')
-    expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ title: 'Résultat mis à jour.' }))
-    expect(bodyText()).toContain(`jusqu’au ${soon}`)
+    expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ title: 'Demande d’exception envoyée : en attente d’approbation par un administrateur.' }))
+    expect(bodyText()).not.toContain(`jusqu’au ${soon}`)
   })
 
   it('confirmer, rouvrir ; refus du serveur affiché (E_MALICIOUS)', async () => {
