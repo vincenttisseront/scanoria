@@ -79,6 +79,8 @@ describe.skipIf(!FORGEJO)('b40-live : déploiement contre un vrai Forgejo et le 
 
   async function scan(verdict: string, tag: string): Promise<string> {
     const sha = (await fj(tokens.admin, 'GET', '/repos/equipe/app/branches/main'))!.commit.id as string
+    // Le tag existe dans la forge : la CD est lancée sur lui (workflow_dispatch ref = tag).
+    if (!await fj(tokens.admin, 'GET', `/repos/equipe/app/tags/${tag}`)) await fj(tokens.admin, 'POST', '/repos/equipe/app/tags', { tag_name: tag, target: sha })
     const id = (await db.pool.query<{ id: string }>(
       `INSERT INTO scans (project_id, number, trigger, priority, ref, commit_sha, profile_id, gate_id, status, verdict, finished_at)
        SELECT id, COALESCE((SELECT max(number) FROM scans WHERE project_id = $1), 0) + 1, 'release', 90, $2, $3, profile_id, gate_id, 'done', $4, now()
@@ -250,7 +252,7 @@ describe.skipIf(!FORGEJO)('b40-live : déploiement contre un vrai Forgejo et le 
     // CD : déclenchée une fois (réservée avant l'appel), suivie sans redéclenchement.
     const cd = by('cd-trigger')
     if (out) await writeFile(join(out, 'cd.json'), JSON.stringify({ status: cd.status, external_id: cd.external_id, error: cd.error }))
-    expect({ status: cd.status, error: cd.error }).toMatchObject({ status: expect.stringMatching(/^(running|succeeded)$/) })
+    expect(`${cd.status} ${cd.error ?? ''}`).toMatch(/^(running|succeeded) /)
     const audit = await db.pool.query<{ details: { run_id: string | null } }>(`SELECT details FROM audit_log WHERE action = 'deploy.cd.trigger'`)
     expect(audit.rows).toHaveLength(1)
     await deployPass(db.pool)
