@@ -20,6 +20,13 @@ export interface EnqueueScanInput {
   requestedBy?: number | null
   apiTokenId?: string | null
   replayOf?: string | null
+  /**
+   * 0.7 (D, contrat 33) : analyse d'une PR, {number, base_sha, base_ref,
+   * head_sha, head_ref, author} (et changed_files pour G18).
+   */
+  pullRequest?: Record<string, unknown> | null
+  /** 0.7 (D, G18) : analyse limitée aux fichiers modifiés (exige pullRequest). */
+  incremental?: boolean
 }
 
 export interface EnqueueScanResult {
@@ -119,11 +126,18 @@ export async function enqueueScan(db: Db, input: EnqueueScanInput): Promise<Enqu
           WHERE project_id = $1 AND status = 'queued' AND profile_id = $2 AND gate_id = $6 AND trigger NOT IN ('replay', 'trial')
             AND ($3::text IS NULL AND commit_sha IS NULL AND ref = $4 OR commit_sha = $3)
             AND upload_id IS NOT DISTINCT FROM $5
+            AND ($7::bigint IS NULL OR pull_request IS NULL OR (pull_request ->> 'number')::bigint = $7)
           ORDER BY queued_at LIMIT 1`,
-        [project.id, profileId, commit, ref, uploadId, gateId])
+        [project.id, profileId, commit, ref, uploadId, gateId, typeof input.pullRequest?.number === 'number' ? input.pullRequest.number : null])
       if (dup.rows[0]) {
         // La demande la plus urgente l'emporte ; l'ancienneté est conservée.
         await client.query('UPDATE scans SET priority = GREATEST(priority, $2) WHERE id = $1', [dup.rows[0].id, priority])
+        // 0.7 (D) : un push puis l'ouverture de la PR sur le même commit → une seule analyse, celle de la PR.
+        if (input.pullRequest) {
+          await client.query(
+            'UPDATE scans SET pull_request = $2, incremental = $3 WHERE id = $1 AND pull_request IS NULL',
+            [dup.rows[0].id, JSON.stringify(input.pullRequest), input.incremental === true])
+        }
         await client.query('COMMIT')
         return { scanId: dup.rows[0].id, number: dup.rows[0].number, merged: true }
       }
@@ -131,12 +145,13 @@ export async function enqueueScan(db: Db, input: EnqueueScanInput): Promise<Enqu
 
     const ins = await client.query<{ id: string, number: number }>(
       `INSERT INTO scans (project_id, number, trigger, priority, ref, commit_sha, upload_id, profile_id, gate_id,
-                          plan, replay_of, requested_by, api_token_id)
+                          plan, replay_of, requested_by, api_token_id, pull_request, incremental)
        VALUES ($1, (SELECT COALESCE(max(number), 0) + 1 FROM scans WHERE project_id = $1),
-               $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+               $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING id, number`,
       [project.id, input.trigger, priority, ref, commit, uploadId, profileId, gateId,
-        plan === null ? null : JSON.stringify(plan), input.replayOf ?? null, input.requestedBy ?? null, input.apiTokenId ?? null])
+        plan === null ? null : JSON.stringify(plan), input.replayOf ?? null, input.requestedBy ?? null, input.apiTokenId ?? null,
+        input.pullRequest ? JSON.stringify(input.pullRequest) : null, !!input.pullRequest && input.incremental === true])
     await client.query('COMMIT')
     return { scanId: ins.rows[0]!.id, number: ins.rows[0]!.number, merged: false }
   }

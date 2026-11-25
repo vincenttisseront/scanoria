@@ -118,6 +118,8 @@ function handle(f: FakeForge, req: IncomingMessage, res: ServerResponse) {
   if (!m || !repo) return send(res, 404, { message: 'not found' })
   const rest = m[2] ?? ''
   if (!rest) return send(res, 200, repoJson(f, repo))
+  // Analyses de PR (0.7) : aucune PR ouverte sur cette fausse forge en lecture.
+  if (rest === '/pulls') return send(res, 200, [])
   if (rest === '/branches') {
     return send(res, 200, paginate(Object.entries(repo.branches!).map(([name, id]) => ({ name, commit: f.kind === 'github' ? { sha: id } : { id } }))))
   }

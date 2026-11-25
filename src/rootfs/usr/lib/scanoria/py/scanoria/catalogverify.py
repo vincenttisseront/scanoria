@@ -234,7 +234,7 @@ def check_module(m):
         _check_command(scan.get("command"), what)
         if scan.get("sbom_command") is not None:   # 0.5, contrat 14
             _check_command(scan["sbom_command"], what)
-        for flag in ("requires_sbom", "prefers_sbom", "service_optional"):
+        for flag in ("requires_sbom", "prefers_sbom", "service_optional", "incremental"):
             if not isinstance(scan.get(flag, False), bool):
                 raise Fail("E_CHECKSUM", "%s: invalid scan.%s" % (what, flag))
         env = scan.get("env") or {}
