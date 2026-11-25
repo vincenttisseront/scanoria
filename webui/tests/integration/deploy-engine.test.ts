@@ -282,6 +282,17 @@ describe.skipIf(!DATABASE_URL)('déploiement après verdict favorable (chantier 
     expect(forge.calls.filter(c => c.method !== 'GET')).toHaveLength(0)
   })
 
+  it('étiquette candidate repoussée avec l\'image d\'un autre commit : jamais promue', async () => {
+    reg.addImage('candidat/app', 'v1.3.1', { 'org.opencontainers.image.revision': 'f'.repeat(40) })
+    const s = await scan({ verdict: 'passed', tag: 'v1.3.1', ref: 'refs/tags/v1.3.1' })
+    await deployPass(db.pool)
+    const r = await runs(s)
+    expect(r.find(x => x.kind === 'registry-promotion')).toMatchObject({ status: 'failed', error: 'E_DEPLOY_REVISION' })
+    expect(r.filter(x => x.kind !== 'registry-promotion').every(x => x.error === 'E_DEPLOY_PREVIOUS')).toBe(true)
+    expect(reg.manifests.get('valide/app')?.has('v1.3.1') ?? false).toBe(false)
+    expect(await auditCount('deploy.registry.revision')).toBe(1)
+  })
+
   it('rapport de release non signé : attente, sans aucune action', async () => {
     const s = await scan({ verdict: 'passed', tag: 'v1.4.0', ref: 'refs/tags/v1.4.0', signed: false })
     await deployPass(db.pool)

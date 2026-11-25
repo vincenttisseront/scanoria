@@ -18,7 +18,7 @@
 import { execFile } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -88,6 +88,14 @@ describe.skipIf(!FORGEJO)('b40-live : déploiement contre un vrai Forgejo et le 
       `INSERT INTO release_reports (scan_id, project_id, tag, commit_sha, report, report_sha256, status, signature, key_fingerprint, signed_at)
        VALUES ($1, $2, $3, $4, '{}'::jsonb, $5, 'signed', $6, $7, now())`,
       [id, projectId, tag, sha, createHash('sha256').update(id).digest('hex'), `${'A'.repeat(86)}==`, 'f'.repeat(64)])
+    // Relevé root écrit par le helper quand il signe le rapport de release
+    // (chantier A, release.record_signed_report) : simulé au même chemin.
+    const ledger = join(helperRoot, 'var/lib/scanoria/release/signed')
+    await mkdir(ledger, { recursive: true, mode: 0o700 })
+    await writeFile(join(ledger, `${id}.json`), JSON.stringify({
+      scan_id: id, report_sha256: createHash('sha256').update(id).digest('hex'), commit_sha: sha, tag,
+      verdict: verdict === 'passed' ? 'passed' : 'failed', key_fingerprint: 'f'.repeat(64), signed_at: new Date().toISOString().slice(0, 19) + 'Z',
+    }), { mode: 0o600 })
     return id
   }
 
@@ -231,9 +239,16 @@ describe.skipIf(!FORGEJO)('b40-live : déploiement contre un vrai Forgejo et le 
     const main = await fj(tokens.admin, 'GET', '/repos/equipe/deploiement/contents/apps/app.yaml?ref=main')
     expect(Buffer.from(main!.content, 'base64').toString()).toContain(`@sha256:${'0'.repeat(64)}`)
 
+    // Pour b40-live.sh : vérification par scanoria-verify-attestation et cosign.
+    if (out) {
+      await writeFile(join(out, 'image.txt'), `${VALIDATED}@${candidateDigest}\n`)
+      await writeFile(join(out, 'candidate.txt'), `${CANDIDATE}@${candidateDigest}\n`)
+    }
+
     // CD : déclenchée une fois (réservée avant l'appel), suivie sans redéclenchement.
     const cd = by('cd-trigger')
-    expect(['running', 'succeeded']).toContain(cd.status)
+    if (out) await writeFile(join(out, 'cd.json'), JSON.stringify({ status: cd.status, external_id: cd.external_id, error: cd.error }))
+    expect({ status: cd.status, error: cd.error }).toMatchObject({ status: expect.stringMatching(/^(running|succeeded)$/) })
     const audit = await db.pool.query<{ details: { run_id: string | null } }>(`SELECT details FROM audit_log WHERE action = 'deploy.cd.trigger'`)
     expect(audit.rows).toHaveLength(1)
     await deployPass(db.pool)
@@ -241,13 +256,6 @@ describe.skipIf(!FORGEJO)('b40-live : déploiement contre un vrai Forgejo et le 
     if (cd.external_id) {
       const r = await fj(tokens.admin, 'GET', `/repos/equipe/app/actions/runs/${cd.external_id}`)
       expect(r).not.toBeNull()
-    }
-
-    // Pour b40-live.sh : vérification par scanoria-verify-attestation et cosign.
-    if (out) {
-      await writeFile(join(out, 'image.txt'), `${VALIDATED}@${candidateDigest}\n`)
-      await writeFile(join(out, 'candidate.txt'), `${CANDIDATE}@${candidateDigest}\n`)
-      await writeFile(join(out, 'cd.json'), JSON.stringify({ status: cd.status, external_id: cd.external_id, error: cd.error }))
     }
   }, 120_000)
 })

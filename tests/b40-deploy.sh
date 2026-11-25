@@ -73,6 +73,18 @@ hostile() {
 	expect "$1" "$(code)" "$2"
 }
 
+# ledger SCAN VERDICT : relevé root du rapport de release signé (écrit par
+# release.record_signed_report du chantier A ; simulé ici au même chemin).
+LEDGER="$T/var/lib/scanoria/release/signed"
+mkdir -p "$LEDGER" && chmod 0700 "$LEDGER"
+ledger() {
+	jq -cn --arg s "$1" --arg v "${2:-passed}" \
+		'{scan_id: $s, report_sha256: ("c" * 64), commit_sha: ("a" * 40), tag: "v1.2.0", verdict: $v, key_fingerprint: ("f" * 64), signed_at: "2026-11-25T10:00:00Z"}' \
+		> "$LEDGER/$1.json"
+	chmod 0600 "$LEDGER/$1.json"
+}
+ledger "$SCAN"
+
 # === 1. Signature valide ===========================================================
 statement > "$TMP/ok.json"
 sign "$TMP/ok.json"
@@ -114,6 +126,36 @@ hostile "verdict non concluant" E_ATTEST_VERDICT 'st["predicate"]["verdict"] = "
 hostile "commit invalide" E_ATTEST_STATEMENT 'st["predicate"]["commit_sha"] = "HEAD"'
 hostile "lien de rapport non HTTPS" E_ATTEST_STATEMENT 'st["predicate"]["report_url"] = "javascript:alert(1)"'
 hostile "date invalide" E_ATTEST_STATEMENT 'st["predicate"]["evaluated_at"] = "hier"'
+
+# === 2 bis. Verdict forgé : le relevé root fait foi, jamais la console seule ===
+hostile "commit différent du rapport signé" E_ATTEST_REPORT 'st["predicate"]["commit_sha"] = "b" * 40'
+hostile "tag différent du rapport signé" E_ATTEST_REPORT 'st["predicate"]["tag"] = "v9.9.9"'
+hostile "tag retiré du prédicat" E_ATTEST_REPORT 'del st["predicate"]["tag"]'
+hostile "empreinte de rapport différente" E_ATTEST_REPORT 'st["predicate"]["report_sha256"] = "d" * 64'
+hostile "empreinte de rapport retirée" E_ATTEST_REPORT 'del st["predicate"]["report_sha256"]'
+FORGED=22222222-2222-4222-8222-222222222222
+SCAN_SAVE=$SCAN
+SCAN=$FORGED
+statement > "$TMP/forged.json"
+sign "$TMP/forged.json"
+expect "aucun relevé pour l'analyse → refus" "$(code)" E_ATTEST_REPORT
+ledger "$FORGED" failed
+sign "$TMP/forged.json"
+expect "rapport signé défavorable → refus" "$(code)" E_ATTEST_VERDICT
+ledger "$FORGED"
+chmod 0666 "$LEDGER/$FORGED.json"
+sign "$TMP/forged.json"
+expect "relevé modifiable par tous → refus" "$(code)" E_ATTEST_REPORT
+rm -f "$LEDGER/$FORGED.json"
+ln -s "$LEDGER/$SCAN_SAVE.json" "$LEDGER/$FORGED.json"
+sign "$TMP/forged.json"
+expect "relevé en lien symbolique → refus" "$(code)" E_ATTEST_REPORT
+rm -f "$LEDGER/$FORGED.json"
+printf '{"scan_id":"%s","report_sha256":"%s","commit_sha":"%s","tag":"v1.2.0","verdict":"passed","verdict":"failed"}' "$FORGED" "$(printf 'c%.0s' {1..64})" "$(printf 'a%.0s' {1..40})" > "$LEDGER/$FORGED.json"
+chmod 0600 "$LEDGER/$FORGED.json"
+sign "$TMP/forged.json"
+expect "relevé avec clé en double → refus" "$(code)" E_ATTEST_REPORT
+SCAN=$SCAN_SAVE
 
 sign "$TMP/ok.json" "$(printf '%064d' 0)"
 expect "empreinte annoncée fausse" "$(code)" E_ATTEST_DIGEST

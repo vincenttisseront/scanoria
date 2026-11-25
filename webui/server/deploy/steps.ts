@@ -25,7 +25,7 @@ import { collectSignatures, listAttestations, requestAttestation } from '../atte
 import { PREDICATE_TYPE, type VerdictPredicate } from '../attest/dsse'
 import { parseConfig, fillTemplate, type CdTriggerConfig, type DeployKind, type GitopsConfig, type RegistryConfig } from './config'
 import { claimDeployment, finishDeployment, safeUrl, setExternal, type DeploymentStatus } from './runs'
-import { RegistryClient, RegistryError, copyImage, parseRepository, pushAttestation } from './registry'
+import { RegistryClient, RegistryError, copyImage, imageRevisions, parseRepository, pushAttestation } from './registry'
 import { GitopsError, promotionBranch, replaceImageDigest } from './gitops'
 
 export const CD_TIMEOUT_MS = 6 * 3600_000
@@ -57,6 +57,8 @@ interface Run {
   external_id: string | null
   error: string | null
   created_at: Date
+  /** Étiquette OCI de révision lue à la résolution (mémoire seulement). */
+  revision?: 'matched' | 'absent'
 }
 
 const ORDER: DeployKind[] = ['registry-promotion', 'gitops-pr', 'cd-trigger']
@@ -136,6 +138,14 @@ async function advancePromotion(db: Queryable, run: Run, scan: ScanInfo, url: st
     if (!tag) return finishDeployment(db, run.id, 'failed', { error: 'E_DEPLOY_TAG' })
     const client = await registryClient(db, src.host, run.credential_id)
     const digest = await client.resolve(src.repo, tag)
+    // L'étiquette a pu être repoussée depuis l'analyse : une image qui déclare
+    // un autre commit que celui analysé n'est jamais promue.
+    const revisions = await imageRevisions(client, src.repo, digest)
+    if ([...revisions].some(r => r !== scan.commit_sha.toLowerCase())) {
+      await audit(db, 'deploy.registry.revision', run, scan, { digest, revisions: [...revisions].slice(0, 4) }, 'failure')
+      return finishDeployment(db, run.id, 'failed', { error: 'E_DEPLOY_REVISION' })
+    }
+    run.revision = revisions.size ? 'matched' : 'absent'
     if (!await claimDeployment(db, run.id, digest)) return
     run.external_id = digest
     run.status = 'running'
@@ -165,7 +175,7 @@ async function advancePromotion(db: Queryable, run: Run, scan: ScanInfo, url: st
     await db.query(`UPDATE attestations SET error = $2 WHERE id = $1`, [att.id, `push: ${errorCode(err)}`.slice(0, 1000)])
   }
   await finishDeployment(db, run.id, 'succeeded', { externalId: digest })
-  await audit(db, 'deploy.registry.promote', run, scan, { source: cfg.source, destination: cfg.destination, digest })
+  await audit(db, 'deploy.registry.promote', run, scan, { source: cfg.source, destination: cfg.destination, digest, ...(run.revision ? { revision: run.revision } : {}) })
 }
 
 // --- 4 : GitOps ----------------------------------------------------------------------------
@@ -276,7 +286,7 @@ async function advanceCd(db: Queryable, run: Run, scan: ScanInfo, digests: Map<s
       if (b.building === true || b.result === null) return
       return finishDeployment(db, run.id, b.result === 'SUCCESS' ? 'succeeded' : 'failed', { error: b.result === 'SUCCESS' ? null : String(b.result).slice(0, 40) })
     }
-    if (age > 10 * 60_000) return finishDeployment(db, run.id, 'succeeded', { error: 'E_DEPLOY_UNTRACKED' })
+    if (age > 10 * 60_000) return finishDeployment(db, run.id, 'failed', { error: 'E_DEPLOY_UNTRACKED' })
     return
   }
   const forge = await deployerFor(db, scan)
@@ -301,7 +311,7 @@ async function advanceCd(db: Queryable, run: Run, scan: ScanInfo, digests: Map<s
       runId = found.runId
       await setExternal(db, run.id, found.runId, found.url)
     }
-    else if (age > 10 * 60_000) return finishDeployment(db, run.id, 'succeeded', { error: 'E_DEPLOY_UNTRACKED' })
+    else if (age > 10 * 60_000) return finishDeployment(db, run.id, 'failed', { error: 'E_DEPLOY_UNTRACKED' })
     else return
   }
   const st = await forge.runStatus(repo, runId)

@@ -25,6 +25,8 @@ describe('deploy-config', () => {
       { provider: 'jenkins', url: 'http://jenkins.exemple.test', job: 'x' },
       { provider: 'jenkins', url: 'https://localhost', job: 'x' },
       { provider: 'jenkins', url: 'https://127.0.0.1', job: 'x' },
+      { provider: 'jenkins', url: 'https://192.0.2.10', job: 'x' },
+      { provider: 'jenkins', url: 'https://[2001:db8::1]', job: 'x' },
       { provider: 'jenkins', url: 'https://u:p@jenkins.exemple.test', job: 'x' },
       { provider: 'jenkins', url: 'https://jenkins.exemple.test', job: '../x' },
       { provider: 'ssh', host: 'prod' },
@@ -47,6 +49,9 @@ describe('deploy-config', () => {
     expect(parseConfig('registry-promotion', { source: 'registre.exemple.test/a/app', destination: 'registre.exemple.test/a/app' })).toBeNull()
     expect(parseConfig('registry-promotion', { source: 'registre.exemple.test/a/app', destination: 'registre.exemple.test/b/app', source_tag: '{env}' })).toBeNull()
     expect(parseConfig('registry-promotion', { source: 'registre.exemple.test/a/app', destination: 'registre.exemple.test/b/app', source_tag: '$(id)' })).toBeNull()
+    // Adresse littérale refusée : le transport ne contrôle les adresses qu'après résolution d'un nom.
+    expect(parseConfig('registry-promotion', { source: '192.0.2.10/a/app', destination: 'registre.exemple.test/b/app' })).toBeNull()
+    expect(parseConfig('registry-promotion', { source: 'registre.exemple.test/a/app', destination: '192.0.2.10:5000/b/app' })).toBeNull()
   })
 
   it('gabarit d\'étiquette rempli et revalidé', () => {

@@ -178,7 +178,8 @@
         "E_ATTEST_SUBJECT",
         "E_ATTEST_SCAN",
         "E_ATTEST_VERDICT",
-        "E_ATTEST_KEY"
+        "E_ATTEST_KEY",
+        "E_ATTEST_REPORT"
       ]
     },
     "message": {

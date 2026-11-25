@@ -7,6 +7,7 @@
 // contourne aucun contrôle. Aucun chemin absolu, aucun « .. », aucun schéma
 // autre que https, aucune adresse de bouclage.
 
+import { isIP } from 'node:net'
 import { z } from 'zod'
 import { WORKFLOW_RE } from '../forges/deploy'
 import { isSafeRef } from '../forges/types'
@@ -26,7 +27,13 @@ export type CdInput = (typeof CD_INPUTS)[number]
 
 const fullName = z.string().max(300).regex(FULL_NAME_RE).refine(s => !s.split('/').some(x => x === '.' || x === '..'), { message: 'path' })
 const gitRef = z.string().max(255).refine(isSafeRef, { message: 'ref' })
-const imageRepo = z.string().max(300).regex(IMAGE_REPO_RE)
+/**
+ * Registres et Jenkins sont désignés par leur nom, jamais par une adresse
+ * littérale : le transport résout le nom et refuse les adresses interdites
+ * (bouclage, appliance) ; une adresse écrite en dur contournerait ce contrôle.
+ */
+const isIpLiteral = (host: string) => isIP(host.replace(/^\[|\]$/g, '')) !== 0
+const imageRepo = z.string().max(300).regex(IMAGE_REPO_RE).refine(r => !isIpLiteral(r.split('/')[0]!.replace(/:\d+$/, '')), { message: 'address' })
 /** Branche configurée d'une cible « branch » (on_trigger) ; ignorée pour une release. */
 const branchField = gitRef.optional()
 
@@ -38,7 +45,7 @@ export const repoPath = z.string().min(1).max(512).refine(p => !p.startsWith('/'
 const httpsBase = z.string().max(300).refine((s) => {
   try {
     const u = new URL(s)
-    return u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash && !LOOPBACK_RE.test(u.hostname)
+    return u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash && !LOOPBACK_RE.test(u.hostname) && !isIpLiteral(u.hostname)
   }
   catch {
     return false

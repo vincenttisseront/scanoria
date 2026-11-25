@@ -13,6 +13,10 @@ empreinte seule. Le helper ne fait confiance à rien :
     par une empreinte sha256, predicateType Scanoria, prédicat dont scan_id
     est celui de la demande et dont le verdict vaut « passed » (aucune
     attestation n'est jamais signée pour un verdict défavorable) ;
+  - relevé root du rapport de release signé (release.record_signed_report,
+    chantier A) : le verdict « passed », le commit, le tag et l'empreinte du
+    rapport viennent de ce que le helper a lui-même signé, jamais de la
+    console seule. Sans relevé, aucune attestation ;
 puis signe la PAE DSSE (payloadType in-toto) avec la clé de l'appliance par
 offline.sign. La clé privée ne quitte jamais ce processus ; la sortie ne porte
 que la signature et l'empreinte de la clé publique.
@@ -24,6 +28,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import tempfile
 
 from . import common, offline
@@ -42,6 +47,10 @@ REPORT_URL_RE = re.compile(r"https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?/[A-Za-z0
 TAG_RE = re.compile(r"[A-Za-z0-9._/+-]{1,255}\Z")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 TIME_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\Z")
+
+SIGNED_DIR = common.VARLIB + "/release/signed"
+MAX_LEDGER = 16 * 1024
+LEDGER_KEYS = {"scan_id", "report_sha256", "commit_sha", "tag", "verdict", "key_fingerprint", "signed_at"}
 
 PREDICATE_KEYS = {"scan_id", "project_id", "verdict", "commit_sha", "ref", "tag", "report_sha256", "report_url", "evaluated_at"}
 OPTIONAL_KEYS = {"tag", "report_sha256", "report_url"}
@@ -126,6 +135,53 @@ def check_statement(raw, scan_id):
     return obj
 
 
+def read_signed_report(scan_id):
+    """Relevé écrit par le helper à la signature du rapport de release.
+
+    Fichier régulier appartenant à root, jamais un lien ; lève Fail si absent
+    ou mal formé.
+    """
+    if not _str(scan_id, UUID_RE):
+        raise Fail("E_ATTEST_SCAN", "invalid scan_id")
+    path = os.path.join(SIGNED_DIR, scan_id + ".json")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
+    except OSError as e:
+        raise Fail("E_ATTEST_REPORT", "no signed release report for this scan") from e
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or (not common.TEST_ROOT and st.st_uid != 0) or st.st_mode & 0o022:
+            raise Fail("E_ATTEST_REPORT", "signed report record is not a root-owned file")
+        with os.fdopen(fd, "rb") as f:
+            fd = -1
+            data = f.read(MAX_LEDGER + 1)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if len(data) > MAX_LEDGER:
+        raise Fail("E_ATTEST_REPORT", "signed report record too large")
+    try:
+        rec = common.loads_strict(data)
+    except common.JsonError as e:
+        raise Fail("E_ATTEST_REPORT", "signed report record is not strict JSON") from e
+    if not isinstance(rec, dict) or not {"scan_id", "report_sha256", "commit_sha", "tag", "verdict"} <= set(rec) <= LEDGER_KEYS:
+        raise Fail("E_ATTEST_REPORT", "unexpected signed report record")
+    if rec["scan_id"] != scan_id:
+        raise Fail("E_ATTEST_REPORT", "signed report record is for another scan")
+    return rec
+
+
+def check_ledger(pred):
+    """Le prédicat doit reprendre exactement ce que le helper a signé."""
+    rec = read_signed_report(pred["scan_id"])
+    if rec["verdict"] != "passed":
+        raise Fail("E_ATTEST_VERDICT", "the signed release report is not passed")
+    if pred.get("report_sha256") is None or rec["report_sha256"] != pred["report_sha256"]:
+        raise Fail("E_ATTEST_REPORT", "report_sha256 differs from the signed release report")
+    if rec["commit_sha"] != pred["commit_sha"] or rec["tag"] != pred.get("tag"):
+        raise Fail("E_ATTEST_REPORT", "commit or tag differs from the signed release report")
+
+
 def act_sign_attestation(c):
     prm = c.params
     if prm.get("kind") != "attestation":
@@ -135,6 +191,7 @@ def act_sign_attestation(c):
     if digest != prm.get("sha256"):
         raise Fail("E_ATTEST_DIGEST", "content digest differs from the request")
     stmt = check_statement(raw, prm.get("scan_id"))
+    check_ledger(stmt["predicate"])
     fd, path = tempfile.mkstemp(prefix=".dsse-", dir=common.RUN)
     try:
         with os.fdopen(fd, "wb") as f:

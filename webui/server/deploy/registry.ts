@@ -373,11 +373,57 @@ async function copyBlob(src: RegistryClient, srcRepo: string, dst: RegistryClien
   if (src.host === dst.host && await dst.mountBlob(dstRepo, digest, srcRepo)) return
   const { body, size } = await src.blobStream(srcRepo, digest)
   const guard = digestGuard(digest, size)
-  const upload = dst.putBlob(dstRepo, digest, guard, size)
-  await Promise.all([pipeline(body, guard).catch((err) => {
-    guard.destroy(err as Error)
-    throw err
-  }), upload])
+  // Les deux côtés sont attendus jusqu'au bout ; au moindre échec, les deux
+  // flux sont détruits (aucune connexion laissée ouverte vers l'un ou l'autre registre).
+  const [pipe, upload] = await Promise.allSettled([pipeline(body, guard), dst.putBlob(dstRepo, digest, guard, size)])
+  const failed = [pipe, upload].find(r => r.status === 'rejected')
+  if (failed) {
+    body.destroy()
+    guard.destroy()
+    throw failed.reason
+  }
+}
+
+const MAX_CONFIG_BYTES = 1024 * 1024
+const REVISION_LABEL = 'org.opencontainers.image.revision'
+
+/**
+ * Commits déclarés par l'image (étiquette OCI `org.opencontainers.image.revision`
+ * de l'index, des manifestes et de leur configuration). Sert à refuser une
+ * étiquette candidate repoussée depuis l'analyse avec une image d'un autre commit.
+ */
+export async function imageRevisions(client: RegistryClient, repo: string, digest: string): Promise<Set<string>> {
+  const out = new Set<string>()
+  const note = (v: unknown) => {
+    if (typeof v === 'string' && v.trim()) out.add(v.trim().toLowerCase())
+  }
+  const visit = async (m: { mediaType: string, body: Buffer }, depth: number) => {
+    const parsed = JSON.parse(m.body.toString('utf8')) as { annotations?: Record<string, unknown> }
+    note(parsed.annotations?.[REVISION_LABEL])
+    const d = descriptors(m.body)
+    if (INDEX_TYPES.has(m.mediaType)) {
+      if (depth > 0 || d.manifests.length > MAX_INDEX_ENTRIES) throw new RegistryError('E_REGISTRY_RESPONSE')
+      for (const child of d.manifests) await visit(await client.manifest(repo, child), depth + 1)
+      return
+    }
+    if (!d.config) return
+    const { body, size } = await client.blobStream(repo, d.config)
+    if (size > MAX_CONFIG_BYTES) {
+      body.destroy()
+      throw new RegistryError('E_REGISTRY_TOO_LARGE')
+    }
+    const raw = await readAll(body, MAX_CONFIG_BYTES)
+    if (`sha256:${createHash('sha256').update(raw).digest('hex')}` !== d.config) throw new RegistryError('E_REGISTRY_DIGEST')
+    try {
+      const cfg = JSON.parse(raw.toString('utf8')) as { config?: { Labels?: Record<string, unknown> } }
+      note(cfg.config?.Labels?.[REVISION_LABEL])
+    }
+    catch {
+      throw new RegistryError('E_REGISTRY_RESPONSE')
+    }
+  }
+  await visit(await client.manifest(repo, checkDigest(digest)), 0)
+  return out
 }
 
 interface Descriptor { mediaType?: unknown, digest?: unknown, size?: unknown }

@@ -197,6 +197,7 @@ export default {
     E_ATTEST_SCAN: 'L’attestation ne porte pas sur l’analyse demandée.',
     E_ATTEST_VERDICT: 'Seul un verdict favorable peut être attesté.',
     E_ATTEST_KEY: 'La clé de l’appliance est indisponible : aucune attestation signée.',
+    E_ATTEST_REPORT: 'Aucun rapport de release signé par l’appliance ne correspond à ce verdict : aucune attestation.',
     E_CANARY_FAILED: 'Au moins un canari a échoué : un outil ne détecte plus un cas connu de son banc d’essai. Le module reste actif ; voir sa fiche.',
     E_TRIAL_INVALID: 'Essai refusé : module non installé, version candidate absente de l’index vérifié ou pas plus récente que la version installée.',
     E_TRIAL_IMAGE: 'L’image de la version candidate n’a pas pu être récupérée ou n’est pas saine : essai annulé.',

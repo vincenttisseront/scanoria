@@ -197,6 +197,7 @@ export default {
     E_ATTEST_SCAN: 'The attestation is not about the requested scan.',
     E_ATTEST_VERDICT: 'Only a passed verdict can be attested.',
     E_ATTEST_KEY: 'The appliance key is unavailable: no signed attestation.',
+    E_ATTEST_REPORT: 'No release report signed by the appliance matches this verdict: no attestation.',
     E_CANARY_FAILED: 'At least one canary failed: a tool no longer detects a known case of its testbed. The module stays enabled; see its page.',
     E_TRIAL_INVALID: 'Trial refused: module not installed, candidate version missing from the verified index or not newer than the installed version.',
     E_TRIAL_IMAGE: 'The candidate version image could not be fetched or is not healthy: trial cancelled.',

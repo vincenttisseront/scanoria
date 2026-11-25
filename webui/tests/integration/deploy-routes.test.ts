@@ -107,6 +107,8 @@ describe.skipIf(!DATABASE_URL)('API de déploiement (PostgreSQL réel)', () => {
     expect((await call(path, 'admin', { method: 'POST', json: { ...registry, environment: 'Prod Ü' } })).status).toBe(400)
     expect((await call(path, 'admin', { method: 'POST', json: { kind: 'cd-trigger', environment: 'recette', on_trigger: 'branch', config: { provider: 'forge', workflow: 'deploy.yml' } } })).status).toBe(400)
     expect((await call(path, 'admin', { method: 'POST', json: { kind: 'cd-trigger', environment: 'x', config: { provider: 'jenkins', url: 'https://127.0.0.1/', job: 'a' } } })).status).toBe(400)
+    // Promotion de registre : release seulement (attestation liée au rapport signé par le helper).
+    expect((await call(path, 'admin', { method: 'POST', json: { ...registry, on_trigger: 'branch', config: { ...registry.config, branch: 'main' } } })).status).toBe(400)
     const token = fakeToken()
     const created = await call(path, 'admin', { method: 'POST', json: { ...registry, credential: { username: 'robot', value: token } } })
     expect(created.status).toBe(201)

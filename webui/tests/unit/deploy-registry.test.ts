@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  RegistryClient, RegistryError, attestationTag, checkDigest, copyImage, parseChallenge, parseRepository, pushAttestation, setRegistryTransport,
+  RegistryClient, RegistryError, attestationTag, checkDigest, copyImage, imageRevisions, parseChallenge, parseRepository, pushAttestation, setRegistryTransport,
 } from '../../server/deploy/registry'
 import { fakeRegistry } from '../helpers/fake-registry'
 
@@ -92,5 +92,19 @@ describe('deploy-registry', () => {
       annotations: { 'dev.cosignproject.cosign/signature': '', 'predicateType': 'urn:test' } })
     reg.readOnly.add('valide/app')
     expect(await code(pushAttestation(c, 'valide/app', digest, Buffer.from('{}'), 'urn:test'))).toBe('E_REGISTRY_DENIED')
+  })
+
+  it('révisions déclarées : étiquette OCI de la configuration et des annotations, index compris', async () => {
+    const reg = fakeRegistry(HOST)
+    setRegistryTransport(reg.transport)
+    const c = new RegistryClient(HOST)
+    const plain = reg.addImage('candidat/app', 'sans')
+    expect([...await imageRevisions(c, 'candidat/app', plain)]).toEqual([])
+    const labelled = reg.addImage('candidat/app', 'avec', { 'org.opencontainers.image.revision': ` ${'A'.repeat(40)} ` })
+    expect([...await imageRevisions(c, 'candidat/app', labelled)]).toEqual(['a'.repeat(40)])
+    const idx = reg.addIndex('candidat/app', 'multi')
+    expect([...await imageRevisions(c, 'candidat/app', idx)]).toEqual([])
+    reg.corruptBlobs = true
+    await expect(imageRevisions(c, 'candidat/app', labelled)).rejects.toThrow()
   })
 })

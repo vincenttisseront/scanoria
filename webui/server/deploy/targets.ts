@@ -64,6 +64,9 @@ function validConfig(kind: DeployKind, raw: unknown, onTrigger: string): TargetC
   const parsed = configSchema(kind).safeParse(raw)
   if (!parsed.success) throw apiError(400, 'E_VALIDATION', { issues: parsed.error.issues.map(i => ({ path: i.path.join('.'), code: i.code })) })
   if (onTrigger === 'branch' && !(parsed.data as { branch?: string }).branch) throw apiError(400, 'E_VALIDATION', { issues: [{ path: 'config.branch', code: 'required' }] })
+  // J9 : l'attestation n'est signée par le helper que sur le relevé d'un rapport
+  // de release qu'il a lui-même signé ; une promotion de branche n'en a pas.
+  if (onTrigger === 'branch' && kind === 'registry-promotion') throw apiError(400, 'E_VALIDATION', { issues: [{ path: 'on_trigger', code: 'release_only' }] })
   return parsed.data
 }
 

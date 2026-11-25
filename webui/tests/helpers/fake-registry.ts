@@ -16,7 +16,7 @@ export interface FakeRegistry {
   log: string[]
   /** Dépôts refusés en écriture (403 sur PUT et POST). */
   readOnly: Set<string>
-  addImage: (repo: string, tag: string) => string
+  addImage: (repo: string, tag: string, labels?: Record<string, string>) => string
   addIndex: (repo: string, tag: string) => string
   corruptBlobs: boolean
 }
@@ -39,9 +39,9 @@ export function fakeRegistry(host: string, opts: { token?: string, basic?: strin
   const reg: FakeRegistry = {
     blobs: new Map(), manifests: new Map(), log: [], readOnly: new Set(), corruptBlobs: false,
     transport: async () => res(500),
-    addImage(repo, tag) {
+    addImage(repo, tag, labels) {
       const layer = Buffer.from(`couche ${repo} ${tag}`)
-      const config = Buffer.from(JSON.stringify({ architecture: 'amd64', os: 'linux', tag }))
+      const config = Buffer.from(JSON.stringify({ architecture: 'amd64', os: 'linux', tag, ...(labels ? { config: { Labels: labels } } : {}) }))
       put(repo, 'blob', sha(layer), layer)
       put(repo, 'blob', sha(config), config)
       const m = Buffer.from(JSON.stringify({ schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json',
