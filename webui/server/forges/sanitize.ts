@@ -84,6 +84,15 @@ export function codeBlock(text: string, lang = ''): string {
 
 const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/
 
+/** Mentions et références de la forge : rendues inertes par une espace de largeur nulle. */
+function inertMentions(text: string): string {
+  return text
+    .replace(/(^|[^\w`])([@#!~$%])(?=[\w.-])/g, (_m, pre: string, sym: string) => `${pre}${sym}${ZWSP}`)
+    .replace(/&(?=\d)/g, `&${ZWSP}`)
+    // Références croisées « dépôt#12 » et « dépôt!3 ».
+    .replace(/([\w.-])([#!])(?=\d)/g, `$1$2${ZWSP}`)
+}
+
 /** Une ligne hors bloc de code. */
 function sanitizeLine(line: string, consoleUrl: string | null | undefined): string {
   let s = line
@@ -93,28 +102,33 @@ function sanitizeLine(line: string, consoleUrl: string | null | undefined): stri
   s = s.replace(/^( {0,3})(\[[^\]]*\]:)/, '$1\\$2')
   // Images : le « ! » devant « [ » est échappé (le texte reste, aucune requête).
   s = s.replace(/!(?=\[)/g, '\\!')
-  // Liens Markdown [texte](url) : gardés seulement vers une adresse permise.
-  s = s.replace(/\[([^\]\n]{0,500})\]\(\s*([^()\s]{1,2000})(?:\s+"[^"]*")?\s*\)/g, (_m, label: string, url: string) =>
-    allowedLink(url, consoleUrl) ? `[${label}](${url})` : `${label} (${defang(url)})`)
+  // Liens Markdown [texte](url) : gardés seulement vers une adresse permise ;
+  // mis de côté le temps des passes suivantes (aucune ne doit les toucher).
+  const kept: string[] = []
+  s = s.replace(/\[([^\]\n]{0,500})\]\(\s*((?:[^()\s]|\([^()\s]*\)){1,2000})(?:\s+"[^"]*")?\s*\)/g, (_m, label: string, url: string) => {
+    if (!allowedLink(url, consoleUrl)) return `${label} (${defang(url)})`
+    kept.push(`[${inertMentions(label)}](${url})`)
+    return `\u0001${kept.length - 1}\u0001`
+  })
+  // Reste de syntaxe de lien (parenthèses non équilibrées…) : cassé.
+  s = s.replace(/\]\(/g, ']\\(')
   // URL nues hors liste : rendues inertes (aucun lien automatique).
-  s = s.replace(/(?<![(\w])(https?|ftp|ftps|file|javascript|data|mailto):(\/\/)?([^\s<>()]*)/gi, (m: string) => {
+  s = s.replace(/(?<!\w)(https?|ftp|ftps|file|javascript|data|mailto|vbscript):(\/\/)?([^\s<>()]*)/gi, (m: string) => {
     if (allowedLink(m, consoleUrl)) return m
     return defang(m)
   })
   s = s.replace(/\bwww\.(?=[A-Za-z0-9-]+\.)/gi, `www${ZWSP}.`)
-  // Mentions et références de la forge : rendues inertes par une espace de largeur nulle.
-  s = s.replace(/(^|[^\w`])([@#!~$%])(?=[\w.-])/g, (_m, pre: string, sym: string) => `${pre}${sym}${ZWSP}`)
-  s = s.replace(/&(?=\d)/g, `&${ZWSP}`)
-  // Références croisées « dépôt#12 » et « dépôt!3 ».
-  s = s.replace(/([\w.-])([#!])(?=\d)/g, `$1$2${ZWSP}`)
-  return s
+  s = inertMentions(s)
+  // Liens permis remis en place, tels quels.
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\u0001(\d+)\u0001/g, (_m, i: string) => kept[Number(i)] ?? '')
 }
 
 /** Neutralise une URL : schéma altéré, jamais cliquable. */
 function defang(url: string): string {
   return url
     .replace(/^https?:/i, m => (m.toLowerCase() === 'https:' ? 'hxxps:' : 'hxxp:'))
-    .replace(/^(ftp|ftps|file|javascript|data|mailto):/i, (_m, p: string) => `${p.toLowerCase()}[:]`)
+    .replace(/^(ftp|ftps|file|javascript|data|mailto|vbscript):/i, (_m, p: string) => `${p.toLowerCase()}[:]`)
     .replace(/\./g, '[.]')
 }
 

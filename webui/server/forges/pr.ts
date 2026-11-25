@@ -62,8 +62,12 @@ export async function enqueuePullRequestScan(db: Db, ctx: ProjectForge, pr: Pull
     number: pr.number, base_sha: pr.base_sha, base_ref: pr.base_ref, head_sha: pr.head_sha, head_ref: pr.head_ref, author: pr.author,
     ...(changed ? { changed_files: changed } : {}),
   }
+  // G9 : profil des PR du projet (migration 014), sinon le profil par défaut du projet.
+  const prof = await db.query<{ slug: string }>(
+    'SELECT pf.slug FROM projects p JOIN profiles pf ON pf.id = p.profile_pr_id WHERE p.id = $1', [ctx.projectId])
   const res = await enqueueScan(db, {
     projectId: ctx.projectId,
+    ...(prof.rows[0] ? { profileSlug: prof.rows[0].slug } : {}),
     ref: pullRequestRef(ctx.forge.kind, pr.number),
     commit: pr.head_sha,
     trigger: 'webhook',

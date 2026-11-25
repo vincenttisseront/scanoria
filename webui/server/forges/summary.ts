@@ -170,7 +170,7 @@ export function buildSummary(input: SummaryInput): string {
   else {
     out.push(t.cols, '|---|---|---|---|---|---|')
     for (const f of input.newFindings) {
-      const where = f.path ? `\`${f.path.replace(/`/g, '').slice(0, 200)}${f.start_line ? `:${f.start_line}` : ''}\`` : '—'
+      const where = f.path ? `\`${f.path.replace(/[`|]/g, '').slice(0, 200)}${f.start_line ? `:${f.start_line}` : ''}\`` : '—'
       const expl = f.ai_summary
         ? `${escapeInline(f.ai_summary, 280)} _(${t.ai}${f.ai_model ? ` · ${escapeInline(f.ai_model, 60)}` : ''})_`
         : '—'

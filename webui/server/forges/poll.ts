@@ -78,13 +78,14 @@ export async function pollPullRequests(db: Db, now = new Date()): Promise<PollRe
 export async function nightlyFullScans(db: Db, now = new Date()): Promise<number> {
   const hour = now.getUTCHours()
   if (hour < 1 || hour > 4) return 0
-  const { rows } = await db.query<{ id: string, default_branch: string }>(
-    `SELECT p.id::text, p.default_branch FROM projects p
+  const { rows } = await db.query<{ id: string, default_branch: string, profile: string | null }>(
+    `SELECT p.id::text, p.default_branch, (SELECT slug FROM profiles WHERE id = p.profile_nightly_id) AS profile FROM projects p
       WHERE p.archived_at IS NULL AND p.suspended_at IS NULL AND p.default_branch IS NOT NULL
         AND EXISTS (SELECT 1 FROM scans s WHERE s.project_id = p.id AND s.incremental AND s.queued_at > $1::timestamptz - interval '1 day')
         AND NOT EXISTS (SELECT 1 FROM scans s WHERE s.project_id = p.id AND NOT s.incremental AND s.pull_request IS NULL
                           AND s.ref = p.default_branch AND s.queued_at > $1::timestamptz - interval '20 hours')
       LIMIT 100`, [now.toISOString()])
-  for (const p of rows) await enqueueScan(db, { projectId: p.id, ref: p.default_branch, trigger: 'schedule' })
+  // G9 : profil nocturne du projet (migration 014), sinon son profil par défaut.
+  for (const p of rows) await enqueueScan(db, { projectId: p.id, ref: p.default_branch, trigger: 'schedule', ...(p.profile ? { profileSlug: p.profile } : {}) })
   return rows.length
 }

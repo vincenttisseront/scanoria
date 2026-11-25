@@ -45,8 +45,19 @@ export function tokenize(line: string): string[] | null {
       continue
     }
     let j = i
-    while (j < line.length && !/\s/.test(line[j]!)) j++
-    out.push(line.slice(i, j))
+    while (j < line.length && !/\s/.test(line[j]!)) {
+      // « --option="texte entre guillemets" » : la valeur citée reste d'un seul tenant.
+      if (line[j - 1] === '=' && Object.hasOwn(closers, line[j]!)) {
+        const end = line.indexOf(closers[line[j]!]!, j + 1)
+        if (end < 0) return null
+        out.push(`${line.slice(i, j)}${line.slice(j + 1, end).trim()}`)
+        j = end + 1
+        i = -1
+        break
+      }
+      j++
+    }
+    if (i >= 0) out.push(line.slice(i, j))
     i = j
   }
   return out

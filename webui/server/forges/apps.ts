@@ -290,9 +290,16 @@ export async function verifyInstallation(db: Queryable, forge: { id: string, bas
   const app = await getForgeApp(db, forge.id)
   if (app?.kind !== 'github-app' || !app.app_id || !app.key_credential_id) return false
   const pem = (await decryptSecret(db, app.key_credential_id)).value
-  const { data } = await forgeGetJson<{ app_id?: unknown, id?: unknown }>(`${githubApiBase(forge.base_url)}/app/installations/${installationId}`, {
-    token: appJwt(app.app_id, pem), authScheme: 'Bearer', accept: 'application/vnd.github+json', headers: { 'x-github-api-version': '2022-11-28' },
-  })
+  let data: { app_id?: unknown, id?: unknown } | null
+  try {
+    data = (await forgeGetJson<{ app_id?: unknown, id?: unknown }>(`${githubApiBase(forge.base_url)}/app/installations/${installationId}`, {
+      token: appJwt(app.app_id, pem), authScheme: 'Bearer', accept: 'application/vnd.github+json', headers: { 'x-github-api-version': '2022-11-28' },
+    })).data
+  }
+  catch (err) {
+    if (err instanceof ForgeError && err.code === 'E_FORGE_NOT_FOUND') return false
+    throw err
+  }
   return String(data?.app_id) === app.app_id && String(data?.id) === installationId
 }
 

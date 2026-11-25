@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { MODULE_ID_RE } from '#shared/schemas'
 import { VerdictDetails } from '#shared/analysis'
 import { readContainedFile, resultDir, resultsRoot } from './files'
-import { parsePlan } from './plan'
+import { planModuleIds } from '../gates/evaluate'
 
 /** Raisons certaines (contrat 35) : une fois les exceptions appliquées, un module de plus ne les lève pas. */
 export const CERTAIN_REASONS = ['malicious-package', 'secret', 'kev', 'license-denied'] as const
@@ -31,7 +31,7 @@ const progressSchema = z.object({
   modules: z.array(z.object({
     id: z.string().regex(MODULE_ID_RE),
     status: z.string().max(32).nullable(),
-    outputs: z.record(z.string(), z.string().max(512).regex(OUTPUT_RE)).default({}),
+    outputs: z.record(z.string(), z.string().max(512).regex(OUTPUT_RE).refine(v => !v.split('/').some(x => x === '.' || x === '..'))).default({}),
   })).max(64),
 })
 
@@ -73,7 +73,7 @@ export async function checkEarlyFailure(db: pg.Pool, deps: EarlyDeps, scan: { id
   if (!row || row.early_failure || row.status !== 'running' || ['trial', 'external', 'recorrelate'].includes(row.trigger)) return null
   const progress = await readProgress(scansDir, scan.job_id)
   if (!progress) return null
-  const planned = new Set(parsePlan(scan.plan)?.modules.map(m => m.id) ?? [])
+  const planned = new Set(planModuleIds(scan.plan))
   let fresh = false
   for (const m of progress.modules) {
     if (m.status !== 'ok' || ingested.has(m.id) || !planned.has(m.id)) continue
