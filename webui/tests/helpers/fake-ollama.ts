@@ -241,8 +241,22 @@ function wellBehaved07Tri(required: string[], data: Record<string, unknown>): Re
 }
 
 /** Réponse sage : reprend le titre, le message et les métadonnées, jamais l'extrait de code. */
+/** 0.8 (A, I6) : notes de sécurité de release, rédigées depuis les seules données. */
+function wellBehaved08(required: string[], data: Record<string, unknown>): Record<string, unknown> | null {
+  if (!(required.includes('headline') && required.includes('accepted'))) return null
+  type Bucket = { total?: number, items?: { tool: string, rule_id: string, severity: string, title: string }[] }
+  const list = (b: unknown) => ((b as Bucket | undefined)?.items ?? []).map(i => `${i.severity} ${i.rule_id} (${i.tool})`).join('; ') || 'none'
+  const acc = (data.accepted as { reason: string, expires_on: string, vex_status: string | null }[] | undefined) ?? []
+  return {
+    headline: `Release ${String(data.tag)}: verdict ${String(data.verdict)}.`,
+    fixed: data.previous_tag ? `Since ${String(data.previous_tag)}: ${list(data.fixed)}` : 'No previous release.',
+    introduced: list(data.introduced),
+    accepted: acc.length ? acc.map(a => `${a.reason} until ${a.expires_on}${a.vex_status ? ` (${a.vex_status})` : ''}`).join('; ') : 'none',
+  }
+}
+
 function wellBehaved(required: string[], data: Record<string, unknown>): Record<string, unknown> {
-  const v04 = wellBehaved07(required, data) ?? wellBehaved07Tri(required, data) ?? wellBehaved06(required, data) ?? wellBehaved04(required, data) ?? wellBehaved05(required, data)
+  const v04 = wellBehaved08(required, data) ?? wellBehaved07(required, data) ?? wellBehaved07Tri(required, data) ?? wellBehaved06(required, data) ?? wellBehaved04(required, data) ?? wellBehaved05(required, data)
   if (v04) return v04
   if (required.includes('detects')) {
     const pkg = data.package as { name?: string, fixed?: string[] } | null

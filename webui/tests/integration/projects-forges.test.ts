@@ -246,6 +246,8 @@ describe.skipIf(!DATABASE_URL)('forges et projets (PostgreSQL, faux serveurs)', 
       }
       // Un seul projet suivi pour ce test : les autres passent en « none ».
       await db.pool.query(`UPDATE projects SET schedule = 'none', detection = '{"version":1}' WHERE repo_full_name <> 'equipe/app'`)
+      // 0.8 (A) : le mode tiré des releases interroge aussi la forge ; hors sujet ici.
+      await db.pool.query(`UPDATE projects SET release_mode = 'off'`)
       const app = (await listProjects(db.pool, { forgeId })).find(p => p.repo_full_name === 'equipe/app')!
       await db.pool.query(`UPDATE projects SET tracked_branches = '{main,release/1.0}', last_polled_at = NULL WHERE id = $1`, [app.id])
       await db.pool.query(`UPDATE forges SET last_discovery_at = now()`)
