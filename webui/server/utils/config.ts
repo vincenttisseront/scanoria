@@ -31,6 +31,10 @@ export interface ConsoleConfig {
   migrateOnStart: boolean
   /** Période de lecture des résultats du helper, en millisecondes. */
   ingestIntervalMs: number
+  /** 0.6 (chantier A) : état hors ligne publié par le helper (offline/status.json). */
+  offlineStatusFile?: string
+  /** 0.6 (chantier A) : lots exportés, lus pour le téléchargement (root:scanoria 0640). */
+  bundlesDir?: string
 }
 
 function bool(value: string | undefined, fallback: boolean): boolean {
@@ -58,6 +62,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConsoleConfig 
     trustProxy: bool(env.NUXT_TRUST_PROXY, true),
     migrateOnStart: bool(env.NUXT_MIGRATE_ON_START, true),
     ingestIntervalMs: Number.isFinite(interval) && interval >= 200 ? interval : 5000,
+    offlineStatusFile: env.NUXT_OFFLINE_STATUS_FILE || '/var/lib/scanoria/offline/status.json',
+    bundlesDir: env.NUXT_BUNDLES_DIR || '/var/lib/scanoria/bundles',
   }
 }
 

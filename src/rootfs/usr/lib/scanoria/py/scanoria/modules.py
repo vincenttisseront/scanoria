@@ -356,8 +356,20 @@ def podman(*args, timeout=900):
 
 
 def pull(m, timeout):
-    if podman("pull", "--quiet", m["image"], timeout=timeout) != 0:
-        raise Fail("E_NETWORK", "cannot pull the image of %s" % m["id"])
+    """Image du module, épinglée par empreinte : registre, sinon image déjà chargée
+    (lot hors ligne importé), sinon miroir déclaré (F17)."""
+    if podman("pull", "--quiet", m["image"], timeout=timeout) == 0:
+        return
+    if podman("image", "exists", m["image"], timeout=60) == 0:
+        common.log("%s: registry unreachable, using the image loaded from an offline bundle" % m["id"])
+        return
+    from . import mirror
+    try:
+        if mirror.fetch_image(m, timeout) and podman("image", "exists", m["image"], timeout=60) == 0:
+            return
+    except Fail as f:
+        raise Fail("E_NETWORK", "cannot pull the image of %s, and the mirror failed (%s)" % (m["id"], f.message))
+    raise Fail("E_NETWORK", "cannot pull the image of %s (import an offline bundle that contains it)" % m["id"])
 
 
 def remove_image(reg, image):
@@ -469,6 +481,11 @@ def route(reg):
         # Aucun service et pas encore de nom (premier démarrage) : rien à aiguiller.
         return
     res = routing.apply(None, svcs) or []
+    from . import dtmirror
+    try:
+        dtmirror.apply_egress(reg)
+    except Fail as f:
+        common.log("egress rules of the permanent modules not applied: %s" % f.message)
     by_id = {r["id"]: r for r in res if isinstance(r, dict) and isinstance(r.get("id"), str)}
     for k, e in reg["modules"].items():
         if e["manifest"]["type"] == "service":
@@ -499,6 +516,11 @@ def provision(m, entry, phase, timeout):
                  "network": quadlet.PREFIX + m["id"], "timeout": max(1, int(timeout)), "phase": phase})
 
 
+def dtmirror_unregister(m):
+    from . import dtmirror
+    dtmirror.unregister_truststore(m)
+
+
 def write_units(m, entry, options):
     """Secrets Podman, fichier d'environnement et unités Quadlet du module."""
     mid = m["id"]
@@ -515,9 +537,11 @@ def write_units(m, entry, options):
         variants.remove_leaves(m)
     _, ulimits = services.requirements(m)
     sub = services.subnet(entry["subnet"]) if isinstance(entry.get("subnet"), int) else None
+    from . import dtmirror
+    extra = dtmirror.unit_extras(m, entry)
     quadlet.write(mid, quadlet.render(m, entry["host_port"], entry["enabled"], has_env, subnet=sub,
                                       secrets=[(services.podman_secret(mid, n), n, env) for n, env in secs],
-                                      ulimits=ulimits))
+                                      ulimits=ulimits, trust=extra.get("trust"), hosts=extra.get("hosts", ())))
 
 
 def stop_service(mid):
@@ -629,7 +653,14 @@ def install_one(c, reg, op, m, options, frac):
         # d'essai des scanners qui en dépendent (E_FEED_UNAVAILABLE sinon).
         op.step("download", frac(0.1), mid)
         save_registry(reg)
-        feeds.refresh(m, options, timeout=c.left())
+        try:
+            feeds.refresh(m, options, timeout=c.left())
+        except Fail as f:
+            # Hors ligne : la base importée d'un lot signé (ou du miroir) suffit ;
+            # son âge reste affiché et contrôlé par le quality gate (G16).
+            if f.code != "E_FEED_UNAVAILABLE" or not feeds.has_data(mid):
+                raise
+            common.log("%s: download failed, keeping the imported database (%s)" % (mid, f.message))
         entry.update(status="healthy", testbed=testbed.run(m))
         save_registry(reg)
         return
@@ -680,6 +711,7 @@ def undo_install(reg, mid):
         quadlet.remove(mid)
         systemctl("daemon-reload", check=False)
         services.unregister_podman_secrets(m)
+        dtmirror_unregister(m)
     if e.get("created_db"):
         pgadmin.drop_database(mid)
     if e.get("created_db") or e.get("created_dir"):
@@ -789,6 +821,7 @@ def act_uninstall_module(c):
             quadlet.remove(mid)
             systemctl("daemon-reload")
             services.unregister_podman_secrets(m)
+            dtmirror_unregister(m)
         if not keep:
             op.step("data", 50)
             remove_data(m)
@@ -1167,6 +1200,8 @@ def act_refresh_feeds(c):
             failed.append(f)
             results.append(feeds.public_status(fid))
     publish(reg)
+    from . import dtmirror
+    dtmirror.sync_all()
     if failed:
         raise Fail(failed[0].code if len(failed) == 1 else "E_FEED_UNAVAILABLE",
                    "; ".join(f.message for f in failed)[:2000], {"feeds": results})

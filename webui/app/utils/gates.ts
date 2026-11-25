@@ -9,7 +9,7 @@ import { GateRules } from '#shared/analysis'
 
 export type GateField
   = | { key: string, kind: 'boolean' }
-    | { key: string, kind: 'number', min: number }
+    | { key: string, kind: 'number', min: number, nullable?: boolean }
     | { key: string, kind: 'severity', options: string[], nullable: boolean }
     | { key: string, kind: 'locked', value: unknown, reason: string }
 
@@ -42,7 +42,7 @@ export function gateFields(): GateField[] {
       out.push({ key, kind: 'boolean' })
     }
     else if (d.type === 'number') {
-      out.push({ key, kind: 'number', min: (s as unknown as { minValue?: number }).minValue ?? 0 })
+      out.push({ key, kind: 'number', min: (s as unknown as { minValue?: number }).minValue ?? 0, ...(nullable ? { nullable } : {}) })
     }
     else if (d.type === 'enum') {
       out.push({ key, kind: 'severity', options: (s as unknown as { options: string[] }).options, nullable })

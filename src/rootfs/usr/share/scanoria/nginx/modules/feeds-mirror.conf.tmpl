@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Généré par scanoria.routing (0.6) : ne pas modifier. Bases de
+# vulnérabilités de l'appliance servies à Dependency-Track, dont la sortie
+# vers Internet est fermée. HTTPS sous feeds.@FQDN@, certificat de l'AC
+# interne (scanoria-ca issue-feeds) ; joignable depuis le seul réseau de
+# Dependency-Track (@ALLOW@), ici et dans nftables (dtmirror.render_egress).
+# scanoria-route: id=feeds mode=static host=feeds port=@PORT@ fqdn=@FQDN@
+server {
+	listen @PORT@ ssl;
+	server_name feeds.@FQDN@;
+	server_tokens off;
+	ssl_certificate /etc/scanoria/pki/feeds/fullchain.pem;
+	ssl_certificate_key /etc/scanoria/pki/feeds/privkey.pem;
+	ssl_protocols TLSv1.2 TLSv1.3;
+	ssl_ecdh_curve X25519:prime256v1:secp384r1;
+	ssl_prefer_server_ciphers off;
+	ssl_session_tickets off;
+	allow @ALLOW@;
+	deny all;
+	root /var/lib/scanoria-feeds-mirror;
+	autoindex off;
+	client_max_body_size 1k;
+
+	location ~ /\. {
+		return 404;
+	}
+	location / {
+		limit_except GET HEAD {
+			deny all;
+		}
+		default_type application/octet-stream;
+		try_files $uri =404;
+	}
+}

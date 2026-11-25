@@ -333,6 +333,11 @@ def source_info():
 # --------------------------------------------------------------------------
 
 def refresh():
+    from . import mirror
+    if mirror.configured():
+        # Appliance miroir déclarée (F17) : index pris dans son dernier lot signé,
+        # vérifié par la clé épinglée du catalogue comme un téléchargement direct.
+        return mirror.refresh_catalog()
     repo = source_repo()
     common.shared_dir(CATALOG_DIR)
     tmp = selfupdate.new_staging("catalog")

@@ -43,6 +43,7 @@ cleanup() {
 	systemctl daemon-reload || true
 	podman volume rm --force "${UNIT}_data" > /dev/null 2>&1 || true
 	podman secret rm "$UNIT-db-password" > /dev/null 2>&1 || true
+	podman secret rm "$UNIT-truststore" > /dev/null 2>&1 || true
 	rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -73,6 +74,8 @@ echo 0.5.0 > "$T/opt/scanoria/current/VERSION"
 cp /proc/meminfo "$T/proc/meminfo" && grep '^processor' /proc/cpuinfo > "$T/proc/cpuinfo"
 echo '{"repo": "exemple/scanoria"}' > "$T/etc/scanoria/catalog.json"
 echo '{"fqdn": "analyse.exemple.test"}' > "$T/etc/scanoria/appliance.json"
+# AC interne : le miroir des bases est servi en HTTPS à Dependency-Track (0.6).
+"$ROOT/src/rootfs/usr/sbin/scanoria-ca" init --fqdn analyse.exemple.test > /dev/null
 openssl genpkey -algorithm ed25519 -out "$TMP/sign.key" 2> /dev/null
 openssl pkey -in "$TMP/sign.key" -pubout -out "$T/etc/scanoria/update-pubkey.pem"
 python3 -I "$ROOT/catalog/build.py" build --version 1 --out "$REL"
@@ -165,6 +168,14 @@ expect "install dependency-track + dtrack-upload par le helper" "$(code)" OK
 for id in dependency-track dtrack-upload; do expect "$id sain et activé" "$(mstate "$id")" healthy/true; done
 expect "dtrack-upload : banc d'essai réussi (SBOM envoyé au vrai service)" "$(testbed dtrack-upload)" true
 expect "unité Quadlet active" "$(systemctl is-active "$UNIT.service")" active
+# Miroir des bases en HTTPS (0.6) : le JVM de Dependency-Track démarre avec le
+# magasin monté en lecture seule, qui porte l'AC interne, et résout feeds.<nom>.
+expect "magasin Java : AC interne présente" \
+	"$(podman exec "$UNIT" keytool -list -cacerts -storepass changeit -alias scanoria-appliance-ca > /dev/null 2>&1 && echo oui || echo non)" oui
+expect "magasin Java : lecture seule" \
+	"$(podman exec "$UNIT" sh -c ': > "$JAVA_HOME/lib/security/cacerts"' > /dev/null 2>&1 && echo écrivable || echo lecture-seule)" lecture-seule
+expect "feeds.<nom> résolu vers la passerelle du module" \
+	"$(podman exec "$UNIT" getent hosts feeds.analyse.exemple.test | awk '{print $1}' | grep -c '^10\.90\.')" 1
 expect "base PostgreSQL du module" "$(runuser -u postgres -- psql -X -A -t -c "SELECT count(*) FROM pg_database WHERE datname = 'mod_dependency_track'")" 1
 PORT=$(jq -r '.modules["dependency-track"].host_port' "$T/var/lib/scanoria/modules/installed.json")
 API="http://127.0.0.1:$PORT"

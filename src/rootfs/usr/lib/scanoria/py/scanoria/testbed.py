@@ -279,6 +279,16 @@ def fetch_archive(manifest, dest):
         raise Fail("E_TESTBED", "module %s has no testbed in the catalog" % manifest["id"])
     if SHA256_RE.match(digest) and _from_cache(digest, dest):
         return
+    # Hors ligne : banc d'essai déjà importé d'un lot signé, sinon pris sur le miroir (F17).
+    from . import bundle, mirror
+    local = os.path.join(bundle.TESTBEDS, name)
+    if not os.path.isfile(local) and mirror.configured():
+        mirror.fetch_testbed(manifest)
+    if os.path.isfile(local) and not os.path.islink(local) and selfupdate.sha256_file(local) == digest:
+        shutil.copyfile(local, dest)
+        if SHA256_RE.match(digest):
+            _to_cache(digest, dest)
+        return
     src = catalogverify.source_info()
     if src is None:
         raise Fail("E_PRECONDITION", "catalog source unknown: refresh the catalog")

@@ -68,7 +68,11 @@ networks_json() { # lignes « version CIDR »
 cmd_apply() {
 	local boot=$1 nets new
 	if [[ ! -f "$CONF" ]]; then
-		[[ $boot -eq 1 ]] && emit OK "no admin networks configured, nothing loaded" '{"loaded": false, "admin_networks": []}'
+		if [[ $boot -eq 1 ]]; then
+			# Sortie fermée des modules et miroir : rechargés même sans réseaux d'administration.
+			load_extra
+			emit OK "no admin networks configured, nothing loaded" '{"loaded": false, "admin_networks": []}'
+		fi
 		emit E_PRECONDITION "admin networks not configured"
 	fi
 	if ! nets=$(read_networks 2>/dev/null); then
@@ -90,7 +94,20 @@ cmd_apply() {
 		emit E_INTERNAL "ruleset could not be loaded, previous rules restored"
 	fi
 	mv -f "$new" "$RULES"
+	load_extra
 	emit OK "firewall loaded" "$(jq -cn --argjson n "$(networks_json "$nets")" '{loaded: true, admin_networks: $n}')"
+}
+
+# Tables générées par le helper (0.6, chantier A), rechargées après la table
+# principale (elles ne sont pas persistantes au redémarrage) : sortie du client
+# du miroir F17 (mirror.nft) et sortie fermée des modules permanents
+# (svc-egress.nft). Un fichier illisible est signalé sans bloquer le reste.
+load_extra() {
+	local f
+	for f in "$NFT_DIR/mirror.nft" "$NFT_DIR/svc-egress.nft"; do
+		[[ -f "$f" && ! -L "$f" ]] || continue
+		sys nft -f "$f" || log "$(basename "$f") could not be loaded"
+	done
 }
 
 cmd_status() {

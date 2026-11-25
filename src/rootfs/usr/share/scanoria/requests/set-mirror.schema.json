@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scanoria:schema:request:set-mirror:1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-or-later. Copyright (C) 2026 Vincent Tisseront. Contrat : docs/ARCHITECTURE.md.",
+  "title": "Déclarer ou retirer l'appliance miroir (F17)",
+  "description": "Valide l'adresse https du miroir, exige que l'empreinte attendue soit dans le magasin de confiance, résout le nom côté helper et épingle les adresses dans /etc/scanoria/mirror.json, puis ouvre dans nftables (table inet scanoria_mirror) la sortie vers ces adresses et ce port pour l'UID de scanoria-mirror seulement. enabled: false referme la règle. CLAUDE.md § 9, F17.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "id",
+    "type",
+    "created_at",
+    "requested_by",
+    "params"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "type": {
+      "const": "set-mirror"
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "requested_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user_id",
+        "username"
+      ],
+      "properties": {
+        "user_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "username": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 45,
+          "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}|[0-9a-f.]*:[0-9a-f:.]*)$"
+        }
+      }
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 300,
+          "pattern": "^https://(\\[[0-9a-f:.]{2,45}\\]|[a-z0-9.-]{1,253})(:[0-9]{1,5})?/?$"
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "ca_pem": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 16384,
+          "pattern": "^-----BEGIN CERTIFICATE-----\\r?\\n"
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "enabled",
+          "url",
+          "fingerprint"
+        ]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "url"
+              ]
+            },
+            {
+              "required": [
+                "fingerprint"
+              ]
+            },
+            {
+              "required": [
+                "ca_pem"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -47,6 +47,9 @@ const CERT = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n'
 // clé privée n'apparaît en clair dans le dépôt (gitleaks, check-repo).
 const PK = ['PRIVATE', 'KEY'].join(' ')
 const KEY = `-----BEGIN ${PK}-----\nMIIE\n-----END ${PK}-----\n`
+// Clé publique Ed25519 et empreinte factices (aucune valeur réelle, faible entropie).
+const PUB = `${'A'.repeat(43)}=`
+const FPR = 'ab'.repeat(32)
 
 const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
   'set-hostname': {
@@ -187,6 +190,44 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
   'reset-service-admin': {
     valid: [{ id: 'sonarqube' }],
     invalid: [{}, { id: 'Sonar' }, { id: '../sonarqube' }, { id: 'sonarqube', password: 'x' }],
+  },
+  'export-bundle': {
+    valid: [
+      { modules: ['gitleaks'] }, { modules: ['gitleaks', 'osv-scanner'], dry_run: true, keep: 3 },
+      { schedule: { enabled: true, every_days: 7, keep: 2, modules: ['gitleaks'] } },
+      { schedule: { enabled: false, every_days: 1, keep: 1, modules: [] } }, { scheduled: true },
+    ],
+    invalid: [
+      {}, { modules: [] }, { modules: ['../x'] }, { modules: ['gitleaks', 'gitleaks'] }, { modules: ['gitleaks'], keep: 0 },
+      { modules: ['gitleaks'], scheduled: true }, { scheduled: false },
+      { schedule: { enabled: true, every_days: 0, keep: 2, modules: [] } },
+      { schedule: { enabled: true, every_days: 7, keep: 2, modules: [], last_run_at: null } },
+    ],
+  },
+  'import-bundle': {
+    valid: [{ upload_id: ID }],
+    invalid: [{}, { upload_id: '../x' }, { upload_id: ID, path: '/tmp/x' }],
+  },
+  'set-mirror': {
+    valid: [
+      { enabled: true, url: 'https://mirror.analyse.exemple.test', fingerprint: FPR },
+      { enabled: true, url: 'https://192.0.2.20:8443/', fingerprint: FPR, ca_pem: CERT + 'x'.repeat(40) },
+      { enabled: false },
+    ],
+    invalid: [
+      { enabled: true, url: 'http://mirror.exemple.test', fingerprint: FPR },
+      { enabled: true, url: 'https://mirror.exemple.test' }, { enabled: true, fingerprint: FPR },
+      { enabled: true, url: 'https://mirror.exemple.test/x;y', fingerprint: FPR },
+      { enabled: true, url: 'https://mirror.exemple.test', fingerprint: FPR.toUpperCase() },
+      { enabled: false, url: 'https://mirror.exemple.test' }, {},
+    ],
+  },
+  'trust-key': {
+    valid: [{ action: 'add', public_key: PUB, fingerprint: FPR }, { action: 'remove', fingerprint: FPR }],
+    invalid: [
+      { action: 'add', public_key: PUB }, { action: 'add', public_key: 'A'.repeat(44), fingerprint: FPR },
+      { action: 'remove', fingerprint: FPR, public_key: PUB }, { action: 'remove', fingerprint: '../x' }, { action: 'rotate', fingerprint: FPR },
+    ],
   },
   'self-sbom': {
     valid: [{}],

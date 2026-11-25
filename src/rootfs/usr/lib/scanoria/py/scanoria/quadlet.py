@@ -90,12 +90,15 @@ def volumes(manifest):
     return res
 
 
-def render(manifest, host_port, enabled, has_env, subnet=None, secrets=(), ulimits=None):
+def render(manifest, host_port, enabled, has_env, subnet=None, secrets=(), ulimits=None, trust=None, hosts=()):
     """Contenu des fichiers Quadlet : {nom de fichier: texte}.
 
     subnet : ipaddress.IPv4Network du réseau du module (None : laissé à Podman) ;
     secrets : [(nom du secret Podman, nom court, variable ou None)] ;
-    ulimits : {nofile|nproc: valeur} déjà validées (services.requirements)."""
+    ulimits : {nofile|nproc: valeur} déjà validées (services.requirements) ;
+    trust : (secret Podman, chemin absolu) d'un magasin de certificats monté en
+    lecture seule (dtmirror, 0.6) ; hosts : [(nom, adresse IPv4)] ajoutés au
+    /etc/hosts du conteneur."""
     mid = _need(ID_RE, manifest.get("id"), "module id")
     image = manifest.get("image")
     from .catalogverify import IMAGE_RE
@@ -148,6 +151,22 @@ def render(manifest, host_port, enabled, has_env, subnet=None, secrets=(), ulimi
         else:
             _need(ENV_KEY_RE, env, "secret variable")
             lines.append("Secret=%s,type=env,target=%s" % (pname, env))
+    if trust is not None:
+        pname, target = trust
+        _need(SECRET_RE, pname, "secret name")
+        _need(PATH_RE, target, "trust store path")
+        lines.append("Secret=%s,type=mount,target=%s,mode=0444" % (pname, target))
+    for name, addr in hosts:
+        from . import netutil
+        import ipaddress
+        if not netutil.check_fqdn(name):
+            raise Fail("E_INVALID_PARAM", "invalid host name")
+        try:
+            ip = ipaddress.IPv4Address(addr)
+        except (ipaddress.AddressValueError, ValueError, TypeError):
+            raise Fail("E_INVALID_PARAM", "invalid host address")
+        # Clé AddHost= absente du Quadlet de Podman 4.9 : option passée telle quelle.
+        lines.append("PodmanArgs=--add-host=%s:%s" % (name, ip))
     for k in sorted(ulimits or {}):
         v = ulimits[k]
         if k not in ("nofile", "nproc") or not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= 1 << 22:

@@ -13,10 +13,12 @@
 # aléatoire (jamais affiché ni en base), équipe « Scanoria (analyses) » et sa
 # clé d'API (scan-token, lue par le runner pour dtrack-upload), télémétrie
 # coupée. Les SBOM arrivent par le module dtrack-upload.
-# Accès sortant : Dependency-Track tient ses propres miroirs de vulnérabilités
-# (NVD, OSV, EPSS) et interroge les registres de paquets (méta-données des
-# composants) ; le réseau du module sort par la passerelle de Podman (§ 3.2).
-# Le mode hors ligne arrive en 0.6.
+# Hors ligne (0.6) : aucun accès sortant. Le réseau du module est fermé vers
+# l'extérieur (table nftables scanoria_svc_egress) ; ses miroirs OSV et EPSS
+# sont servis par l'appliance depuis ses propres bases (osv-db, epss), mises à
+# jour par téléchargement, lot signé ou appliance miroir. NVD, GitHub
+# Advisories, OSS Index et les métadonnées des registres de paquets sont
+# coupés et affichés comme trous de couverture (dtmirror.py).
 id: dependency-track
 name: OWASP Dependency-Track
 description:
@@ -37,7 +39,7 @@ image: docker.io/dependencytrack/bundled@sha256:dc3d9a87c74271663d65deafe83fbd7b
 version: "4.14.7"
 resources: { min_ram_mb: 4608, min_cpu: 2, disk_mb: 10240 }
 hostname: dtrack
-requires: { modules: [], feeds: [], appliance: ">=0.5.0" }
+requires: { modules: [], feeds: [osv-db], appliance: ">=0.5.0" }
 conflicts: []
 needs: { sysctl: {}, postgres: true }
 options:
@@ -63,13 +65,4 @@ service:
     - { name: db-password, env: ALPINE_DATABASE_PASSWORD }
   # Le mot de passe admin et la clé d'API d'analyse sont créés par dtrack.py
   # dans le même répertoire de secrets, sans être montés dans le conteneur.
-  egress:
-    - nvd.nist.gov
-    - services.nvd.nist.gov
-    - osv-vulnerabilities.storage.googleapis.com
-    - epss.empiricalsecurity.com
-    - registry.npmjs.org
-    - pypi.org
-    - repo1.maven.org
-    - proxy.golang.org
 upgrade: { policy: on-demand }
