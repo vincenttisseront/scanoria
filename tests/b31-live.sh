@@ -91,8 +91,8 @@ for id in "${MODS[@]}"; do
 	fi
 	mapfile -t health < <(jq -r '.health.command[]' "$TMP/$id.json")
 	v=$(podman run --rm --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges --user 65534:65534 \
-		--tmpfs /tmp --env HOME=/tmp --entrypoint "${health[0]}" "${IMG[$id]}" "${health[@]:1}" 2>&1 | head -n 3 | tr '\n' ' ' || true)
-	echo "     $id : ${health[*]} → $v"
+		--tmpfs /tmp --env HOME=/tmp --entrypoint "${health[0]}" "${IMG[$id]}" "${health[@]:1}" 2>&1 | tr '\n' ' ' || true)
+	echo "     $id : ${health[*]} → ${v:0:160}"
 	want=$(jq -r .version "$TMP/$id.json")
 	[[ "$v" == *"$want"* ]] && ok "$id : version $want de l'outil" || ko "$id : version de l'outil différente du manifeste ($want)"
 done
@@ -127,6 +127,12 @@ except Fail as f:
 EOF
 	expect "$id : banc d'essai de l'installation réussi" "$(jq -r .passed "$TMP/tb.json" 2> /dev/null || echo erreur)" true
 	jq -c . "$TMP/tb.json" 2> /dev/null | cut -c1-1500 || sed 's/^/     /' "$TMP/tb.err" | tail -n 20
+	if [[ "$(jq -r .passed "$TMP/tb.json" 2> /dev/null)" != true ]]; then
+		# Diagnostic : début de la sortie de l'outil (le message du helper n'en garde que la fin).
+		d="$TMP/diag-$id"; mkdir -p "$d/src" "$d/out" "$d/feeds"; cp -R "$ROOT/modules/$id/testbed/." "$d/src/"; chmod -R a+rwX "$d"
+		mapfile -d '' -t dargs < <(python3 "$ROOT/tests/lib/modcheck.py" podman "$ROOT/modules/$id/module.yaml" "$d/src" "$d/out" "$d/feeds" "${IMG[$id]}")
+		timeout 300 podman "${dargs[@]}" 2>&1 | head -n 25 | sed 's/^/     diag /' || true
+	fi
 done
 expect "bancs d'essai : aucun dossier de travail laissé" "$(find "$T/var/lib/scanoria/modules/work" -mindepth 1 -maxdepth 1 2> /dev/null | wc -l)" 0
 
@@ -148,13 +154,15 @@ scan() { # module dossier [rulesets] → résultat JSON
 	local id up; id=$(uuid); up=$(upload "$2")
 	drop "$id" "$(job "$id" "$up" "$1" "${3:-}")"
 	"$RUNNER" --once 2> "$TMP/runner.err" || echo "     runner : code $?"
-	LAST="$SCANS/results/$id"
-	cat "$LAST/result.json" 2> /dev/null || echo '{}'
+	echo "$id" > "$TMP/last.id"   # scan est appelée dans $( ) : LAST est posé par l'appelant (last_scan)
+	cat "$SCANS/results/$id/result.json" 2> /dev/null || echo '{}'
 }
+last_scan() { LAST="$SCANS/results/$(cat "$TMP/last.id")"; }
 mkdir -p "$TMP/recorded"
 for id in "${MODS[@]}"; do
 	[[ -n "${IMG[$id]:-}" ]] || continue
 	R=$(scan "$id" "$ROOT/modules/$id/testbed")
+	last_scan
 	expect "$id : analyse du banc d'essai par le runner" "$(jq -r '.status + "/" + (.modules[0].status // "?")' <<< "$R")" ok/ok
 	[[ "$(jq -r .status <<< "$R")" == ok ]] || { jq -c '.modules[0] | {status, error, exit_code}' <<< "$R"; tail -n 20 "$TMP/runner.err" | sed 's/^/     /'; }
 	S="$LAST/$(jq -r '.modules[0].outputs.sarif // "absent"' <<< "$R")"
@@ -184,6 +192,7 @@ if [[ -n "${IMG[opengrep]:-}" ]]; then
 	cp -R "$ROOT/modules/opengrep/testbed/." "$TMP/og-src/"
 	printf 'def f(x):\n    print(x)\n' > "$TMP/og-src/app/extra.py"
 	R=$(scan opengrep "$TMP/og-src" "[{\"slug\": \"interne\", \"engine\": \"opengrep\", \"version\": 2, \"sha256\": \"$GOOD\"}]")
+	last_scan
 	expect "opengrep + jeu de règles : analyse réussie" "$(jq -r '.status + "/" + (.modules[0].status // "?")' <<< "$R")" ok/ok
 	expect "opengrep + jeu de règles : version et empreinte relevées (G11)" "$(jq -c '.modules[0].rulesets' <<< "$R")" "[{\"slug\":\"interne\",\"version\":2,\"sha256\":\"$GOOD\"}]"
 	S="$LAST/$(jq -r '.modules[0].outputs.sarif // "absent"' <<< "$R")"
@@ -192,6 +201,7 @@ if [[ -n "${IMG[opengrep]:-}" ]]; then
 	[[ " $rules " == *" scanoria-python-subprocess-shell "* ]] && ok "opengrep : règles maison conservées" || ko "opengrep : règles maison absentes ($rules)"
 	BAD=$(put $'rules:\n  - id: casse\n    pattern: print(\n    message: x\n    languages: [python]\n    severity: WARNING\n')
 	R=$(scan opengrep "$TMP/og-src" "[{\"slug\": \"casse\", \"engine\": \"opengrep\", \"version\": 1, \"sha256\": \"$BAD\"}]")
+	last_scan
 	expect "opengrep + jeu invalide : module en erreur E_RULESET_INVALID (input), jamais un résultat vide" \
 		"$(jq -r '(.modules[0].status // "?") + " " + (.modules[0].error.code // "?") + " " + (.modules[0].error.class // "?")' <<< "$R")" "error E_RULESET_INVALID input"
 fi

@@ -449,6 +449,11 @@ SCORECARD_RISK = {
     "SAST": "info", "Security-Policy": "info", "CI-Tests": "info", "CII-Best-Practices": "info",
     "Contributors": "info", "License": "info", "SBOM": "info",
 }
+# Contrôles qui se jugent sur les seuls fichiers du dépôt (--local) : les autres
+# interrogent l'API de la forge ou des services en ligne (Fuzzing : OSS-Fuzz),
+# impossibles et interdits dans un conteneur sans réseau.
+SCORECARD_LOCAL_CHECKS = ("Binary-Artifacts", "Dangerous-Workflow", "Dependency-Update-Tool", "License",
+                          "Pinned-Dependencies", "Security-Policy", "Token-Permissions")
 THRESHOLD_RULE = "scorecard/score-below-threshold"
 SEV_LEVEL = {"critical": "error", "high": "error", "medium": "warning", "low": "note", "info": "note"}
 DETAIL_PATH_RE = re.compile(r"^(?:Warn|Info|Debug): .*?([A-Za-z0-9._/@+-]+\.[A-Za-z0-9]+):(\d+)")
@@ -546,7 +551,8 @@ def run_scorecard(args):
     min_score = parse_min_score(args)
     native = os.path.join(OUT, "scorecard.json")
     binary = os.environ.get("SCANORIA_SCORECARD_BIN") or "scorecard"
-    rc = run([binary, "--local", SRC, "--format", "json", "--show-details", "--output", native])
+    rc = run([binary, "--local", SRC, "--checks", ",".join(SCORECARD_LOCAL_CHECKS),
+              "--format", "json", "--show-details", "--output", native])
     if rc != 0 or not os.path.isfile(native):
         raise ToolError(RC_TOOL, "scorecard exited with code %d" % rc)
     doc = convert_scorecard(read_json(native), min_score)
