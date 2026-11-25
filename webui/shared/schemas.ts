@@ -59,6 +59,7 @@ export const REQUEST_TYPES = [
   'start-trial',
   'prefetch-images',
   'validate-ruleset',
+  'sign-attestation',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -87,6 +88,8 @@ export const RESULT_CODES = [
   // 0.7 (A, G4, contrat 34) : jeux de règles.
   'E_RULESET_INVALID', 'E_RULESET_MISSING', 'E_RULESET_NONE', 'E_RULESET_ENGINE_MISSING',
   'E_RELAY_UNAVAILABLE', 'E_RELAY_TOKEN',
+  'E_ATTEST_ENCODING', 'E_ATTEST_CANONICAL', 'E_ATTEST_DIGEST', 'E_ATTEST_STATEMENT',
+  'E_ATTEST_SUBJECT', 'E_ATTEST_SCAN', 'E_ATTEST_VERDICT', 'E_ATTEST_KEY',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 
@@ -249,6 +252,13 @@ export const requestParamSchemas = {
     version: z.string().regex(MODULE_VERSION_RE),
     trial_id: uuidSchema.optional(),
     action: z.enum(['start', 'abandon']).optional(),
+  }),
+  // 0.8 (D, J9, contrat 37) : déclaration in-toto canonique, relue et signée par le helper.
+  'sign-attestation': z.strictObject({
+    scan_id: uuidSchema,
+    kind: z.literal('attestation'),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    content_b64: z.string().min(4).max(87_384).regex(/^[A-Za-z0-9+/]+={0,2}$/),
   }),
 } satisfies Record<RequestType, z.ZodType>
 

@@ -14,7 +14,7 @@ import { dirname } from 'node:path'
 import type { Queryable } from './db'
 import { trimEnd } from './text'
 
-export const SECRET_KINDS = ['token', 'ssh-key', 'ai-token', 'app-key', 'webhook-secret', 'oauth-secret'] as const
+export const SECRET_KINDS = ['token', 'ssh-key', 'ai-token', 'app-key', 'webhook-secret', 'oauth-secret', 'deploy-token', 'registry-token'] as const
 export type SecretKind = (typeof SECRET_KINDS)[number]
 
 const VERSION = 0x01

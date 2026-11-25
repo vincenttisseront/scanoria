@@ -270,6 +270,18 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
       { engine: 'opengrep', sha256: 'a'.repeat(64), content: 'rules: []' },
     ],
   },
+  'sign-attestation': {
+    valid: [
+      { scan_id: '0b7c2f0e-9a4d-4c1e-8f3a-2d5b6c7d8e9f', kind: 'attestation', sha256: 'c'.repeat(64), content_b64: 'e30=' },
+    ],
+    invalid: [
+      {}, { scan_id: 'x', kind: 'attestation', sha256: 'c'.repeat(64), content_b64: 'e30=' },
+      { scan_id: '0b7c2f0e-9a4d-4c1e-8f3a-2d5b6c7d8e9f', kind: 'release-report', sha256: 'c'.repeat(64), content_b64: 'e30=' },
+      { scan_id: '0b7c2f0e-9a4d-4c1e-8f3a-2d5b6c7d8e9f', kind: 'attestation', sha256: 'c'.repeat(64), content_b64: 'e30=', key: 'x' },
+      { scan_id: '0b7c2f0e-9a4d-4c1e-8f3a-2d5b6c7d8e9f', kind: 'attestation', sha256: 'c'.repeat(64), content_b64: '{"a":1}' },
+      { scan_id: '0b7c2f0e-9a4d-4c1e-8f3a-2d5b6c7d8e9f', kind: 'attestation', sha256: 'c'.repeat(64), content_b64: 'A'.repeat(87_388) },
+    ],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {

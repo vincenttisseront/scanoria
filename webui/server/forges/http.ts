@@ -423,3 +423,6 @@ export async function withForgeRetry<T>(fn: () => Promise<T>): Promise<T> {
     }
   }
 }
+
+/** 0.8 (D) : même résolution contrôlée pour le client de registre OCI (server/deploy/registry.ts). */
+export { guardedLookup as forgeGuardedLookup }

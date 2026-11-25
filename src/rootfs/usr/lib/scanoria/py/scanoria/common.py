@@ -72,6 +72,7 @@ REQUEST_TYPES = (
     "self-sbom", "run-canaries", "start-trial",
     "prefetch-images",
     "validate-ruleset",
+    "sign-attestation",
 )
 REJECT_CODES = frozenset((
     "E_INVALID_NAME", "E_NOT_REGULAR_FILE", "E_BAD_OWNER", "E_TOO_LARGE", "E_INVALID_JSON",
@@ -98,6 +99,8 @@ ERROR_CODES = frozenset((
     "E_PREFETCH_FAILED", "E_PREFETCH_UNKNOWN_IMAGE",
     "E_RULESET_INVALID", "E_RULESET_MISSING", "E_RULESET_NONE", "E_RULESET_ENGINE_MISSING",
     "E_RELAY_UNAVAILABLE", "E_RELAY_TOKEN",
+    "E_ATTEST_ENCODING", "E_ATTEST_CANONICAL", "E_ATTEST_DIGEST", "E_ATTEST_STATEMENT",
+    "E_ATTEST_SUBJECT", "E_ATTEST_SCAN", "E_ATTEST_VERDICT", "E_ATTEST_KEY",
 ))
 ALL_CODES = frozenset(("OK",)) | REJECT_CODES | ERROR_CODES
 
