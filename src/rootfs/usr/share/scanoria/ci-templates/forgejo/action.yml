@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Action composite Scanoria pour Forgejo Actions (J3, 0.8) : une ligne d'appel qui
+# enveloppe scanoria-scan (verdict, téléversement des résultats, OIDC par
+# défaut). À publier dans un dépôt d'actions de l'entreprise avec scanoria-ci.sh,
+# puis à appeler par l'empreinte de son commit (uses: <dépôt>@<sha>) ; le client
+# téléchargé depuis l'appliance est vérifié par son empreinte (client-sha256).
+# La PR d'intégration (J2) n'en dépend pas : elle copie scanoria-ci.sh dans le dépôt.
+name: Scanoria
+description: Analyse par l'appliance Scanoria et verdict du quality gate
+inputs:
+  url:
+    description: "Adresse de l'appliance (https://…)"
+    required: false
+    default: ""
+  project:
+    description: "Identifiant du projet Scanoria"
+    required: false
+    default: ""
+  mode:
+    description: "push (la CI appelle l'appliance) ou pull (attente du statut scanoria/release-gate)"
+    required: false
+    default: push
+  profile:
+    description: "Profil d'analyse (défaut : celui du déclencheur)"
+    required: false
+    default: ""
+  ref:
+    description: "Ref analysée (défaut : branche ou tag courant)"
+    required: false
+    default: ""
+  cacert:
+    description: "Fichier PEM de l'AC de l'appliance, si le runner ne la connaît pas"
+    required: false
+    default: ""
+  client-sha256:
+    description: "Empreinte attendue du client scanoria-scan"
+    required: false
+    default: ""
+  sarif:
+    description: "Fichiers SARIF ou CycloneDX à téléverser (séparés par des espaces)"
+    required: false
+    default: ""
+  timeout:
+    description: "Délai d'attente du verdict, en secondes"
+    required: false
+    default: "3600"
+  token:
+    description: "Jeton d'API du projet, seulement si OIDC est indisponible (passer un secret)"
+    required: false
+    default: ""
+outputs:
+  verdict:
+    description: "passed, failed, inconclusive ou error"
+    value: ${{ steps.scan.outputs.verdict }}
+runs:
+  using: composite
+  steps:
+    - id: scan
+      shell: sh
+      env:
+        SCANORIA_URL: ${{ inputs.url }}
+        SCANORIA_PROJECT: ${{ inputs.project }}
+        SCANORIA_MODE: ${{ inputs.mode }}
+        SCANORIA_PROFILE: ${{ inputs.profile }}
+        SCANORIA_REF: ${{ inputs.ref }}
+        SCANORIA_CACERT: ${{ inputs.cacert }}
+        SCANORIA_CLIENT_SHA256: ${{ inputs.client-sha256 }}
+        SCANORIA_SARIF: ${{ inputs.sarif }}
+        SCANORIA_TIMEOUT: ${{ inputs.timeout }}
+        SCANORIA_TOKEN: ${{ inputs.token }}
+        SCANORIA_FORGE_TOKEN: ${{ github.token }}
+      run: sh "${FORGEJO_ACTION_PATH:-$GITHUB_ACTION_PATH}/scanoria-ci.sh"

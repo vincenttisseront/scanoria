@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Workflow Scanoria (J3, 0.8), ajouté par la PR d'intégration (J2) dans
+# .github/workflows/scanoria.yml, avec l'étape commune dans .github/scanoria/ :
+# épinglés par le commit du dépôt lui-même, le client téléchargé depuis
+# l'appliance est vérifié par son empreinte (client-sha256).
+# Sans secret : jeton OIDC de la CI (id-token: write), vérifié par l'appliance.
+name: scanoria
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+permissions: {}
+concurrency:
+  group: scanoria-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  scanoria:
+    name: Scanoria
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    permissions:
+      contents: read # lecture du script de l'étape (sparse-checkout)
+      id-token: write # jeton OIDC présenté à l'appliance à la place d'un secret (J4)
+      statuses: read # mode tiré : lecture du statut scanoria/release-gate
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scanoria
+      - name: Scanoria
+        env:
+          SCANORIA_URL: https://analyse.exemple.test
+          SCANORIA_PROJECT: 00000000-0000-4000-8000-000000000000
+          SCANORIA_MODE: push
+          SCANORIA_CLIENT_SHA256: ""
+          SCANORIA_FORGE_TOKEN: ${{ github.token }}
+        run: sh .github/scanoria/scanoria-ci.sh

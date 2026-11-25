@@ -13,13 +13,24 @@
 #   SCANORIA_TOKEN=scn_… scanoria-scan upload <résultats.sarif|sbom.cdx.json> --url … \
 #       --project <id> [--ref <réf>] [--commit <sha>] [--tool <nom>] [--tool-version <v>] \
 #       [--category <catégorie>]
+#   scanoria-scan --oidc --url … --project <id> --ref <réf> --wait   (0.8, J4 : sans secret)
 #
 # « upload » (0.6, J6) téléverse des résultats produits ailleurs (SARIF 2.1.0 ou
 # CycloneDX 1.5/1.6, 32 Mo au plus) : la console les valide, crée une analyse
 # « externe », évalue le quality gate et le client en affiche le verdict.
 #
 # Le jeton est lu dans SCANORIA_TOKEN, jamais en argument (il apparaîtrait
-# dans la liste des processus et dans les journaux de CI). Les options ont
+# dans la liste des processus et dans les journaux de CI).
+#
+# --oidc (0.8, J4) : aucun secret à créer. Le client présente le jeton OIDC de
+# la CI, que l'appliance vérifie (signature de la forge, dépôt et ref liés au
+# projet). Il le lit, jamais en argument :
+#   - SCANORIA_ID_TOKEN s'il est défini (GitLab CI : id_tokens, audience scanoria) ;
+#   - sinon ACTIONS_ID_TOKEN_REQUEST_URL et ACTIONS_ID_TOKEN_REQUEST_TOKEN
+#     (GitHub Actions avec « id-token: write », Forgejo Actions avec
+#     « enable-openid-connect: true ») : jeton demandé pour l'audience
+#     SCANORIA_OIDC_AUDIENCE (« scanoria » par défaut).
+# SCANORIA_OIDC=1 équivaut à --oidc. Les options ont
 # aussi une variable : SCANORIA_URL, SCANORIA_PROJECT, SCANORIA_REF,
 # SCANORIA_PROFILE, SCANORIA_CACERT, SCANORIA_TIMEOUT ; SCANORIA_INTERVAL fixe
 # le premier intervalle d'attente (5 s par défaut).
@@ -46,6 +57,8 @@ TOOL=
 TOOL_VERSION=
 CATEGORY=
 QUIET=0
+OIDC=${SCANORIA_OIDC:-0}
+AUDIENCE=${SCANORIA_OIDC_AUDIENCE:-scanoria}
 case ${SCANORIA_LANG:-${LC_ALL:-${LANG:-}}} in
   en*) L=en ;;
   *) L=fr ;;
@@ -72,7 +85,8 @@ scanoria-scan --url URL (--project ID --ref REF [--profile P] | --scan ID)
               [--wait] [--timeout S] [--cacert FILE] [--quiet]
 scanoria-scan upload FILE --url URL --project ID [--ref REF] [--commit SHA]
               [--tool NAME] [--tool-version V] [--category C] [--cacert FILE] [--quiet]
-Token: SCANORIA_TOKEN environment variable (never an argument).
+scanoria-scan --oidc ...   (CI OIDC token instead of SCANORIA_TOKEN)
+Token: SCANORIA_TOKEN environment variable (never an argument), or --oidc.
 Exit codes: 0 passed, 1 failed, 2 inconclusive, 3 usage/access error.
 EOF
 }
@@ -101,6 +115,8 @@ while [ $# -gt 0 ]; do
     --timeout) need_value "$@"; TIMEOUT=$2; shift 2 ;;
     --cacert) need_value "$@"; CACERT=$2; shift 2 ;;
     --wait) WAIT=1; shift ;;
+    --oidc) OIDC=1; shift ;;
+    --oidc-audience) need_value "$@"; AUDIENCE=$2; shift 2 ;;
     --quiet|-q) QUIET=1; shift ;;
     --token|--token=*) die 3 "le jeton se passe par la variable SCANORIA_TOKEN, jamais en argument" "pass the token in SCANORIA_TOKEN, never as an argument" ;;
     -h|--help) usage; exit 0 ;;
@@ -113,8 +129,17 @@ command -v jq >/dev/null 2>&1 || die 3 "jq est requis" "jq is required"
 
 TOKEN=${SCANORIA_TOKEN:-}
 unset SCANORIA_TOKEN
-printf '%s' "$TOKEN" | grep -Eq '^scn_[A-Za-z0-9]{40}$' \
-  || die 3 "SCANORIA_TOKEN absent ou mal formé (scn_ suivi de 40 caractères)" "SCANORIA_TOKEN missing or malformed (scn_ followed by 40 characters)"
+case $OIDC in
+  1|true|yes) OIDC=1 ;;
+  *) OIDC=0 ;;
+esac
+if [ "$OIDC" = 1 ]; then
+  TOKEN=
+  printf '%s' "$AUDIENCE" | grep -Eq '^[A-Za-z0-9._:/-]{1,255}$' || die 3 "audience OIDC invalide" "invalid OIDC audience"
+else
+  printf '%s' "$TOKEN" | grep -Eq '^scn_[A-Za-z0-9]{40}$' \
+    || die 3 "SCANORIA_TOKEN absent ou mal formé (scn_ suivi de 40 caractères), ou utilisez --oidc" "SCANORIA_TOKEN missing or malformed (scn_ followed by 40 characters), or use --oidc"
+fi
 
 URL=${URL%/}
 case $URL in
@@ -150,6 +175,38 @@ trap 'exit 3' HUP INT TERM
 # En-tête d'autorisation dans un fichier 0600 lu par curl (-H @fichier) : le
 # jeton n'apparaît jamais dans les arguments d'un processus.
 umask 077
+if [ "$OIDC" = 1 ]; then
+  # Jeton OIDC de la CI : variable de GitLab (id_tokens), ou demandé au
+  # service de jetons de GitHub ou Forgejo Actions (URL et jeton de requête
+  # fournis par le runner). Il ne passe jamais en argument d'un processus.
+  if [ -n "${SCANORIA_ID_TOKEN:-}" ]; then
+    TOKEN=$SCANORIA_ID_TOKEN
+  elif [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+    case $ACTIONS_ID_TOKEN_REQUEST_URL in
+      https://*) ;;
+      http://*) [ "${SCANORIA_ALLOW_HTTP:-0}" = 1 ] || die 3 "service de jetons OIDC en http:// refusé" "OIDC token service over http:// refused" ;;
+      *) die 3 "ACTIONS_ID_TOKEN_REQUEST_URL invalide" "invalid ACTIONS_ID_TOKEN_REQUEST_URL" ;;
+    esac
+    printf 'Authorization: Bearer %s\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" > "$TMP/oidc-auth"
+    case $ACTIONS_ID_TOKEN_REQUEST_URL in
+      *\?*) sep='&' ;;
+      *) sep='?' ;;
+    esac
+    aud=$(jq -rn --arg a "$AUDIENCE" '$a | @uri')
+    set -- -sS --max-time 30 -H @"$TMP/oidc-auth" -H 'Accept: application/json' -o "$TMP/oidc" -w '%{http_code}'
+    if [ -n "${SCANORIA_OIDC_CACERT:-}" ]; then set -- "$@" --cacert "$SCANORIA_OIDC_CACERT"; fi
+    o_code=$(curl "$@" "$ACTIONS_ID_TOKEN_REQUEST_URL${sep}audience=$aud" 2>"$TMP/err") || o_code=000
+    rm -f "$TMP/oidc-auth"
+    [ "$o_code" = 200 ] || die 3 "jeton OIDC non obtenu de la CI (HTTP $o_code) : droit id-token ou enable-openid-connect manquant ?" "could not get the CI OIDC token (HTTP $o_code): missing id-token permission or enable-openid-connect?"
+    TOKEN=$(jq -r '.value // empty' "$TMP/oidc" 2>/dev/null)
+    rm -f "$TMP/oidc"
+  else
+    die 3 "--oidc : aucun jeton OIDC fourni par la CI (SCANORIA_ID_TOKEN, ou ACTIONS_ID_TOKEN_REQUEST_URL et _TOKEN)" "--oidc: no OIDC token provided by the CI (SCANORIA_ID_TOKEN, or ACTIONS_ID_TOKEN_REQUEST_URL and _TOKEN)"
+  fi
+  unset SCANORIA_ID_TOKEN
+  [ "${#TOKEN}" -le 8192 ] && printf '%s' "$TOKEN" | grep -Eq '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' \
+    || die 3 "jeton OIDC mal formé" "malformed OIDC token"
+fi
 printf 'Authorization: Bearer %s\n' "$TOKEN" > "$TMP/auth"
 TOKEN=
 
@@ -174,8 +231,18 @@ api_error() {
   code=$(jq -r '.data.code // empty' "$TMP/body" 2>/dev/null)
   case $1 in
     000) say "scanoria-scan: console injoignable ($(head -c 200 "$TMP/err"))" "scanoria-scan: console unreachable ($(head -c 200 "$TMP/err"))" >&2 ;;
-    401) say "scanoria-scan: jeton refusé (${code:-401}) : invalide, révoqué ou expiré" "scanoria-scan: token refused (${code:-401}): invalid, revoked or expired" >&2 ;;
-    403) say "scanoria-scan: accès refusé (${code:-403}) : le jeton appartient-il à ce projet ?" "scanoria-scan: access denied (${code:-403}): does the token belong to this project?" >&2 ;;
+    401)
+      if [ "$OIDC" = 1 ]; then
+        say "scanoria-scan: jeton OIDC refusé (${code:-401}) : émetteur, audience, signature ou validité (journal d'audit de la console)" "scanoria-scan: OIDC token refused (${code:-401}): issuer, audience, signature or validity (console audit log)" >&2
+      else
+        say "scanoria-scan: jeton refusé (${code:-401}) : invalide, révoqué ou expiré" "scanoria-scan: token refused (${code:-401}): invalid, revoked or expired" >&2
+      fi ;;
+    403)
+      if [ "$OIDC" = 1 ]; then
+        say "scanoria-scan: accès refusé (${code:-403}) : aucune liaison OIDC de ce dépôt et de cette ref vers ce projet" "scanoria-scan: access denied (${code:-403}): no OIDC binding from this repository and ref to this project" >&2
+      else
+        say "scanoria-scan: accès refusé (${code:-403}) : le jeton appartient-il à ce projet ?" "scanoria-scan: access denied (${code:-403}): does the token belong to this project?" >&2
+      fi ;;
     404) say "scanoria-scan: projet ou analyse introuvable" "scanoria-scan: project or scan not found" >&2 ;;
     429) say "scanoria-scan: trop de requêtes, réessayez plus tard" "scanoria-scan: too many requests, retry later" >&2 ;;
     *) say "scanoria-scan: erreur HTTP $1 ${code}" "scanoria-scan: HTTP error $1 ${code}" >&2 ;;
