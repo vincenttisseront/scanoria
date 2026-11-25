@@ -784,9 +784,50 @@ def health(version):
         time.sleep(2)
     if not ok:
         raise Fail("E_INTERNAL", "console health check failed")
-    r = common.run("scanoria-selftest", ["--json", "--quick"], timeout=300)
-    if r.returncode != 0:
-        raise Fail("E_INTERNAL", "selftest --quick failed after update")
+    selftest_until_pass()
+
+
+SELFTEST_RETRY_S = 10
+SELFTEST_WAIT_S = 180
+
+
+def selftest_failures(stdout):
+    """Contrôles en échec d'un rapport JSON de scanoria-selftest (« id: message »)."""
+    try:
+        rep = common.loads_strict(stdout)
+    except common.JsonError:
+        return []
+    checks = rep.get("checks") if isinstance(rep, dict) else None
+    out = []
+    for c in checks if isinstance(checks, list) else []:
+        if isinstance(c, dict) and c.get("status") == "fail":
+            out.append("%s: %s" % (str(c.get("id"))[:64], str(c.get("message"))[:200]))
+    return out
+
+
+def selftest_until_pass():
+    """scanoria-selftest --quick, rejoué jusqu'au succès ou au délai de santé.
+
+    Juste après le redémarrage, le worker et le runner peuvent ne pas avoir
+    encore publié leur signe de vie (worker.alive, runner.alive) : un seul
+    essai suffisait à faire échouer la mise à jour, puis le retour arrière
+    lui-même (0.5.0 vers 0.7.0, E_ROLLBACK_FAILED). Les contrôles en échec sont
+    journalisés et repris dans le message, sinon rien ne dit lequel a échoué."""
+    wait = health_timeout() if os.environ.get("SCANORIA_TEST_HEALTH_TIMEOUT") and common.TEST_ROOT \
+        else SELFTEST_WAIT_S
+    end = time.monotonic() + wait
+    while True:
+        r = common.run("scanoria-selftest", ["--json", "--quick"], timeout=300)
+        if r.returncode == 0:
+            return
+        failed = selftest_failures(r.stdout)
+        left = end - time.monotonic()
+        if left <= 0:
+            break
+        time.sleep(min(SELFTEST_RETRY_S, max(1, left)))
+    common.log("selftest --quick failed: %s" % ("; ".join(failed) or "exit code %s" % r.returncode))
+    ids = ", ".join(f.split(":", 1)[0] for f in failed[:6])
+    raise Fail("E_INTERNAL", "selftest --quick failed after update" + (" (%s)" % ids if ids else ""))
 
 
 def write_alert(message, version):

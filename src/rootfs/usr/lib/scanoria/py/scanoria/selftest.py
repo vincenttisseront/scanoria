@@ -407,7 +407,10 @@ def check_ai(rep):
     status = _json(aiendpoint.STATUS_FILE) or {}
     changed = bool((status.get("resolution") or {}).get("changed"))
     if not active:
-        rep.add("ai.alive", "fail", "AI connector enabled but scanoria-ai is not running")
+        # Avertissement, jamais un échec : l'appliance fonctionne à l'identique
+        # sans l'IA (CLAUDE.md § 1, § 3.5). Un échec ici faisait annuler une
+        # mise à jour, puis échouer son retour arrière (0.5.0 → 0.7.0).
+        rep.add("ai.alive", "warn", "AI connector enabled but scanoria-ai is not running")
     elif changed:
         rep.add("ai.alive", "warn", "AI server name now resolves differently: confirm it again in the console",
                 {"pinned": conf.get("addresses", [])})
