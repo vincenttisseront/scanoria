@@ -53,9 +53,11 @@ peut être supprimé.
 
 Une mise à jour n'installe aucun paquet système. Sur une appliance installée
 depuis une ISO antérieure à la 0.7.1, si `scanoria-selftest` signale
-`podman.dns`, il faut donc, en root, lancer `apt install aardvark-dns`, puis
-réinstaller depuis le catalogue le module concerné (par exemple
-`dtrack-upload`). Hors ligne, on installe le paquet `aardvark-dns` de la
+`podman.dns`, il faut donc, en root, lancer `apt install aardvark-dns`. Il
+faut ensuite redémarrer les modules « service » déjà installés pour que leurs
+noms soient enregistrés (`systemctl restart scanoria-mod-<id>.service`, ou
+redémarrer l'appliance), puis réinstaller depuis le catalogue le module en
+échec (par exemple `dtrack-upload`). Hors ligne, on installe le paquet `aardvark-dns` de la
 distribution de l'appliance avec `apt install ./aardvark-dns_*.deb`.
 
 ## 0.7.0 — 2026-11-25
