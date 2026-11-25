@@ -31,10 +31,14 @@ export const ConnectorBody = z.strictObject({
   /** Nouveau jeton (chaîne), retrait (null), ou jeton actuel conservé (absent). */
   token: z.string().min(8).max(4096).regex(/^[\x21-\x7E]+$/).nullable().optional(),
   ca_pem: z.string().min(64).max(16384).regex(CERT_PEM_RE).nullable().optional(),
+  /** https seulement, sans AC : certificat du serveur accepté sans vérification (défaut : vérifié). */
+  skip_tls_verify: z.boolean().optional(),
   /** Modale d'activation lue et confirmée (sortie de données, § 3.5). */
   confirmed: z.literal(true),
 }).refine(b => !(b.url.startsWith('http:') && typeof b.token === 'string'), { message: 'token requires https', path: ['token'] })
   .refine(b => !b.url.startsWith('http:') || b.allow_insecure === true, { message: 'http requires allow_insecure', path: ['allow_insecure'] })
+  .refine(b => !(b.skip_tls_verify && b.url.startsWith('http:')), { message: 'skip_tls_verify requires https', path: ['skip_tls_verify'] })
+  .refine(b => !(b.skip_tls_verify && b.ca_pem), { message: 'skip_tls_verify excludes ca_pem', path: ['skip_tls_verify'] })
 export type ConnectorBody = z.infer<typeof ConnectorBody>
 
 /**
@@ -260,9 +264,10 @@ export async function aiStatus(db: Queryable, paths: AiPaths = aiPaths()) {
   const { url, host, port, addresses, insecure, token, ca, pinned_at } = endpoint.enabled
     ? endpoint
     : { url: null, host: null, port: null, addresses: [], insecure: false, token: false, ca: false, pinned_at: null }
+  const tls_verify = !endpoint.enabled || endpoint.tls_verify !== false
   return {
     enabled: endpoint.enabled,
-    endpoint: { url, host, port, addresses, insecure, token, ca, pinned_at },
+    endpoint: { url, host, port, addresses, insecure, token, ca, tls_verify, pinned_at },
     token_stored: settings.tokenCredentialId !== null,
     check,
     probe: probeRow

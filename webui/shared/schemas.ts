@@ -184,6 +184,8 @@ export const requestParamSchemas = {
       allow_insecure: z.boolean().optional(),
       token: z.boolean().optional(),
       ca_pem: z.string().min(64).max(16384).regex(CERT_PEM_RE).optional(),
+      /** https seulement, jamais avec ca_pem : certificat du serveur accepté sans vérification. */
+      skip_tls_verify: z.boolean().optional(),
     }),
     z.strictObject({ enabled: z.literal(false) }),
   ]),

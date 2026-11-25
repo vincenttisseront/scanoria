@@ -671,6 +671,12 @@ scanoria-ai (scanoria-ai, Node) ─ file ai_tasks ─HTTPS─▶ Ollama externe 
   (`{slots, busy, updated_at}`, root:scanoria 0640), bornée par la RAM.
 - **scanoria-ai** : service sans privilège, utilisateur `scanoria-ai`, seul
   autorisé à sortir vers le serveur Ollama (règle nftables `meta skuid`).
+  En https, le certificat du serveur est vérifié (AC du système, plus l'AC
+  fournie le cas échéant). L'administrateur peut désactiver cette vérification
+  pour un certificat autosigné (`skip_tls_verify` de `set-ai-endpoint`, champ
+  `tls_verify: false` de `/etc/scanoria/ai.json`) : https seulement, jamais
+  avec une AC, signalé dans le formulaire, la modale d'activation et l'état du
+  connecteur. Le nom et les adresses restent épinglés.
 
 ### 12.2 Arborescence ajoutée
 

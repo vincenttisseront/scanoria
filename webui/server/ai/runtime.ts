@@ -25,7 +25,8 @@ export interface RuntimeOptions {
 
 /** Client Ollama du service ; le jeton est lu avec la seule clé copiée dans runtimeDir (ai-token.key). */
 export async function clientFor(db: Queryable, endpoint: ActiveEndpoint, runtimeDir: string, tokens: TokenStore = runtimeTokenStore(runtimeDir)): Promise<OllamaLike> {
-  const caPem = endpoint.ca ? await readFile(join(runtimeDir, 'ca.pem'), 'utf8') : null
+  const verifyTls = endpoint.tls_verify !== false
+  const caPem = verifyTls && endpoint.ca ? await readFile(join(runtimeDir, 'ca.pem'), 'utf8') : null
   let token: string | null = null
   if (endpoint.token) {
     const { tokenCredentialId } = await loadAiSettings(db)
@@ -33,7 +34,7 @@ export async function clientFor(db: Queryable, endpoint: ActiveEndpoint, runtime
     token = await tokens.read(db, tokenCredentialId)
   }
   return new OllamaClient({
-    scheme: endpoint.scheme, host: endpoint.host, port: endpoint.port, addresses: endpoint.addresses, token, caPem,
+    scheme: endpoint.scheme, host: endpoint.host, port: endpoint.port, addresses: endpoint.addresses, token, caPem, verifyTls,
   })
 }
 

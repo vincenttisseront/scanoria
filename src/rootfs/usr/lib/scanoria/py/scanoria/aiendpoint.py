@@ -261,12 +261,20 @@ def act_set_ai_endpoint(c):
         if scheme != "https":
             raise Fail("E_AI_URL", "a CA is only meaningful with https")
         check_ca(ca)
+    # Vérification du certificat désactivée (certificat autosigné) : https seulement,
+    # et jamais avec une AC fournie (elle ne servirait à rien et masquerait l'erreur).
+    skip_verify = bool(prm.get("skip_tls_verify", False))
+    if skip_verify:
+        if scheme != "https":
+            raise Fail("E_AI_URL", "skipping certificate verification is only meaningful with https")
+        if ca is not None:
+            raise Fail("E_AI_URL", "a CA cannot be combined with skipping certificate verification")
     common.set_step("pin")
     addresses = resolve(host, literal, timeout=min(20, c.left()))
     conf = {
         "version": 1, "enabled": True, "url": prm["url"].rstrip("/"), "scheme": scheme,
         "host": host, "port": port, "addresses": addresses, "insecure": scheme == "http",
-        "token": token, "ca": ca is not None, "literal": literal is not None,
+        "token": token, "ca": ca is not None, "tls_verify": not skip_verify, "literal": literal is not None,
         "pinned_at": common.iso(common.now()),
     }
     if not schema.load("schemas", "ai-endpoint").valid(conf):
@@ -291,7 +299,8 @@ def act_set_ai_endpoint(c):
     common.run("systemctl", ["restart", "scanoria-ai.service"], timeout=c.left())
     write_status(check_status(conf))
     return {"enabled": True, "url": conf["url"], "host": host, "port": port,
-            "addresses": addresses, "insecure": conf["insecure"], "token": token, "ca": conf["ca"]}
+            "addresses": addresses, "insecure": conf["insecure"], "token": token, "ca": conf["ca"],
+            "tls_verify": conf["tls_verify"]}
 
 
 # --------------------------------------------------------------------------

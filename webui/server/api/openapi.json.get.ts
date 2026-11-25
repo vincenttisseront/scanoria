@@ -249,6 +249,7 @@ export default defineEventHandler(async () => {
             allow_insecure: { type: 'boolean' },
             token: { type: ['string', 'null'], maxLength: 4096 },
             ca_pem: { type: ['string', 'null'], maxLength: 16384 },
+            skip_tls_verify: { type: 'boolean', description: 'https only, not with ca_pem: accept the server certificate without verifying it (self-signed). Default: verified' },
             confirmed: { const: true },
           },
         },
