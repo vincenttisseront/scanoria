@@ -28,7 +28,7 @@ license:
 upstream:
   homepage: https://opengrep.dev
   source: https://github.com/opengrep/opengrep/releases/tag/v2.0.0
-image_pending: true
+image: ghcr.io/vincenttisseront/scanoria-opengrep@sha256:317b8788e39b5bd95de3ff6c9b9f7afb7d6eb330106da06c4f6957ccce720141
 version: "2.0.0"
 resources: { min_ram_mb: 2048, min_cpu: 1, disk_mb: 600 }
 hostname: null

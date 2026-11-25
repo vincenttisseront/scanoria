@@ -37,7 +37,7 @@ license:
 upstream:
   homepage: https://scorecard.dev
   source: https://github.com/ossf/scorecard
-image_pending: true
+image: ghcr.io/vincenttisseront/scanoria-scorecard@sha256:34203ebbb7efd8926a842a46e9437c6ddaae6005a9e7d897aba6d0798fff8de1
 version: "5.7.0"
 resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 200 }
 hostname: null
