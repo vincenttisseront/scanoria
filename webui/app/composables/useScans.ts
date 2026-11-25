@@ -70,6 +70,8 @@ export interface CoverageGap {
   reason?: string
   path?: string | null
   detail?: string | null
+  /** 0.7 : code d'erreur d'un module d'IA en échec (ai-module-failed). */
+  code?: string | null
 }
 
 export interface ScanDetail extends ScanSummary {

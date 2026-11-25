@@ -45,7 +45,7 @@ export interface AiTaskRequest {
 
 export interface Integrations {
   decryptSecret: (db: Queryable, credentialId: string) => Promise<{ kind: string, value: string, username: string | null | undefined }>
-  ingestModuleOutputs: (db: pg.Pool, args: { scanId: string, moduleId: string, resultDir: string, outputs: Record<string, string> }) => Promise<IngestOutcome>
+  ingestModuleOutputs: (db: pg.Pool, args: { scanId: string, moduleId: string, resultDir: string, outputs: Record<string, string>, aiRelay?: boolean }) => Promise<IngestOutcome>
   finalizeScanFindings: (db: pg.Pool, scanId: string, opts: { complete: boolean }) => Promise<unknown>
   evaluateGate: (db: pg.Pool, scanId: string) => Promise<VerdictDetails>
   enqueueAiTask: (db: Queryable, req: AiTaskRequest) => Promise<string | null>

@@ -530,6 +530,35 @@ jobs:
       - name: tests/b26-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b26-live.sh
 
+  relay-live:
+    # Relais IA de la 0.7 (chantier E, contrat 31) : vrai relais de scanoria-ai
+    # (esbuild) en HTTPS sur son socket Unix, certificat ai-relay de la vraie AC
+    # interne, faux Ollama en mémoire, vrai runner et vrai podman ; module de
+    # test en --network=none à travers le pont (tests/b35-live.sh).
+    name: relay-live (relais IA, pont et podman réels, b35-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+      - name: Dépendances (podman, jq, openssl, console)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark python3-yaml openssl
+          sudo podman --version
+          cd webui && npm ci --ignore-scripts
+      # Machine jetable : runner en root avec le vrai podman (§ 6.4).
+      - name: tests/b35-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b35-live.sh
+
   modelscan-live:
     # Module modelscan (chantier E de la 0.6, K8) : banc d'essai (F12) et
     # analyse d'un dépôt piégé par le vrai runner avec le vrai podman, dans
@@ -606,7 +635,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live, forges-live, sast-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live, forges-live, relay-live, sast-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

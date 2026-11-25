@@ -167,7 +167,9 @@
         "E_RULESET_INVALID",
         "E_RULESET_MISSING",
         "E_RULESET_NONE",
-        "E_RULESET_ENGINE_MISSING"
+        "E_RULESET_ENGINE_MISSING",
+        "E_RELAY_UNAVAILABLE",
+        "E_RELAY_TOKEN"
       ]
     },
     "message": {

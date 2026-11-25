@@ -21,6 +21,8 @@ export type CoverageGap
     // 0.6 (chantier D) : module sans fichier concerné (V6, contrat 23) ; SBOM attendu, dépôt lu (V3).
     | { kind: 'not-applicable', code: 'not-applicable', module: string, reason: 'no-matching-files' }
     | { kind: 'sbom-fallback', module: string }
+    // 0.7 (§ 3.5) : module d'analyse par IA en échec (relais, modèle, sortie) : hors verdict, mais signalé (G15).
+    | { kind: 'ai-module-failed', module: string, code: string }
 
 export function scansDir(): string {
   return process.env.SCANORIA_SCANS_DIR || '/var/lib/scanoria/scans'

@@ -698,6 +698,12 @@ def cmd_scheduled(job):
             dtmirror.refresh_tls()
         except Fail as e:
             common.log("feeds mirror certificate not renewed: %s" % e.message)
+        # 0.7 (contrat 31) : certificat du relais IA ; scanoria-ai le relit à son redémarrage.
+        try:
+            from . import aiendpoint
+            aiendpoint.refresh_relay_certificate()
+        except Fail as e:
+            common.log("AI relay certificate not renewed: %s" % e.message)
         if tls_mode() != "internal":
             return 0
         return cmd_exec("timer", "issue-certificate", '{"force": false}')

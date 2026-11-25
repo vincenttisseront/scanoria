@@ -34,7 +34,7 @@ export interface FindingFilter {
   /** F16 (0.5) : un résultat par problème (groupe de résultats recoupés). */
   grouped?: boolean
   /** J6 (0.6) : origine du résultat. */
-  origin?: 'module' | 'external'
+  origin?: 'module' | 'external' | 'ai'
   /** F6 (0.7) : un responsable lu dans CODEOWNERS. */
   owner?: string
   /** F6 (0.7) : « Mes résultats », compte et ses formes directes (ownerAliases). */
@@ -74,7 +74,7 @@ export interface FindingRow {
   kev_added: string | null
   /** F16 (0.5) : groupe de résultats recoupés (null sans clé de recoupement). */
   /** J6 (0.6) : origine, et source du dernier téléversement d'un résultat externe. */
-  origin: 'module' | 'external'
+  origin: 'module' | 'external' | 'ai'
   external_source: { tool: string, version: string | null, format: string, uploaded_via: string } | null
   correlation_key: string | null
   group?: FindingGroup | null

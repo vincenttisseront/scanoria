@@ -34,6 +34,7 @@ export type ApiErrorCode
     | 'E_MALICIOUS' | 'E_NOT_SECRET' | 'E_AI_STALE'
     | 'E_NOT_PERMANENT' | 'E_BACKUP_NOT_FOUND' | 'E_BACKUP_INVALID'
     | 'E_PRECONDITION' | 'E_GONE'
+    | 'E_NOT_AI' | 'E_AI_CONFIRMED'
     // 0.7 (B) : circuit des exceptions (F5, J15) et tri en masse (F4).
     | 'E_LOCKED' | 'E_NOT_PENDING' | 'E_DECIDER_NOT_ALLOWED' | 'E_EXPIRED'
     // Suivi 0.7 : faux positif refusé à l'auteur du commit et aux comptes non humains.

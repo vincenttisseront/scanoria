@@ -169,6 +169,8 @@ export const scanResultSchema = z.strictObject({
     sbom_fallback: z.boolean().optional(),
     // 0.7 (A, contrat 34) : jeux de règles montés sous /rules.
     rulesets: z.array(resultRuleset).max(16).optional(),
+    // 0.7 (contrat 32) : module relié au relais IA (manifeste réellement lancé).
+    ai_relay: z.boolean().optional(),
   })).max(64),
 })
 export type ScanResult = z.infer<typeof scanResultSchema>

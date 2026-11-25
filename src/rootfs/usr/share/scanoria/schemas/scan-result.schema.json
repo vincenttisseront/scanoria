@@ -418,6 +418,10 @@
                 "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
               }
             }
+          },
+          "ai_relay": {
+            "type": "boolean",
+            "description": "0.7 (contrat 32) : module relié au relais IA ; ses résultats sont marqués « IA », hors verdict jusqu'à confirmation."
           }
         }
       }

@@ -86,6 +86,7 @@ export const RESULT_CODES = [
   'E_PREFETCH_FAILED', 'E_PREFETCH_UNKNOWN_IMAGE',
   // 0.7 (A, G4, contrat 34) : jeux de règles.
   'E_RULESET_INVALID', 'E_RULESET_MISSING', 'E_RULESET_NONE', 'E_RULESET_ENGINE_MISSING',
+  'E_RELAY_UNAVAILABLE', 'E_RELAY_TOKEN',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 
