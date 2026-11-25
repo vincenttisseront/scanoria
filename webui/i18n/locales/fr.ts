@@ -1198,6 +1198,14 @@ export default {
     },
   },
   scans: {
+    agents: {
+      title: 'Workflows d’agents IA',
+      help: 'Relevés par Agentic Radar {version}, sans exécution ni appel de modèle.',
+      agents: 'Agents',
+      guardrail: 'garde-fou',
+      graph: 'Graphe : {nodes} nœud(s), {edges} arête(s).',
+      truncated: 'Inventaire tronqué : trop de workflows.',
+    },
     nav: 'Analyses',
     title: 'Analyses',
     project: 'Projet',

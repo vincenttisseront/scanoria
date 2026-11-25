@@ -552,10 +552,32 @@ jobs:
       - name: tests/b29-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b29-live.sh
 
+  ia-modules-live:
+    # Modules d'analyse du code IA de la 0.7 (chantier F, K5–K7) : image
+    # construite depuis modules/<id>/image (pas d'image amont), puis banc
+    # d'essai confiné comme sur l'appliance avec le vrai podman (tests/b36-live.sh).
+    name: ia-modules-live (agentic-radar, mcp-scanner, skill-scanner, b36-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Dépendances (podman, jq, python3-yaml, python3-jsonschema)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq python3-yaml python3-jsonschema curl
+          podman --version
+      - name: tests/b36-live.sh
+        run: bash tests/b36-live.sh
+
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live, ia-modules-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

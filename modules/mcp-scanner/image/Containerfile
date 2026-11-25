@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Image du module mcp-scanner (K5, 0.7) : Cisco AI MCP Scanner 4.8.7
+# (Apache-2.0), installé depuis PyPI par pip --require-hashes à partir du
+# verrou complet requirements.lock (uv pip compile --generate-hashes
+# --only-binary :all:, Python 3.13, linux x86_64), sur l'image officielle
+# python 3.13-slim épinglée par empreinte. Seules les règles YARA livrées sont
+# utilisées par le module (aucun appel à l'API Cisco, à VirusTotal ni à un
+# LLM) ; l'amont ne publie aucune image de conteneur (docs/MODULES.md § 8).
+ARG SOURCE_DATE_EPOCH=0
+FROM docker.io/library/python@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
+ENV PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+COPY requirements.lock /tmp/requirements.lock
+RUN pip install --require-hashes --no-deps --only-binary=:all: -r /tmp/requirements.lock \
+ && rm -f /tmp/requirements.lock
+LABEL org.opencontainers.image.source="https://github.com/cisco-ai-defense/mcp-scanner" \
+      org.opencontainers.image.revision="b27af3b0e66ea8d5ab9c294b47aba137f4c30752" \
+      org.opencontainers.image.version="4.8.7" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.description="Cisco AI MCP Scanner pour Scanoria (règles YARA hors ligne)" \
+      io.scanoria.module="mcp-scanner"
+USER 65534:65534

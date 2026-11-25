@@ -518,3 +518,52 @@ amont (`cosign verify-blob`…). Il doit sortir en 0.
 Un nouveau paquet GHCR est **privé** à sa première publication : il doit être
 rendu public (réglage du paquet, par le propriétaire du dépôt) pour que les
 appliances le récupèrent sans jeton.
+
+## 9. Analyse du code IA et des agents (0.7, K5–K7)
+
+Trois scanners examinent ce qu'un dépôt confie à des agents ou à des modèles.
+Leur image est construite par la CI de Scanoria (§ 8) et ils tournent sans
+réseau, comme tout scanner. Leur convertisseur vit dans
+`src/rootfs/usr/lib/scanoria/scan-tools/<id>/` (`scan.tool`, monté en lecture
+seule sur `/scanoria`).
+
+| Module | Version | Lancé si le dépôt contient | Ce qu'il relève |
+|---|---|---|---|
+| `agentic-radar` (K7) | 0.14.2 | `*.py`, `*.json` | workflows LangGraph, CrewAI, n8n, OpenAI Agents, AutoGen : agents, outils, serveurs MCP, graphe ; vulnérabilités connues des outils (exécution de code…) |
+| `mcp-scanner` (K5) | 4.8.7 | `*.json`, `*.py`, `*.js`, `*.ts`… | outils, invites et serveurs MCP déclarés (listes JSON, `mcpServers`, décorateurs Python, `.tool(…)` JS/TS) : empoisonnement d'outil, injection d'invite, exfiltration (règles YARA) |
+| `skill-scanner` (K6) | 2.3.2 | `SKILL.md` | dossiers de skills d'agents : injection d'invite, exfiltration, exécution de commandes (analyse statique, comportementale et YARA-X) |
+
+Choix de confinement :
+
+- **Aucun service tiers.** Les variables `OPENAI_*`, `AZURE_OPENAI_*`,
+  `VIRUSTOTAL_*`, `MCP_SCANNER_*` et celles des services Cisco sont retirées
+  avant de lancer l'outil ; ni l'API Cisco AI Defense, ni VirusTotal, ni
+  OpenAI ne sont appelés. L'analyseur OpenAI Agents d'Agentic Radar, qui
+  voudrait interroger un modèle pour décrire les vulnérabilités, est
+  neutralisé : la table amont des vulnérabilités suffit.
+- **Pas d'OSV.dev pour K6** (`--use-osv` jamais passé) : les dépendances des
+  skills sont couvertes hors ligne par les modules SCA (OSV-Scanner, Trivy,
+  Grype) de la même analyse.
+- **Pas d'exécution** : les trois outils lisent le code (ast, YARA), aucun ne
+  l'importe ni ne le lance. Fichiers en lien symbolique, dossiers exclus
+  (`node_modules`, `.git`, `vendor`…) et fichiers trop gros sont ignorés.
+- **Secrets** : d'une configuration `mcpServers`, seuls les **noms** des
+  variables d'environnement sont lus, jamais leurs valeurs ; d'un agent,
+  seule la **longueur** de l'invite système est gardée.
+- **Chemins** : le SARIF ne porte que des chemins relatifs au dépôt ; un
+  chemin amont qui en sort est écarté.
+
+L'inventaire d'Agentic Radar voyage dans le SARIF
+(`runs[0].properties["scanoria/agent-inventory"]`), est revalidé et borné par
+la console (`webui/server/ai/agent-inventory.ts`), enregistré dans
+`agent_inventories` (migration 016) et affiché sur la page de l'analyse ; il
+servira de métadonnées à la cartographie de la surface d'attaque (I22).
+
+Leurs juges LLM facultatifs (K5, K6) et Vulnhuntr (K3) passent par le relais
+de `scanoria-ai` (`scan.network: ai-relay`) : ce sont des modules distincts,
+dont les résultats sont marqués « IA » et restent hors verdict tant qu'une
+personne ne les a pas confirmés (CLAUDE.md § 3.5).
+
+Tests : `tests/b36-ia.sh` (convertisseurs sur sorties enregistrées, entrées
+hostiles, sans conteneur) et `tests/b36-live.sh` (image construite, banc
+d'essai confiné, job CI `ia-modules-live`).

@@ -1198,6 +1198,14 @@ export default {
     },
   },
   scans: {
+    agents: {
+      title: 'AI agent workflows',
+      help: 'Found by Agentic Radar {version}, without running anything or calling any model.',
+      agents: 'Agents',
+      guardrail: 'guardrail',
+      graph: 'Graph: {nodes} node(s), {edges} edge(s).',
+      truncated: 'Inventory truncated: too many workflows.',
+    },
     nav: 'Scans',
     title: 'Scans',
     project: 'Project',
