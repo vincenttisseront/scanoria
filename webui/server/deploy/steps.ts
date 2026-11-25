@@ -66,12 +66,12 @@ const ORDER: DeployKind[] = ['registry-promotion', 'gitops-pr', 'cd-trigger']
 async function loadScan(db: Queryable, scanId: string): Promise<ScanInfo | null> {
   const r = await db.query<ScanInfo>(
     `SELECT s.id::text, s.project_id::text, s.commit_sha, s.ref, s.verdict,
-            COALESCE(rr.tag, rc.tag) AS tag, rr.report_sha256,
+            -- Le tag du rapport signé fait foi ; sinon un seul tag candidat, choisi de façon stable.
+            COALESCE(rr.tag, (SELECT rc.tag FROM release_candidates rc WHERE rc.scan_id = s.id ORDER BY rc.tag LIMIT 1)) AS tag, rr.report_sha256,
             to_char(COALESCE((s.verdict_details ->> 'evaluated_at')::timestamptz, s.finished_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS evaluated_at,
             p.forge_id::text, p.repo_full_name
        FROM scans s JOIN projects p ON p.id = s.project_id
        LEFT JOIN release_reports rr ON rr.scan_id = s.id AND rr.status = 'signed'
-       LEFT JOIN release_candidates rc ON rc.scan_id = s.id
       WHERE s.id = $1`, [scanId])
   return r.rows[0] ?? null
 }
@@ -229,12 +229,27 @@ async function advanceGitops(db: Queryable, run: Run, scan: ScanInfo, digests: M
 
 // --- 5 : CD existante ----------------------------------------------------------------------
 
+/** Numéro de file Jenkins lu dans Location (même origine que Jenkins) ; null sinon. */
+export function jenkinsQueueItem(location: string | null, base: string): RegExpExecArray | null {
+  if (!location) return null
+  try {
+    const u = new URL(location, base)
+    return u.origin === new URL(base).origin ? /\/queue\/item\/(\d{1,19})\/?$/.exec(u.pathname) : null
+  }
+  catch {
+    return null
+  }
+}
+
+const SAFE_TAG_RE = /^[A-Za-z0-9._/+-]{1,255}$/
+
 function cdInputs(cfg: CdTriggerConfig, scan: ScanInfo, url: string | null, digests: Map<string, string>): Record<string, string> {
   const first = [...digests.entries()][0]
   const all: Record<string, string> = {
     scanoria_report: url ? `${url}/scans/${scan.id}` : '',
     scanoria_commit: scan.commit_sha,
-    scanoria_tag: scan.tag ?? '',
+    // Un nom de tag git peut contenir $, ( ou ` : seul un tag sans caractère de shell est transmis.
+    scanoria_tag: scan.tag && SAFE_TAG_RE.test(scan.tag) ? scan.tag : '',
     scanoria_image: first ? `${first[0]}@${first[1]}` : '',
   }
   return Object.fromEntries(cfg.inputs.map(k => [k, all[k]!]))
@@ -262,9 +277,9 @@ async function advanceCd(db: Queryable, run: Run, scan: ScanInfo, digests: Map<s
       if (!await claimDeployment(db, run.id)) return
       const q = new URLSearchParams(Object.entries(cdInputs(cfg, scan, url, digests)).map(([k, v]) => [k.toUpperCase(), v]))
       const res = await forgeSend(`${base}/${jenkinsJobPath(cfg.job)}/buildWithParameters?${q}`, req, { method: 'POST' })
-      const loc = res.headers.get('location')
-      const queue = loc && new URL(loc, base).origin === new URL(base).origin ? new URL(loc, base).toString() : null
-      const m = queue ? /\/queue\/item\/(\d{1,19})\/?$/.exec(new URL(queue).pathname) : null
+      // Le build est lancé : un en-tête Location illisible ne fait pas échouer
+      // l'exécution, elle reste simplement sans suivi.
+      const m = jenkinsQueueItem(res.headers.get('location'), base)
       await setExternal(db, run.id, m ? `queue:${m[1]}` : null, null)
       await audit(db, 'deploy.cd.trigger', run, scan, { provider: 'jenkins', job: cfg.job })
       return

@@ -60,13 +60,14 @@ const proposals = ref<Proposal[]>([])
 const loading = ref(false)
 const saving = ref(false)
 
-async function load() {
+async function load(withProposals = true) {
   loading.value = true
   try {
     const [c, tg] = await Promise.all([api<Chain>(`${apiBase.value}/chain`), api<{ items: Target[] }>(`${apiBase.value}/targets`)])
     chain.value = c
     targets.value = tg.items
-    if (props.isAdmin) proposals.value = (await api<{ items: Proposal[] }>(`${apiBase.value}/proposals`)).items
+    // Les propositions lisent les workflows du dépôt dans la forge : pas à chaque rafraîchissement.
+    if (props.isAdmin && withProposals) proposals.value = (await api<{ items: Proposal[] }>(`${apiBase.value}/proposals`)).items
   }
   catch (err) {
     toast.add({ title: errorMessage(err), color: 'error' })
@@ -81,7 +82,7 @@ onMounted(() => {
   void load()
   // Rafraîchi sans recharger la page tant qu'une exécution est en cours.
   timer = setInterval(() => {
-    if (chain.value?.releases.some(r => r.deployments.some(d => d.status === 'pending' || d.status === 'running'))) void load()
+    if (chain.value?.releases.some(r => r.deployments.some(d => d.status === 'pending' || d.status === 'running'))) void load(false)
   }, 15_000)
 })
 onBeforeUnmount(() => {
@@ -115,8 +116,18 @@ async function act(fn: () => Promise<unknown>, done: string) {
   }
 }
 
+// Une proposition déclenchera un déploiement réel : confirmée dans une modale.
+const proposal = ref<Proposal | null>(null)
+const proposalOpen = computed({ get: () => !!proposal.value, set: (v: boolean) => {
+  if (!v) proposal.value = null
+} })
 function confirmProposal(p: Proposal) {
-  void act(() => api(`${apiBase.value}/targets`, { method: 'POST', body: { kind: p.kind, environment: p.environment, on_trigger: 'release', config: p.config } }), 'deploy.created')
+  proposal.value = p
+}
+async function acceptProposal() {
+  const p = proposal.value
+  if (!p) return
+  if (await act(() => api(`${apiBase.value}/targets`, { method: 'POST', body: { kind: p.kind, environment: p.environment, on_trigger: 'release', config: p.config } }), 'deploy.created')) proposal.value = null
 }
 
 function toggle(target: Target) {
@@ -200,7 +211,7 @@ async function add() {
             variant="ghost"
             :loading="loading"
             :label="t('deploy.refresh')"
-            @click="load"
+            @click="load()"
           />
           <UButton
             v-if="isAdmin"
@@ -605,6 +616,14 @@ async function add() {
       :ack="autoMergeTarget?.auto_merge ? undefined : t('deploy.targets.autoMergeAck')"
       :loading="saving"
       @confirm="setAutoMerge"
+    />
+    <ConfirmModal
+      v-model:open="proposalOpen"
+      color="warning"
+      :title="t('deploy.proposals.confirmTitle', { environment: proposal?.environment ?? '' })"
+      :body="t('deploy.proposals.confirmBody', { workflow: proposal?.reason.path ?? '' })"
+      :loading="saving"
+      @confirm="acceptProposal"
     />
     <ConfirmModal
       v-model:open="removeOpen"

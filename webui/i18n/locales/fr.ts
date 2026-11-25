@@ -2878,6 +2878,8 @@ export default {
       title: 'Cibles proposées',
       why: 'Le workflow {workflow} se déclenche à la main et attend scanoria_report : cible « {environment} » proposée.',
       confirm: 'Confirmer',
+      confirmTitle: 'Déployer automatiquement vers « {environment} » ?',
+      confirmBody: 'Après chaque release au verdict favorable, Scanoria lancera le workflow {workflow}, qui déploie réellement. Scanoria ne déploie jamais lui-même ; rien ne part si le verdict n’est pas favorable.',
     },
     targets: {
       title: 'Cibles',

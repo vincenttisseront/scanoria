@@ -8,7 +8,7 @@
 // net après un échec, chaîne autonome (J16) traitée une fois par analyse.
 
 import { createHash, generateKeyPairSync, randomBytes, sign as edSign } from 'node:crypto'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -124,6 +124,16 @@ describe.skipIf(!DATABASE_URL)('déploiement après verdict favorable (chantier 
     return r.rowCount ?? 0
   }
 
+  /** Clé publique de l'appliance telle que le helper la publie (état hors ligne). */
+  async function publishKey(raw: Buffer) {
+    await writeFile(join(dir, 'offline-status.json'), JSON.stringify({
+      version: 1, updated_at: '2026-11-25T10:00:00Z',
+      appliance_key: { public_key: raw.toString('base64'), fingerprint: createHash('sha256').update(raw).digest('hex') },
+      trusted_keys: [], bundles: [], last_import: null, mirror: null, publication: null,
+      schedule: { enabled: false, every_days: 7, keep: 3, modules: [], last_run_at: null }, dtrack: null,
+    }))
+  }
+
   const runs = async (scanId: string) => (await listDeployments(db.pool, { scanId })).sort((a, b) => a.kind.localeCompare(b.kind))
   const auditCount = async (action: string) => Number((await db.pool.query<{ n: string }>('SELECT count(*) AS n FROM audit_log WHERE action = $1', [action])).rows[0]!.n)
 
@@ -139,7 +149,10 @@ describe.skipIf(!DATABASE_URL)('déploiement après verdict favorable (chantier 
       NUXT_UPLOADS_DIR: join(dir, 'uploads'),
       NUXT_CATALOG_INDEX_FILE: join(dir, 'absent-index.json'),
       NUXT_MODULES_STATE_FILE: join(dir, 'absent-state.json'),
+      NUXT_STATE_FILE: join(dir, 'absent-photo.json'),
+      NUXT_OFFLINE_STATUS_FILE: join(dir, 'offline-status.json'),
     }))
+    await publishKey(rawPub)
     setConsoleUrl(CONSOLE)
     setForgeRetryDelays([1, 1])
     forge = fakeForgejo()
@@ -291,6 +304,24 @@ describe.skipIf(!DATABASE_URL)('déploiement après verdict favorable (chantier 
     expect(r.filter(x => x.kind !== 'registry-promotion').every(x => x.error === 'E_DEPLOY_PREVIOUS')).toBe(true)
     expect(reg.manifests.get('valide/app')?.has('v1.3.1') ?? false).toBe(false)
     expect(await auditCount('deploy.registry.revision')).toBe(1)
+  })
+
+  it('signature rendue qui ne vérifie pas avec la clé publiée de l\'appliance : refusée', async () => {
+    const other = (generateKeyPairSync('ed25519').publicKey.export({ format: 'der', type: 'spki' }) as Buffer).subarray(-32)
+    await publishKey(other)
+    try {
+      reg.addImage('candidat/app', 'v1.3.2')
+      const s = await scan({ verdict: 'passed', tag: 'v1.3.2', ref: 'refs/tags/v1.3.2' })
+      await deployPass(db.pool)
+      await helperSigns()
+      await deployPass(db.pool)
+      const r = await runs(s)
+      expect(r.find(x => x.kind === 'registry-promotion')?.error).toContain('E_ATTEST_KEY')
+      expect(reg.manifests.get('valide/app')?.has('v1.3.2') ?? false).toBe(false)
+    }
+    finally {
+      await publishKey(rawPub)
+    }
   })
 
   it('rapport de release non signé : attente, sans aucune action', async () => {

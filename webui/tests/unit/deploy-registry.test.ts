@@ -6,10 +6,12 @@
 // attestation au format cosign, références et réponses hostiles.
 
 import { createHash } from 'node:crypto'
+import { Readable } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   RegistryClient, RegistryError, attestationTag, checkDigest, copyImage, imageRevisions, parseChallenge, parseRepository, pushAttestation, setRegistryTransport,
 } from '../../server/deploy/registry'
+import { fakeToken } from '../helpers/fake-forge'
 import { fakeRegistry } from '../helpers/fake-registry'
 
 const HOST = 'registre.exemple.test'
@@ -34,7 +36,7 @@ describe('deploy-registry', () => {
     const reg = fakeRegistry(HOST, { token: 'jeton-de-test' })
     setRegistryTransport(reg.transport)
     const digest = reg.addImage('candidat/app', 'v1.0.0')
-    const c = new RegistryClient(HOST, { username: 'robot', password: 'mot-de-passe' })
+    const c = new RegistryClient(HOST, { username: 'robot', password: fakeToken() })
     expect(await c.resolve('candidat/app', 'v1.0.0')).toBe(digest)
     await copyImage(c, 'candidat/app', c, 'valide/app', digest, 'v1.0.0')
     expect(reg.manifests.get('valide/app')?.has(digest)).toBe(true)
@@ -64,13 +66,14 @@ describe('deploy-registry', () => {
   })
 
   it('erreurs : étiquette absente, empreinte qui ne correspond pas, accès refusé, jeton faux', async () => {
-    const reg = fakeRegistry(HOST, { token: 'bon', basic: Buffer.from('robot:bon-mdp').toString('base64') })
+    const pass = fakeToken()
+    const reg = fakeRegistry(HOST, { token: 'bon', basic: Buffer.from(`robot:${pass}`).toString('base64') })
     setRegistryTransport(reg.transport)
     reg.addImage('candidat/app', 'v1')
-    const good = new RegistryClient(HOST, { username: 'robot', password: 'bon-mdp' })
+    const good = new RegistryClient(HOST, { username: 'robot', password: pass })
     expect(await code(good.resolve('candidat/app', 'absente'))).toBe('E_REGISTRY_NOT_FOUND')
     expect(await code(good.manifest('candidat/app', `sha256:${'0'.repeat(64)}`))).toBe('E_REGISTRY_NOT_FOUND')
-    expect(await code(new RegistryClient(HOST, { username: 'robot', password: 'faux' }).resolve('candidat/app', 'v1'))).toBe('E_REGISTRY_AUTH')
+    expect(await code(new RegistryClient(HOST, { username: 'robot', password: fakeToken() }).resolve('candidat/app', 'v1'))).toBe('E_REGISTRY_AUTH')
     expect(await code(good.resolve('candidat/app', '../x'))).toBe('E_REGISTRY_REF')
     expect(() => new RegistryClient('https://x')).toThrow(RegistryError)
   })
@@ -106,5 +109,28 @@ describe('deploy-registry', () => {
     expect([...await imageRevisions(c, 'candidat/app', idx)]).toEqual([])
     reg.corruptBlobs = true
     await expect(imageRevisions(c, 'candidat/app', labelled)).rejects.toThrow()
+  })
+
+  it('blob redirigé vers un stockage objet : suivi sans jeton, contenu vérifié par empreinte', async () => {
+    const a = fakeRegistry('a.exemple.test', { token: 'jeton-de-test' })
+    const b = fakeRegistry('b.exemple.test')
+    const seen: { url: string, auth: unknown }[] = []
+    setRegistryTransport(async (url, init) => {
+      const u = new URL(url)
+      if (u.host === 'objets.exemple.test') {
+        seen.push({ url, auth: init.headers.authorization })
+        const data = a.blobs.get('candidat/app')!.get(u.pathname.slice(1))!
+        return { status: 200, headers: { 'content-length': String(data.length) }, body: Readable.from([data]) }
+      }
+      if (u.host === 'a.exemple.test' && init.method === 'GET' && u.pathname.includes('/blobs/') && init.headers.authorization) {
+        return { status: 307, headers: { location: `https://objets.exemple.test/${u.pathname.split('/').at(-1)}?signature=x` }, body: Readable.from([]) }
+      }
+      return (u.host === 'a.exemple.test' ? a : b).transport(url, init)
+    })
+    const digest = a.addImage('candidat/app', 'v4')
+    await copyImage(new RegistryClient('a.exemple.test', { username: 'robot', password: 'x'.repeat(12) }), 'candidat/app', new RegistryClient('b.exemple.test'), 'valide/app', digest, null)
+    expect(b.manifests.get('valide/app')?.has(digest)).toBe(true)
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.every(x => x.auth === undefined)).toBe(true)
   })
 })

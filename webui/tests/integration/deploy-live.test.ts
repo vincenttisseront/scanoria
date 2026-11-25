@@ -134,7 +134,9 @@ describe.skipIf(!FORGEJO)('b40-live : déploiement contre un vrai Forgejo et le 
       '  deploy:',
       '    runs-on: docker',
       '    steps:',
-      '      - run: echo "${{ inputs.scanoria_image }}"',
+      '      - run: echo "$SCANORIA_IMAGE"',
+      '        env:',
+      '          SCANORIA_IMAGE: ${{ inputs.scanoria_image }}',
       '',
     ].join('\n')
     await fj(tokens.admin, 'POST', '/repos/equipe/app/contents/.forgejo/workflows/deploy.yml', { content: Buffer.from(workflow).toString('base64'), message: 'déploiement', branch: 'main' })

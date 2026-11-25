@@ -8,10 +8,14 @@
 // Le suivi est fait par passes (aucune attente bloquante) : la demande porte
 // l'identifiant de l'attestation dans son contexte en base.
 
+import { createHash } from 'node:crypto'
 import type { Queryable } from '../utils/db'
 import { getConfig } from '../utils/config'
+import { readPublishedState } from '../utils/appliance'
 import { submitRequest, type Requester } from '../utils/requests'
-import { buildStatement, canonicalJson, envelopeOf, PREDICATE_TYPE, sha256Hex, type DsseEnvelope, type VerdictPredicate } from './dsse'
+import { readOfflineStatus } from '../offline/status'
+import { PUBLIC_KEY_B64_RE } from '#shared/schemas'
+import { buildStatement, canonicalJson, envelopeOf, verifyEnvelope, PREDICATE_TYPE, sha256Hex, type DsseEnvelope, type VerdictPredicate } from './dsse'
 
 export const SYSTEM_REQUESTER: Requester = { userId: 0, username: 'system' }
 
@@ -80,6 +84,23 @@ const FP_RE = /^[0-9a-f]{64}$/
  * Recueille les signatures rendues par le helper : enveloppe DSSE enregistrée
  * (statut « signed »), ou erreur. Rend le nombre d'attestations terminées.
  */
+/** Clé publique brute de l'appliance, publiée par le helper (état hors ligne, sinon photographie d'état). */
+async function applianceKey(): Promise<Buffer | null> {
+  const cfg = getConfig()
+  const [status, published] = await Promise.all([
+    readOfflineStatus(cfg.offlineStatusFile ?? '/var/lib/scanoria/offline/status.json').catch(() => null),
+    readPublishedState(cfg.stateFile).catch(() => ({ state: undefined })),
+  ])
+  const stateKey = (published.state as { appliance_key?: { public_key?: unknown } } | undefined)?.appliance_key
+  const b64 = status?.appliance_key?.public_key ?? stateKey?.public_key
+  return typeof b64 === 'string' && PUBLIC_KEY_B64_RE.test(b64) ? Buffer.from(b64, 'base64') : null
+}
+
+/**
+ * Relit les signatures rendues par le helper. Quand la clé publique de
+ * l'appliance est publiée, chaque enveloppe est vérifiée avec elle (empreinte
+ * de clé et signature) avant d'être retenue.
+ */
 export async function collectSignatures(db: Queryable): Promise<number> {
   const r = await db.query<{ id: string, status: string, code: string | null, output: Record<string, unknown> | null, content: string | null, sha256: string | null }>(
     `SELECT a.id::text, h.status, h.code, h.output, h.params ->> 'content_b64' AS content, h.params ->> 'sha256' AS sha256
@@ -88,12 +109,19 @@ export async function collectSignatures(db: Queryable): Promise<number> {
       WHERE a.status = 'pending' AND h.status IN ('ok', 'error', 'rejected', 'lost')
       LIMIT 100`)
   let done = 0
+  const key = r.rows.length ? await applianceKey() : null
+  const keyFp = key ? createHash('sha256').update(key).digest('hex') : null
   for (const x of r.rows) {
     const out = x.output ?? {}
     const sig = typeof out.signature === 'string' ? out.signature : ''
     const fp = typeof out.key_fingerprint === 'string' ? out.key_fingerprint : ''
     if (x.status === 'ok' && SIG_RE.test(sig) && FP_RE.test(fp) && x.content && out.sha256 === x.sha256) {
       const envelope = envelopeOf(Buffer.from(x.content, 'base64'), sig, fp)
+      if (key && (fp !== keyFp || !verifyEnvelope(envelope, key))) {
+        await db.query(`UPDATE attestations SET status = 'error', error = 'E_ATTEST_KEY' WHERE id = $1 AND status = 'pending'`, [x.id])
+        done++
+        continue
+      }
       await db.query(`UPDATE attestations SET envelope = $2, status = 'signed', error = NULL WHERE id = $1 AND status = 'pending'`, [x.id, JSON.stringify(envelope)])
     }
     else {

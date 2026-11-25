@@ -2878,6 +2878,8 @@ export default {
       title: 'Proposed targets',
       why: 'Workflow {workflow} runs on demand and expects scanoria_report: target “{environment}” proposed.',
       confirm: 'Confirm',
+      confirmTitle: 'Deploy automatically to “{environment}”?',
+      confirmBody: 'After each release with a passed verdict, Scanoria will run workflow {workflow}, which really deploys. Scanoria never deploys by itself; nothing runs unless the verdict is passed.',
     },
     targets: {
       title: 'Targets',

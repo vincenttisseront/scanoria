@@ -58,8 +58,14 @@ describe('déploiement après verdict favorable', () => {
     route('GET', `${base}/chain`, () => chain())
     route('GET', `${base}/targets`, () => ({ items: [target()] }))
     route('GET', `${base}/proposals`, () => ({ items: [] }))
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     await mountIn(ProjectChain, { props: { projectId: 'p1', isAdmin: true } })
     await settle()
+    // Rafraîchissement périodique : la chaîne seulement, jamais les propositions (lecture de la forge).
+    await vi.advanceTimersByTimeAsync(15_100)
+    await settle()
+    expect(callsTo('GET', `${base}/chain`).length).toBeGreaterThan(1)
+    expect(callsTo('GET', `${base}/proposals`)).toHaveLength(1)
     const text = bodyText()
     expect(text).toContain('Chaîne autonome activée')
     expect(text).toContain('PR 12')
@@ -91,6 +97,9 @@ describe('déploiement après verdict favorable', () => {
     expect(bodyText()).toContain('Aucune release analysée')
 
     await click(button('Confirmer'))
+    expect(callsTo('POST', `${base}/targets`)).toHaveLength(0)
+    expect(dialog().textContent).toContain('déploie réellement')
+    await click([...dialog().querySelectorAll('button')].find(b => b.textContent?.trim() === 'Confirmer')!)
     expect(callsTo('POST', `${base}/targets`)[0]!.body).toMatchObject({ kind: 'cd-trigger', environment: 'production', config: { workflow: 'deploy.yml' } })
 
     await click(button('Désactiver'))

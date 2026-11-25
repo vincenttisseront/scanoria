@@ -9,8 +9,10 @@
 //   empreinte relue dans la destination après la copie ;
 // - attestation au format cosign (étiquette sha256-<hex>.att, couche DSSE).
 // HTTPS seulement, résolution contrôlée (aucune adresse de bouclage ni de lien
-// local), délais et tailles bornés, aucune redirection vers un autre hôte que
-// le registre ou son serveur de jetons. Le jeton n'apparaît dans aucune erreur.
+// local), délais et tailles bornés. Aucune redirection n'est suivie, sauf pour
+// lire un blob (stockage objet derrière le registre) : HTTPS, trois sauts au
+// plus, SANS l'en-tête d'authentification, et contenu vérifié par son
+// empreinte. Le jeton n'apparaît dans aucune erreur.
 
 import { createHash } from 'node:crypto'
 import { request as httpsRequest } from 'node:https'
@@ -85,6 +87,7 @@ export const MANIFEST_TYPES = [
   'application/vnd.docker.distribution.manifest.list.v2+json',
 ] as const
 const INDEX_TYPES = new Set<string>([MANIFEST_TYPES[1], MANIFEST_TYPES[3]])
+const REDIRECTS = new Set([301, 302, 303, 307, 308])
 export const MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 export const MAX_BLOB_BYTES = 20 * 1024 ** 3
 export const MAX_INDEX_ENTRIES = 64
@@ -326,7 +329,21 @@ export class RegistryClient {
 
   /** Flux d'un blob (vérifié à la volée par l'appelant). */
   async blobStream(repo: string, digest: string): Promise<{ body: Readable, size: number }> {
-    const res = await this.request(repo, `/blobs/${checkDigest(digest)}`, { method: 'GET', headers: {}, timeoutMs: BLOB_TIMEOUT_MS })
+    let res = await this.request(repo, `/blobs/${checkDigest(digest)}`, { method: 'GET', headers: {}, timeoutMs: BLOB_TIMEOUT_MS })
+    for (let hop = 0; REDIRECTS.has(res.status) && hop < 3; hop++) {
+      const loc = res.headers.location
+      drain(res)
+      let next: URL
+      try {
+        next = new URL(typeof loc === 'string' ? loc : '', this.base)
+      }
+      catch {
+        throw new RegistryError('E_REGISTRY_RESPONSE', res.status)
+      }
+      if (next.protocol !== 'https:' || next.username || next.password) throw new RegistryError('E_REGISTRY_RESPONSE', res.status)
+      // Lien présigné : aucun jeton du registre n'est transmis à l'hôte suivant.
+      res = await this.send(next.toString(), { method: 'GET', headers: {}, timeoutMs: BLOB_TIMEOUT_MS })
+    }
     if (res.status !== 200) {
       drain(res)
       throw new RegistryError(res.status === 404 ? 'E_REGISTRY_NOT_FOUND' : 'E_REGISTRY_RESPONSE', res.status)

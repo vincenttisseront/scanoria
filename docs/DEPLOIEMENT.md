@@ -41,8 +41,13 @@ jobs:
   deploy:
     runs-on: docker
     steps:
-      - run: echo "Déploiement de ${{ inputs.scanoria_commit }} (rapport ${{ inputs.scanoria_report }})"
+      - run: echo "Déploiement de $SCANORIA_COMMIT (rapport $SCANORIA_REPORT)"
+        env:
+          SCANORIA_COMMIT: ${{ inputs.scanoria_commit }}
+          SCANORIA_REPORT: ${{ inputs.scanoria_report }}
 ```
+
+Les entrées sont **toujours passées par des variables d'environnement**, jamais interpolées directement dans un script (`run: … ${{ inputs.… }}`) : c'est la règle que zizmor (H1) vérifie, et elle protège d'une valeur piégée. Scanoria borne déjà les valeurs : `scanoria_tag` n'est transmis que s'il ne contient que des lettres, chiffres et `._/+-` (vide sinon), et aucune entrée ne contient de caractère de contrôle ni ne dépasse 500 caractères.
 
 Pour Jenkins, les entrées sont passées en paramètres en majuscules (`SCANORIA_REPORT`…), par `buildWithParameters`, avec un compte et un jeton d'API Jenkins.
 
