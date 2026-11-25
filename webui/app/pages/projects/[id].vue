@@ -378,6 +378,11 @@ async function remove() {
         :is-admin="isAdmin"
       />
 
+      <DeployProjectChain
+        :project-id="project.id"
+        :is-admin="isAdmin"
+      />
+
       <VexProjectPanel :project-id="project.id" />
 
       <UCard v-if="session.can('operator')">

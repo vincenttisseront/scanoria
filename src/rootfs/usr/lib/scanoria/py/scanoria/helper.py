@@ -30,6 +30,7 @@ import uuid
 from . import aiendpoint, bundle, common, mirror, modules, netutil, offline, pkgdates, prefetch, provision, schema, vigilance
 from . import dns as dnscheck
 from . import rulesets
+from . import attest
 from . import release
 from .common import Fail
 
@@ -56,6 +57,7 @@ TIMEOUTS = {
     "self-sbom": 3300, "run-canaries": 3300, "start-trial": 1200,
     "prefetch-images": 3300,
     "validate-ruleset": 420,
+    "sign-attestation": 120,
     "sign-release-report": 120,
 }
 # Marge laissée entre l'échéance passée à scanoria-selfupdate et l'arrêt forcé
@@ -527,6 +529,7 @@ ACTIONS = {
     "start-trial": vigilance.act_start_trial,
     "prefetch-images": prefetch.act_prefetch_images,
     "validate-ruleset": rulesets.act_validate_ruleset,
+    "sign-attestation": attest.act_sign_attestation,
     "sign-release-report": release.act_sign_release_report,
 }
 

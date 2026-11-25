@@ -70,6 +70,7 @@
             "start-trial",
             "prefetch-images",
             "validate-ruleset",
+            "sign-attestation",
             "sign-release-report"
           ]
         }
@@ -171,6 +172,15 @@
         "E_RULESET_ENGINE_MISSING",
         "E_RELAY_UNAVAILABLE",
         "E_RELAY_TOKEN",
+        "E_ATTEST_ENCODING",
+        "E_ATTEST_CANONICAL",
+        "E_ATTEST_DIGEST",
+        "E_ATTEST_STATEMENT",
+        "E_ATTEST_SUBJECT",
+        "E_ATTEST_SCAN",
+        "E_ATTEST_VERDICT",
+        "E_ATTEST_KEY",
+        "E_ATTEST_REPORT",
         "E_SIGN_TOO_LARGE",
         "E_SIGN_ENCODING",
         "E_SIGN_DIGEST",

@@ -59,6 +59,7 @@ export const REQUEST_TYPES = [
   'start-trial',
   'prefetch-images',
   'validate-ruleset',
+  'sign-attestation',
   'sign-release-report',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
@@ -88,6 +89,8 @@ export const RESULT_CODES = [
   // 0.7 (A, G4, contrat 34) : jeux de règles.
   'E_RULESET_INVALID', 'E_RULESET_MISSING', 'E_RULESET_NONE', 'E_RULESET_ENGINE_MISSING',
   'E_RELAY_UNAVAILABLE', 'E_RELAY_TOKEN',
+  'E_ATTEST_ENCODING', 'E_ATTEST_CANONICAL', 'E_ATTEST_DIGEST', 'E_ATTEST_STATEMENT',
+  'E_ATTEST_SUBJECT', 'E_ATTEST_SCAN', 'E_ATTEST_VERDICT', 'E_ATTEST_KEY', 'E_ATTEST_REPORT',
   // 0.8 (A, contrat 37) : signature par la clé de l'appliance (communs avec D).
   'E_SIGN_TOO_LARGE', 'E_SIGN_ENCODING', 'E_SIGN_DIGEST', 'E_SIGN_CANONICAL', 'E_SIGN_SCHEMA', 'E_SIGN_SCAN', 'E_SIGN_KEY',
 ] as const
@@ -252,6 +255,13 @@ export const requestParamSchemas = {
     version: z.string().regex(MODULE_VERSION_RE),
     trial_id: uuidSchema.optional(),
     action: z.enum(['start', 'abandon']).optional(),
+  }),
+  // 0.8 (D, J9, contrat 37) : déclaration in-toto canonique, relue et signée par le helper.
+  'sign-attestation': z.strictObject({
+    scan_id: uuidSchema,
+    kind: z.literal('attestation'),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    content_b64: z.string().min(4).max(87_384).regex(/^[A-Za-z0-9+/]+={0,2}$/),
   }),
   // 0.8 (A, contrat 37) : rapport de release canonique à signer, porté en entier (4 Mio au plus).
   'sign-release-report': z.strictObject({
