@@ -41,9 +41,9 @@ describe('contrats des analyses', () => {
     expect(sql012).toContain(`status IN (${quoted(SCAN_MODULE_STATUSES)})`)
   })
 
-  it('sujets des tâches IA identiques à la dernière contrainte (013_triage_forges.sql)', () => {
-    const sql013 = readFileSync(root('webui/server/db/migrations/013_triage_forges.sql'), 'utf8').replace(/\s+/g, ' ')
-    expect(sql013).toContain(`subject_type IN (${quoted(AI_SUBJECT_TYPES)})`)
+  it('sujets des tâches IA identiques à la dernière contrainte (018_release.sql)', () => {
+    const sql018 = readFileSync(root('webui/server/db/migrations/018_release.sql'), 'utf8').replace(/\s+/g, ' ')
+    expect(sql018).toContain(`subject_type IN (${quoted(AI_SUBJECT_TYPES)})`)
   })
 
   it('catégories identiques au schéma des modules', () => {

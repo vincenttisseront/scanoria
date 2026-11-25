@@ -527,6 +527,7 @@ from scanoria import schema
 schema.load("requests", sys.argv[1]); print("ok")' "$f")" ok
 done
 expect "pare-feu : PostgreSQL depuis le bloc des modules" "$(grep -c -F 'ip saddr 10.90.0.0/16 tcp dport 5432 accept' "$ROOT/src/rootfs/usr/share/scanoria/nftables/scanoria.nft.tmpl")/$(grep -c -x 'pool = 10.90.0.0/16' "$ROOT/src/rootfs/usr/share/scanoria/modules/services-network.conf")" 1/1
+expect "pare-feu : DNS des réseaux Podman (aardvark-dns)" "$(grep -c -F 'iifname "podman*" meta l4proto { tcp, udp } th dport 53 accept' "$ROOT/src/rootfs/usr/share/scanoria/nftables/scanoria.nft.tmpl")" 1
 U="$ROOT/src/rootfs/usr/lib/systemd/system/scanoria-runner.service"
 for d in 'ProtectSystem=strict' 'ProtectHome=yes' 'PrivateTmp=yes' 'ProtectKernelModules=yes' 'ProtectControlGroups=no'; do
 	expect "scanoria-runner.service : $d" "$(grep -c -x "$d" "$U")" 1

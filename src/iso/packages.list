@@ -8,6 +8,11 @@ postgresql-16
 postgresql-client-16
 nginx
 podman
+# Résolution des noms entre conteneurs d'un même réseau (modules « service » et
+# leurs scanners, ex. dtrack-upload → Dependency-Track) : simple recommandation
+# de podman, donc absente avec --no-install-recommends.
+netavark
+aardvark-dns
 skopeo
 uidmap
 slirp4netns

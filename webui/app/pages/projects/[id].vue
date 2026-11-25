@@ -383,6 +383,8 @@ async function remove() {
         :is-admin="isAdmin"
       />
 
+      <VexProjectPanel :project-id="project.id" />
+
       <UCard v-if="session.can('operator')">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <p class="text-sm text-muted">
