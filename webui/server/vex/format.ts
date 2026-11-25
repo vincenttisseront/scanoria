@@ -36,6 +36,9 @@ export const VEX_LIMITS = {
 } as const
 
 /** Même forme que vex_statements.vuln_id (018). */
+/** Ordre des points de code (et non de la locale) : forme canonique identique partout. */
+export const byCodepoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
 export const VULN_ID_RE = /^[A-Za-z][A-Za-z0-9._:-]{2,100}$/
 /** purl : type, espace de noms et nom, version et qualificatifs facultatifs ; aucun espace ni caractère de contrôle. */
 export const PURL_RE = /^pkg:[a-z][a-z0-9.+-]{0,31}\/[^\s/?#@][^\s?#]{0,400}(?:\?[^\s#]{1,200})?(?:#[^\s]{1,100})?$/
@@ -67,7 +70,7 @@ export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(v => canonicalJson(v === undefined ? null : v)).join(',')}]`
   const obj = value as Record<string, unknown>
-  const keys = Object.keys(obj).filter(k => obj[k] !== undefined).sort()
+  const keys = Object.keys(obj).filter(k => obj[k] !== undefined).sort(byCodepoint)
   return `{${keys.map(k => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(',')}}`
 }
 
@@ -148,7 +151,7 @@ export function renderOpenVex(input: RenderInput): { document: Record<string, un
   const statements = [...groups.values()].map(({ s, products }) => {
     const st: Record<string, unknown> = {
       vulnerability: { name: s.vuln_id },
-      products: [...new Set(products)].sort().map(p => ({ '@id': p, 'identifiers': { purl: p } })),
+      products: [...new Set(products)].sort(byCodepoint).map(p => ({ '@id': p, 'identifiers': { purl: p } })),
       status: s.status,
       timestamp: s.timestamp,
     }
@@ -221,7 +224,7 @@ function purlName(p: string): string {
 /** CycloneDX 1.6 (VEX dans un BOM) : un composant par produit, une vulnérabilité par déclaration groupée. */
 export function renderCycloneDxVex(input: RenderInput): { document: Record<string, unknown>, canonical: string } {
   const list = sortStatements(input.statements)
-  const products = [...new Set(list.map(s => s.product))].sort()
+  const products = [...new Set(list.map(s => s.product))].sort(byCodepoint)
   const groups = new Map<string, { s: VexStatement, refs: string[] }>()
   for (const s of list) {
     const k = canonicalJson([s.vuln_id, s.status, s.justification, s.impact_statement, s.action_statement, s.timestamp])
@@ -250,7 +253,7 @@ export function renderCycloneDxVex(input: RenderInput): { document: Record<strin
       return {
         id: s.vuln_id,
         analysis,
-        affects: [...new Set(refs)].sort().map(ref => ({ ref })),
+        affects: [...new Set(refs)].sort(byCodepoint).map(ref => ({ ref })),
       }
     }),
   }

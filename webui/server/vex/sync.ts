@@ -10,7 +10,7 @@
 // qui l'importe.
 
 import type { Queryable } from '../utils/db'
-import { justificationFromReason, validPurl, VULN_ID_RE, type VexStatement, type VexStatus } from './format'
+import { byCodepoint, justificationFromReason, validPurl, VULN_ID_RE, type VexStatement, type VexStatus } from './format'
 
 /** Produits (purl) au plus par déclaration tirée d'une exception. */
 export const MAX_PRODUCTS_PER_EXCEPTION = 20
@@ -96,7 +96,7 @@ async function exceptionSubjects(db: Queryable, e: ExceptionVexRow): Promise<{ v
     if (purl) products.add(purl)
   }
   if (!products.size) return null
-  return { vulnIds, products: [...products].sort().slice(0, MAX_PRODUCTS_PER_EXCEPTION) }
+  return { vulnIds, products: [...products].sort(byCodepoint).slice(0, MAX_PRODUCTS_PER_EXCEPTION) }
 }
 
 export const ISO = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, 'Z')

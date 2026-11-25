@@ -157,7 +157,7 @@ const cases = {
   "vuln-commande": ov([st({ vulnerability: { name: "$(touch /tmp/scanoria-b38-pwn)" } })]),
   "vuln-chemin": ov([st({ vulnerability: { name: "../../etc/passwd" } })]),
   "vuln-controle": ov([st({ vulnerability: { name: "CVE-2026-0001\n" } })]),
-  "vuln-direction": ov([st({ vulnerability: { name: "CVE-2026-‮1000" } })]),
+  "vuln-direction": ov([st({ vulnerability: { name: "CVE-2026-\u202e1000" } })]),
   "vuln-absente": ov([st({ vulnerability: {} })]),
   "purl-espace": ov([st({ products: [{ "@id": "pkg:npm/lib 1.0.0" }] })]),
   "purl-saut": ov([st({ products: [{ "@id": "pkg:npm/lib@1\nX-Injected: 1" }] })]),

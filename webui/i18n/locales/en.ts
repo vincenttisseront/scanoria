@@ -2915,6 +2915,7 @@ export default {
     import: 'Import',
     importTitle: 'Import a VEX document',
     importHelp: 'OpenVEX 0.2 or CycloneDX VEX. “Not affected” and “fixed” statements become exception requests, to be approved by an administrator; the others are kept for information.',
+    file: 'JSON file',
     paste: 'Paste the JSON document or choose a file.',
     preview: 'Preview',
     previewTitle: 'Import effect ({format})',

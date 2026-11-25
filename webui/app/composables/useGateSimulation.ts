@@ -46,7 +46,7 @@ export interface SimulationRow {
 /** Clés triées : deux jeux de règles égaux donnent la même chaîne. */
 export function rulesKey(rules: Record<string, unknown> | null | undefined): string {
   if (!rules) return ''
-  return JSON.stringify(Object.keys(rules).sort().map(k => [k, rules[k]]))
+  return JSON.stringify(Object.keys(rules).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map(k => [k, rules[k]]))
 }
 
 export function useGateSimulation(pollMs = 2000) {

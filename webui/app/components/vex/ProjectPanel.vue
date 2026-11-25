@@ -204,7 +204,12 @@ watch(docText, () => {
           <p class="text-xs text-warning">
             {{ t('vex.importScope') }}
           </p>
+          <label
+            for="vex-file"
+            class="block font-medium"
+          >{{ t('vex.file') }}</label>
           <input
+            id="vex-file"
             type="file"
             accept=".json,application/json"
             data-testid="vex-file"

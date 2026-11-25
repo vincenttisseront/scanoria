@@ -26,6 +26,7 @@ import { z } from 'zod'
 import type { Queryable } from '../utils/db'
 import { applyGateFloor, planGateFloor } from '../profiles/locks'
 import { computeVerdict, loadGateInput } from './evaluate'
+import { byCodepoint } from '../vex/format'
 
 /** Au plus autant d'analyses rejouées par simulation (les plus récentes d'abord). */
 export const MAX_SIMULATED_SCANS = 2000
@@ -133,7 +134,7 @@ export function responsibleRules(replay: VerdictDetails, simulated: VerdictDetai
   for (const c of after) if (!before.has(c) && RULE_OF_CODE[c]) out.add(RULE_OF_CODE[c])
   for (const c of before) if (!after.has(c) && RULE_OF_CODE[c]) out.add(RULE_OF_CODE[c])
   if (replay.rules.new_code_only !== simulated.rules.new_code_only) out.add('new_code_only')
-  return [...out].sort()
+  return [...out].sort(byCodepoint)
 }
 
 export function effectOf(replay: Verdict, simulated: Verdict): Effect {
@@ -144,7 +145,7 @@ export function effectOf(replay: Verdict, simulated: Verdict): Effect {
 
 export function changedRules(current: GateRules | null, candidate: GateRules): string[] {
   if (!current) return []
-  return (Object.keys(candidate) as (keyof GateRules)[]).filter(k => current[k] !== candidate[k]).sort()
+  return (Object.keys(candidate) as (keyof GateRules)[]).filter(k => current[k] !== candidate[k]).sort(byCodepoint)
 }
 
 interface ScanRow {
