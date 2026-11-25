@@ -31,7 +31,7 @@ license:
 upstream:
   homepage: https://github.com/cisco-ai-defense/skill-scanner
   source: https://pypi.org/project/cisco-ai-skill-scanner/2.3.2/
-image_pending: true
+image: ghcr.io/vincenttisseront/scanoria-skill-scanner@sha256:3dc98d7feb846e71b97e95fa302372edd307520c086593850b6b5f59dc8c35b3
 version: "2.3.2"
 resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 2000 }
 hostname: null

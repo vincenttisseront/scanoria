@@ -37,7 +37,7 @@ license:
 upstream:
   homepage: https://github.com/protectai/vulnhuntr
   source: https://github.com/protectai/vulnhuntr/tree/ead88c5adba4279dae5c56d65124c530a9a1c5ae
-image_pending: true
+image: ghcr.io/vincenttisseront/scanoria-vulnhuntr@sha256:cd908e2b66b88ef22052b79998c816d52762f0ee2b43288108e60e5df805a828
 version: "0.1.0+ead88c5"
 resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 800 }
 hostname: null
