@@ -119,13 +119,25 @@ const CANDIDATE_RE = /[A-Za-z0-9+/_=-]{20,4096}/g
 /**
  * Chaîne aléatoire probable (union des deux critères de la 0.3) : au moins
  * deux classes et entropie ≥ 3,5, ou lettres et chiffres et entropie ≥ 3,3.
- * Jamais un mot ou un identifiant sans chiffre.
+ * Jamais un mot ni un identifiant sans chiffre ; une suite de lettres seules
+ * n'est retenue qu'en casse mélangée au hasard et d'entropie ≥ 4.
  */
+/**
+ * Au moins 25 % de majuscules et au moins une minuscule : casse mélangée au
+ * hasard. Un identifiant camelCase ou PascalCase en a bien moins.
+ */
+function mixedCase(value: string): boolean {
+  const upper = value.replace(/[^A-Z]/g, '').length / value.length
+  return upper >= 0.25 && /[a-z]/.test(value)
+}
+
 export function looksRandom(value: string): boolean {
   if (value.length < 20) return false
   if (/^[a-z]+$|^[A-Z]+$|^[0-9]+$/.test(value)) return false
-  if (/^[a-z_-]+$/i.test(value)) return false
   const h = entropy(value)
+  // Lettres seules : un identifiant (camelCase…) a peu de majuscules ; une
+  // chaîne aléatoire en casse mélangée est masquée (jamais rien de secret ne sort).
+  if (/^[a-z_-]+$/i.test(value)) return /^[A-Za-z]+$/.test(value) && h >= 4 && mixedCase(value)
   const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter(re => re.test(value)).length
   if (classes >= 2 && h >= 3.5) return true
   return /[A-Za-z]/.test(value) && /[0-9]/.test(value) && h >= 3.3
