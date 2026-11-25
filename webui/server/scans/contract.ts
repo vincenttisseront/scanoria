@@ -43,6 +43,16 @@ const sshCredential = z.strictObject({
 export const jobCredential = z.union([z.null(), tokenCredential, sshCredential])
 export type JobCredential = z.infer<typeof jobCredential>
 
+/** 0.7 (A, contrat 34) : référence d'un jeu de règles dans la tâche et dans le résultat. */
+const RULESET_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/
+export const RULESET_ENGINES = ['opengrep', 'semgrep', 'gitleaks', 'checkov', 'kics'] as const
+const resultRuleset = z.strictObject({
+  slug: z.string().regex(RULESET_SLUG_RE),
+  version: z.number().int().min(1),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+})
+const jobRuleset = resultRuleset.extend({ engine: z.enum(RULESET_ENGINES) })
+
 export const scanJobSchema = z.strictObject({
   schema: z.literal(1),
   id: uuid,
@@ -75,6 +85,8 @@ export const scanJobSchema = z.strictObject({
     image_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
     // 0.6 (V3, V5) : modules de la tâche à terminer avant celui-ci.
     after: z.array(moduleId).max(64).refine(l => new Set(l).size === l.length).optional(),
+    // 0.7 (A, contrat 34) : jeux de règles G4 retenus par le plan (contenu dans jobs/rulesets/<sha256>).
+    rulesets: z.array(jobRuleset).max(16).optional(),
   })).min(1).max(64).refine(list => new Set(list.map(m => JSON.stringify(m))).size === list.length),
   // 0.6 (B, contrat 25) : analyse d'essai F13.
   trial: z.boolean().optional(),
@@ -148,6 +160,8 @@ export const scanResultSchema = z.strictObject({
     reused_from: cacheKey.optional(),
     input: z.enum(['src', 'sbom']).optional(),
     sbom_fallback: z.boolean().optional(),
+    // 0.7 (A, contrat 34) : jeux de règles montés sous /rules.
+    rulesets: z.array(resultRuleset).max(16).optional(),
   })).max(64),
 })
 export type ScanResult = z.infer<typeof scanResultSchema>

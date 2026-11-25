@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module kics (0.7, chantier A) : erreurs de configuration de l'IaC par les
+# requêtes Rego de KICS (Checkmarx), en complément de Checkov. Hors ligne :
+# --disable-full-descriptions (sans elle, KICS demande les descriptions à
+# l'API de Checkmarx), requêtes de secrets écartées (gitleaks les couvre).
+# Requêtes maison : jeux de règles G4 du moteur « kics » (document JSON
+# {queries: [{id, metadata, query}]}), dépliés par le runner sous
+# /rules/<slug>/<id>/{query.rego,metadata.json} ; /rules est toujours monté.
+#
+# Amont relevé le 2026-11-25 : checkmarx/kics v2.2.1 (Docker Hub, index OCI,
+# variante alpine par défaut), LICENSE Apache-2.0 du dépôt Checkmarx/kics.
+id: kics
+name: KICS
+description:
+  fr: Erreurs de configuration de l'infrastructure en code par les requêtes de KICS (Terraform, Kubernetes, Dockerfile, Ansible, Helm…).
+  en: Infrastructure-as-code misconfigurations found by KICS queries (Terraform, Kubernetes, Dockerfile, Ansible, Helm…).
+type: scanner
+categories: [iac]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/Checkmarx/kics/blob/v2.2.1/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: KICS et ses requêtes intégrées sous Apache-2.0 ; aucun service Checkmarx n'est appelé.
+upstream:
+  homepage: https://kics.io
+  source: https://github.com/Checkmarx/kics
+image: docker.io/checkmarx/kics@sha256:49ccc54b6ae7f5d5fc95e96f8f95c18c57f3bba047ab611a03d80792bdff6757
+version: "2.2.1"
+resources: { min_ram_mb: 1536, min_cpu: 1, disk_mb: 400 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["/app/bin/kics", "scan", "--path", "/src", "--output-path", "/out", "--output-name", "kics",
+            "--report-formats", "sarif", "--ci", "--no-progress", "--disable-full-descriptions",
+            "--disable-secrets", "--ignore-on-exit", "results",
+            "--queries-path", "/app/bin/assets/queries", "--queries-path", "/rules"]
+  rulesets: { engine: kics, mount: /rules }
+  applies_to:
+    detect: [terraform, containers, helm, ansible, manifests]
+  timeout_s: 1800
+  network: none
+  exit_codes_ok: [0]
+  severity_map: { "level:error": high, "level:warning": medium, "level:note": low, "level:none": info }
+outputs:
+  sarif: { path: /out/kics.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # Relevé sur la sortie enregistrée (identifiants de requête KICS).
+    - { rule: kics-placeholder, category: iac, min: 1 }
+health: { command: ["/app/bin/kics", "version"] }
+upgrade: { policy: on-demand }

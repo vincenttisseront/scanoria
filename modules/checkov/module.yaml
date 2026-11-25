@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module checkov (0.7, chantier A) : erreurs de configuration de l'IaC
+# (Terraform, Kubernetes, Helm, Dockerfile, Ansible, CloudFormation…).
+# Hors ligne : --skip-download (aucun appel à la plateforme Prisma Cloud),
+# cadres secrets et SCA écartés (gitleaks et OSV-Scanner les couvrent, et la
+# SCA de Checkov exige l'API). Politiques maison : jeux de règles G4 du moteur
+# « checkov » (politiques YAML), montés sous /rules/<slug>/policies.yaml.
+#
+# Gravités (G5) : sans clé d'API, Checkov ne publie aucune gravité et marque
+# tout résultat « error » ; la table ramène ce niveau à « medium », pour que
+# l'IaC ne bloque pas un verdict sans réglage (iac_block_from « high »).
+# L'administrateur la relève dans Système › Gravités s'il le souhaite.
+#
+# Amont relevé le 2026-11-25 : bridgecrew/checkov 3.4.11 (Docker Hub, index
+# OCI), LICENSE Apache-2.0 du dépôt bridgecrewio/checkov.
+id: checkov
+name: Checkov
+description:
+  fr: Erreurs de configuration de l'infrastructure en code (Terraform, Kubernetes, Helm, Dockerfile, Ansible…).
+  en: Infrastructure-as-code misconfigurations (Terraform, Kubernetes, Helm, Dockerfile, Ansible…).
+type: scanner
+categories: [iac]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/bridgecrewio/checkov/blob/3.4.11/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: Checkov et ses politiques intégrées sous Apache-2.0 ; aucun service Prisma Cloud n'est appelé.
+upstream:
+  homepage: https://www.checkov.io
+  source: https://github.com/bridgecrewio/checkov
+image: docker.io/bridgecrew/checkov@sha256:68da9ede242807850ab346b533dc1e4d2b00e15a9e6b4b595654d39c7f2e2566
+version: "3.4.11"
+resources: { min_ram_mb: 1536, min_cpu: 1, disk_mb: 1200 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/sast_run.py", "checkov"]
+  tool: sast
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+    BC_SKIP_MAPPING: "TRUE"
+    CHECKOV_RUN_SCA_PACKAGE_SCAN_V2: "false"
+    LOG_LEVEL: "WARNING"
+  rulesets: { engine: checkov, mount: /rules }
+  applies_to:
+    detect: [terraform, containers, helm, ansible, manifests]
+  timeout_s: 1800
+  network: none
+  exit_codes_ok: [0]
+  severity_map: { "level:error": medium, "level:warning": low, "level:note": low }
+outputs:
+  sarif: { path: /out/checkov.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # infra/main.tf : port 22 ouvert à 0.0.0.0/0.
+    - { rule: CKV_AWS_24, category: iac, min: 1 }
+    # infra/Dockerfile : aucun USER.
+    - { rule: CKV_DOCKER_3, category: iac, min: 1 }
+health: { command: ["checkov", "--version"] }
+upgrade: { policy: on-demand }

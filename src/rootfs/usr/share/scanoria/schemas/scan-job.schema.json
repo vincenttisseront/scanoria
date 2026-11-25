@@ -233,6 +233,22 @@
               "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
             },
             "description": "0.6 (V3, V5) : modules de la tâche qui doivent être terminés avant celui-ci (graphe du plan)."
+          },
+          "rulesets": {
+            "type": "array",
+            "maxItems": 16,
+            "description": "0.7 (G4, contrat 34) : versions des jeux de règles retenues par le plan pour ce module ; contenu rangé par le worker dans jobs/rulesets/<sha256>, vérifié par le runner.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["slug", "version", "sha256", "engine"],
+              "properties": {
+                "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+                "engine": { "enum": ["opengrep", "semgrep", "gitleaks", "checkov", "kics"] },
+                "version": { "type": "integer", "minimum": 1 },
+                "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              }
+            }
           }
         }
       }

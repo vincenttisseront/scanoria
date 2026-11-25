@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module bandit (0.7, chantier A) : SAST Python. L'image officielle
+# (ghcr.io/pycqa/bandit/bandit, Dockerfile docker/Dockerfile du dépôt) est
+# installée sans l'extra « sarif » : Bandit y écrit son JSON natif, que
+# l'enveloppe de l'appliance (scan-tools/sast/sast_run.py) convertit en
+# SARIF 2.1.0. La gravité Bandit est abaissée d'un cran quand sa confiance est
+# faible ; l'extrait des tests de mot de passe en dur (B105-B107) est masqué.
+#
+# Amont relevé le 2026-11-25 : Bandit 1.9.4 (dernière étiquette du dépôt
+# PyCQA/bandit et de PyPI), Apache-2.0 ; image publiée sous la seule
+# étiquette « latest », épinglée par empreinte (version contrôlée par b31-live).
+id: bandit
+name: Bandit
+description:
+  fr: Analyse statique du code Python (injection de commande, désérialisation, cryptographie faible…).
+  en: Static analysis of Python code (command injection, deserialization, weak cryptography…).
+type: scanner
+categories: [sast]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/PyCQA/bandit/blob/1.9.4/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: Bandit sous Apache-2.0 ; image officielle basée sur python:3.12-alpine (PSF-2.0).
+upstream:
+  homepage: https://bandit.readthedocs.io
+  source: https://github.com/PyCQA/bandit
+image: ghcr.io/pycqa/bandit/bandit@sha256:70c0d5de64db59de9b213348fc2bede3216c55fccb789386efe56440c384b29a
+version: "1.9.4"
+resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 200 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/sast_run.py", "bandit"]
+  tool: sast
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+  applies_to:
+    detect: [python]
+  timeout_s: 900
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/bandit.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # svc/handlers.py : subprocess avec shell=True.
+    - { rule: bandit/B602, category: sast, min: 1 }
+    # svc/handlers.py : pickle.loads.
+    - { rule: bandit/B301, category: sast, min: 1 }
+    # svc/handlers.py : yaml.load sans chargeur sûr.
+    - { rule: bandit/B506, category: sast, min: 1 }
+health: { command: ["bandit", "--version"] }
+upgrade: { policy: on-demand }

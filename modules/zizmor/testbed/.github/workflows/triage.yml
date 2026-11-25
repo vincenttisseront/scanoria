@@ -1,0 +1,14 @@
+# Banc d'essai Scanoria : workflow volontairement dangereux, jamais lancé.
+name: triage
+on:
+  pull_request_target:
+    types: [opened]
+permissions: write-all
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - run: echo "Titre ${{ github.event.pull_request.title }}"

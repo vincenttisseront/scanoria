@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module opengrep (0.7, chantier A) : moteur SAST par défaut de l'appliance.
+# Opengrep (fork LGPL-2.1 de Semgrep CE) lance les règles maison de Scanoria
+# (scan-tools/sast/rules/opengrep/scanoria-base.yaml, AGPL, jeu de règles G4
+# de départ) et les jeux de règles G4 rattachés au profil, montés sous
+# /rules/<slug>/rules.yaml (contrat 34). Aucune règle officielle Semgrep.
+#
+# Amont relevé le 2026-11-25 : Opengrep v2.0.0 (13-11-2026), LGPL-2.1
+# (LICENSE du dépôt opengrep/opengrep à l'étiquette v2.0.0). Opengrep ne
+# publie aucune image : l'image d'outil Scanoria (image/Containerfile) part de
+# python:3.13-slim épinglé et y dépose le binaire statique de la release,
+# vérifié par sha256 et par sa signature cosign (image/verify.sh).
+id: opengrep
+name: Opengrep
+description:
+  fr: Analyse statique du code (injections, désérialisation, secrets écrits en dur…) avec les règles maison de Scanoria et vos jeux de règles.
+  en: Static code analysis (injections, deserialization, hard-coded secrets…) with Scanoria's own rules and your rulesets.
+type: scanner
+categories: [sast]
+license:
+  spdx: LGPL-2.1-only
+  url: https://github.com/opengrep/opengrep/blob/v2.0.0/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: Moteur Opengrep LGPL-2.1, non modifié ; règles maison écrites pour Scanoria (AGPL-3.0-or-later) ; image de base python:3.13-slim (PSF-2.0).
+upstream:
+  homepage: https://opengrep.dev
+  source: https://github.com/opengrep/opengrep/releases/tag/v2.0.0
+image_pending: true
+version: "2.0.0"
+resources: { min_ram_mb: 2048, min_cpu: 1, disk_mb: 600 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties:
+    builtin_rules:
+      type: boolean
+      default: true
+      title: Règles maison
+      description: Lancer les règles maison de Scanoria en plus des jeux de règles rattachés au profil.
+options_i18n:
+  builtin_rules:
+    fr: { title: Règles maison, description: Lancer les règles maison de Scanoria en plus des jeux de règles rattachés au profil. }
+    en: { title: Built-in rules, description: Run Scanoria's own rules in addition to the rulesets attached to the profile. }
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/sast_run.py", "opengrep", "--builtin={opt.builtin_rules}"]
+  tool: sast
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+  rulesets: { engine: opengrep, mount: /rules }
+  applies_to:
+    detect: [python, javascript, go, java, shell, containers, terraform]
+    paths:
+      - "**/*.{py,js,jsx,mjs,cjs,ts,tsx,mts,cts,java,go,php,rb,cs,kt,scala,swift,rs,c,h,cpp,hpp,lua,ex,exs}"
+  timeout_s: 1800
+  network: none
+  exit_codes_ok: [0]
+  severity_map: { "level:error": high, "level:warning": medium, "level:note": low }
+outputs:
+  sarif: { path: /out/opengrep.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # app/views.py : commande lancée par un shell avec une entrée de la requête.
+    - { rule: scanoria-python-subprocess-shell, category: sast, min: 1 }
+    # app/views.py : pickle.loads d'un corps de requête.
+    - { rule: scanoria-python-pickle-load, category: sast, min: 1 }
+    # app/server.js : requête SQL concaténée.
+    - { rule: scanoria-js-sql-concat, category: sast, min: 1 }
+health: { command: ["opengrep", "--version"] }
+upgrade: { policy: on-demand }

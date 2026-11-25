@@ -38,6 +38,7 @@ import contextlib
 from . import applicability, catalogverify, common, feeds, fetch, gitmirror, modules, resultcache, sbom, \
     schedule, schema, svcnet, testbed, vigilance, workspace
 from .common import Fail
+from . import rulesets as rulesets_mod
 
 
 def _test_path(var, default):
@@ -82,6 +83,8 @@ LAYOUT = (
     (JOBS, 0o750, False, True),
     (TMP, 0o700, True, True),
     (INCOMING, 0o700, True, True),
+    # 0.7 (A, contrat 34) : jeux de règles du plan, déposés par le worker.
+    (JOBS + "/rulesets", 0o700, True, True),
     (WORK, 0o700, False, False),
     (RESULTS, 0o750, False, True),
     (WORKSPACES, 0o700, False, False),
@@ -464,10 +467,38 @@ def plan(reg, job):
         except Fail as f:
             out.append((_module_entry(mid, ver, "error", _err("E_OPTIONS_INVALID", "input", f.message), m), None))
             continue
+        # 0.7 (A, contrat 34) : jeux de règles G4 retenus par le plan.
+        skip, rsets = plan_rulesets(item, m, mid, ver)
+        if skip is not None:
+            out.append((skip, None))
+            continue
         spec = {"manifest": m, "options": options, "command": command, "history": history,
-                "service": svc, "mounts": mounts, "sbom_command": sbom_cmd}
+                "service": svc, "mounts": mounts, "sbom_command": sbom_cmd, "rulesets": rsets}
         out.append((_module_entry(mid, ver, "ok", None, m), spec))
     return out
+
+
+def plan_rulesets(item, m, mid, ver):
+    """(entrée de résultat si le module ne tourne pas, jeux de règles chargés)."""
+    spec = rulesets_mod.spec_of(m)
+    try:
+        rsets = rulesets_mod.load(item, m, SCANS)
+    except Fail as f:
+        return _module_entry(mid, ver, "error", _err(f.code, "input", f.message), m), None
+    if spec and spec.get("required") and not rsets:
+        return _module_entry(mid, ver, "skipped", _err(rulesets_mod.E_NONE, "input",
+                             "module %s needs a %s ruleset attached to the profile" % (mid, spec["engine"])), m), None
+    return None, rsets
+
+
+def ruleset_mount(ws, m, spec):
+    """/rules du module (toujours monté pour un module qui déclare scan.rulesets, vide sans jeu)."""
+    if rulesets_mod.spec_of(m) is None:
+        return [], {}
+    dest = os.path.join(ws, "rules", m["id"])
+    os.makedirs(os.path.dirname(dest), mode=0o755, exist_ok=True)
+    rulesets_mod.stage(spec.get("rulesets") or [], dest)
+    return [(dest, "/rules", "ro")], rulesets_mod.env_of(m, spec.get("rulesets") or [])
 
 
 def feeds_info(reg, m, leases=None):
@@ -754,6 +785,14 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
             # Objets de l'historique : ceux du miroir (alternates de /git, V2), en lecture seule.
             mounts.append((ctx["mirror"], "/mirror", "ro"))
     mounts += spec.get("mounts") or []
+    try:
+        rmounts, renv = ruleset_mount(ws, m, spec)
+    except (OSError, Fail) as e:
+        return finish("error", _err(rulesets_mod.E_INVALID, "input", "rulesets of module %s cannot be staged (%s)"
+                                    % (mid, getattr(e, "message", type(e).__name__))))
+    mounts += rmounts
+    if spec.get("rulesets"):
+        entry["rulesets"] = rulesets_mod.digest_of(spec["rulesets"])
     cache = scan_cache_dir(m, job)
     if cache:
         mounts.append((cache, "/cache", "rw"))
@@ -783,6 +822,8 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
         args += ["--timeout", str(timeout)]
         for k in sorted(scan.get("env") or {}):
             args += ["--env", "%s=%s" % (k, scan["env"][k])]
+        for k in sorted(renv):
+            args += ["--env", "%s=%s" % (k, renv[k])]
         if cache:
             args += ["--env", "SCANORIA_CACHE_DIR=/cache"]
         cmd = spec["command"]
@@ -818,6 +859,9 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
     if rc in (125, 126, 127):
         return finish("error", _err("E_PODMAN", "infra", "container of module %s could not start (exit %d)"
                                     % (mid, rc)), rc)
+    if rc == 3 and rulesets_mod.spec_of(m) is not None and spec.get("rulesets"):
+        # Contrat 34 : jeu de règles refusé par le moteur, jamais un résultat vide silencieux.
+        return finish("error", _err(rulesets_mod.E_INVALID, "input", "module %s rejected its rulesets (exit 3)" % mid), rc)
     if rc not in (scan.get("exit_codes_ok") or testbed.SCANNER_OK_RC):
         return finish("error", _err("E_TOOL_EXIT", "tool", "module %s exited with code %d" % (mid, rc)), rc)
     outputs, used = {}, set()

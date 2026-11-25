@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Image d'outil Scanoria pour OpenSSF Scorecard (0.7, chantier A, H2). L'image
+# amont (ghcr.io/ossf/scorecard, base cgr.dev/chainguard/static) n'a pas
+# d'interpréteur : le binaire Go statique /scorecard en est copié tel quel,
+# depuis l'image amont épinglée par empreinte, dans python:3.13-slim (épinglé),
+# où l'enveloppe sast_run.py de l'appliance convertit son JSON en SARIF.
+FROM ghcr.io/ossf/scorecard@sha256:70b14bcf41b0a1dda48742257a95bf284f81a6dca866e5c96e3f533bb102666f AS upstream
+
+FROM docker.io/library/python@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
+
+ARG SOURCE_DATE_EPOCH
+
+LABEL org.opencontainers.image.source="https://github.com/ossf/scorecard" \
+      org.opencontainers.image.revision="v5.7.0" \
+      org.opencontainers.image.version="5.7.0" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.description="OpenSSF Scorecard for Scanoria (upstream static binary)" \
+      io.scanoria.module="scorecard"
+
+COPY --from=upstream /scorecard /usr/local/bin/scorecard
+RUN /usr/local/bin/scorecard version
+
+USER 65534:65534

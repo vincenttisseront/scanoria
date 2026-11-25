@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module semgrep (0.7, chantier A) : Semgrep Community Edition, en option à
+# côté d'Opengrep. Le moteur est sous LGPL-2.1, mais les règles officielles
+# Semgrep (Semgrep Rules License) sont réservées à un usage interne et
+# interdites de redistribution : elles ne sont JAMAIS embarquées ni
+# téléchargées par l'appliance d'elle-même (CLAUDE.md § 5.1). L'administrateur
+# les importe lui-même dans un jeu de règles G4 (une modale en rappelle les
+# conditions) ; sans jeu de règles « semgrep » rattaché au profil, le plan ne
+# lance pas ce module. D'où restrictions: other, à accepter à l'activation.
+#
+# Amont relevé le 2026-11-25 : semgrep/semgrep 1.187.0 (Docker Hub, index OCI
+# multi-architecture), LICENSE LGPL-2.1 du dépôt semgrep/semgrep.
+id: semgrep
+name: Semgrep CE
+description:
+  fr: Analyse statique avec le moteur Semgrep CE et les jeux de règles que vous importez (règles officielles Semgrep comprises, pour un usage interne).
+  en: Static analysis with the Semgrep CE engine and the rulesets you import (official Semgrep rules included, for internal use).
+type: scanner
+categories: [sast]
+license:
+  spdx: LGPL-2.1-only
+  url: https://github.com/semgrep/semgrep/blob/v1.187.0/LICENSE
+  restrictions: other
+  verified_at: "2026-11-25"
+  notes: Moteur LGPL-2.1. Règles officielles Semgrep sous Semgrep Rules License, usage interne seulement et redistribution interdite, jamais fournies par Scanoria ; l'administrateur les télécharge et les importe lui-même.
+upstream:
+  homepage: https://semgrep.dev
+  source: https://github.com/semgrep/semgrep
+image: docker.io/semgrep/semgrep@sha256:0c8dfa7aa1ca8c50233ec9110e8cd88d139dedd603d56507493f74c6f4b3e062
+version: "1.187.0"
+resources: { min_ram_mb: 2048, min_cpu: 1, disk_mb: 1500 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/sast_run.py", "semgrep"]
+  tool: sast
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+    SEMGREP_SEND_METRICS: "off"
+    SEMGREP_ENABLE_VERSION_CHECK: "0"
+  rulesets: { engine: semgrep, mount: /rules, required: true }
+  applies_to:
+    paths:
+      - "**/*.{py,js,jsx,mjs,cjs,ts,tsx,mts,cts,java,go,php,rb,cs,kt,scala,swift,rs,c,h,cpp,hpp,lua,ex,exs,tf,yaml,yml,json}"
+  timeout_s: 1800
+  network: none
+  exit_codes_ok: [0]
+  severity_map: { "level:error": high, "level:warning": medium, "level:note": low }
+outputs:
+  sarif: { path: /out/semgrep.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    - { rule: scanoria-python-subprocess-shell, category: sast, min: 1 }
+    - { rule: scanoria-js-sql-concat, category: sast, min: 1 }
+health: { command: ["semgrep", "--version"] }
+upgrade: { policy: on-demand }

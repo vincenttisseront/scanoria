@@ -143,8 +143,12 @@ def key_for(job, m, spec, feeds, tree, sbom_file, sbom_mounted):
         if tool_sha is None:
             return None
     cmd = spec["sbom_command"] if sbom_file and spec.get("sbom_command") else spec["command"]
+    opts = spec.get("options") or {}
+    if spec.get("rulesets"):
+        # 0.7 (A, contrat 34) : les jeux de règles montés font partie de la configuration.
+        opts = dict(opts, **{"__rulesets": [[r["slug"], r["version"], r["sha256"]] for r in spec["rulesets"]]})
     return compute_key(m["id"], digest, input_, fv,
-                       options_sha256(spec.get("options") or {}, cmd, scan.get("env"), tool_sha))
+                       options_sha256(opts, cmd, scan.get("env"), tool_sha))
 
 
 def _attest_path(key):

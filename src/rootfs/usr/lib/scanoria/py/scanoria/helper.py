@@ -29,6 +29,7 @@ import uuid
 
 from . import aiendpoint, bundle, common, mirror, modules, netutil, offline, pkgdates, prefetch, provision, schema, vigilance
 from . import dns as dnscheck
+from . import rulesets
 from .common import Fail
 
 MAX_SIZE = 128 * 1024
@@ -47,6 +48,7 @@ TIMEOUTS = {
     "export-bundle": 3300, "import-bundle": 3300, "set-mirror": 180, "trust-key": 60,
     "self-sbom": 3300, "run-canaries": 3300, "start-trial": 1200,
     "prefetch-images": 3300,
+    "validate-ruleset": 420,
 }
 # Marge laissée entre l'échéance passée à scanoria-selfupdate et l'arrêt forcé
 # du helper : selfupdate ne franchit le point de non-retour (arrêt de la
@@ -505,6 +507,7 @@ ACTIONS = {
     "run-canaries": vigilance.act_run_canaries,
     "start-trial": vigilance.act_start_trial,
     "prefetch-images": prefetch.act_prefetch_images,
+    "validate-ruleset": rulesets.act_validate_ruleset,
 }
 
 

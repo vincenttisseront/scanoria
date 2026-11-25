@@ -1,0 +1,206 @@
+{
+ "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+ "runs": [
+  {
+   "invocations": [
+    {
+     "executionSuccessful": true,
+     "toolExecutionNotifications": [
+      {
+       "level": "warning",
+       "message": {
+        "text": "svc/broken.py: syntax error while parsing AST from file"
+       }
+      }
+     ]
+    }
+   ],
+   "properties": {
+    "scanoria": {
+     "wrapper": "sast_run",
+     "wrapper_version": "1.0.0"
+    }
+   },
+   "results": [
+    {
+     "level": "error",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "svc/handlers.py"
+        },
+        "region": {
+         "snippet": {
+          "text": "8 def ping(host):\n9     return subprocess.check_output('ping -c 1 ' + host, shell=True)\n"
+         },
+         "startLine": 9
+        }
+       }
+      }
+     ],
+     "message": {
+      "text": "subprocess call with shell=True identified, security issue."
+     },
+     "properties": {
+      "bandit_confidence": "HIGH",
+      "bandit_severity": "HIGH",
+      "severity": "high"
+     },
+     "ruleId": "bandit/B602",
+     "ruleIndex": 0
+    },
+    {
+     "level": "warning",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "svc/handlers.py"
+        },
+        "region": {
+         "snippet": {
+          "text": "13     return pickle.loads(blob)\n"
+         },
+         "startLine": 13
+        }
+       }
+      }
+     ],
+     "message": {
+      "text": "Pickle and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue."
+     },
+     "properties": {
+      "bandit_confidence": "HIGH",
+      "bandit_severity": "MEDIUM",
+      "severity": "medium"
+     },
+     "ruleId": "bandit/B301",
+     "ruleIndex": 1
+    },
+    {
+     "level": "note",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "svc/handlers.py"
+        },
+        "region": {
+         "snippet": {
+          "text": "17     return yaml.load(text)\n"
+         },
+         "startLine": 17
+        }
+       }
+      }
+     ],
+     "message": {
+      "text": "Use of unsafe yaml load."
+     },
+     "properties": {
+      "bandit_confidence": "LOW",
+      "bandit_severity": "MEDIUM",
+      "severity": "low"
+     },
+     "ruleId": "bandit/B506",
+     "ruleIndex": 2
+    },
+    {
+     "level": "note",
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "svc/settings.py"
+        },
+        "region": {
+         "snippet": {
+          "text": "[valeur masquée par Scanoria]"
+         },
+         "startLine": 3
+        }
+       }
+      }
+     ],
+     "message": {
+      "text": "Possible hardcoded password (B105)"
+     },
+     "properties": {
+      "bandit_confidence": "MEDIUM",
+      "bandit_severity": "LOW",
+      "severity": "low"
+     },
+     "ruleId": "bandit/B105",
+     "ruleIndex": 3
+    }
+   ],
+   "tool": {
+    "driver": {
+     "informationUri": "https://github.com/PyCQA/bandit",
+     "name": "Bandit",
+     "rules": [
+      {
+       "helpUri": "https://bandit.readthedocs.io/en/latest/plugins/b602_subprocess_popen_with_shell_equals_true.html",
+       "id": "bandit/B602",
+       "name": "subprocess_popen_with_shell_equals_true",
+       "properties": {
+        "tags": [
+         "security",
+         "CWE-78"
+        ]
+       },
+       "shortDescription": {
+        "text": "subprocess_popen_with_shell_equals_true"
+       }
+      },
+      {
+       "helpUri": "https://bandit.readthedocs.io/en/latest/blacklists/blacklist_calls.html#b301-pickle",
+       "id": "bandit/B301",
+       "name": "blacklist",
+       "properties": {
+        "tags": [
+         "security",
+         "CWE-502"
+        ]
+       },
+       "shortDescription": {
+        "text": "blacklist"
+       }
+      },
+      {
+       "helpUri": "https://bandit.readthedocs.io/",
+       "id": "bandit/B506",
+       "name": "yaml_load",
+       "properties": {
+        "tags": [
+         "security",
+         "CWE-20"
+        ]
+       },
+       "shortDescription": {
+        "text": "yaml_load"
+       }
+      },
+      {
+       "helpUri": "https://bandit.readthedocs.io/",
+       "id": "bandit/B105",
+       "name": "hardcoded_password_string",
+       "properties": {
+        "tags": [
+         "security",
+         "CWE-259"
+        ]
+       },
+       "shortDescription": {
+        "text": "hardcoded_password_string"
+       }
+      }
+     ],
+     "version": "unknown"
+    }
+   }
+  }
+ ],
+ "version": "2.1.0"
+}

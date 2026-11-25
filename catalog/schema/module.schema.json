@@ -673,6 +673,28 @@
               "description": "Motifs de chemins relatifs à la racine (« ** » : tout sous-répertoire, « * » : un segment)."
             }
           }
+        },
+        "rulesets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["engine", "mount"],
+          "description": "0.7 (G4, contrat 34) : le module lit les jeux de règles de la console pour ce moteur. Le runner monte en lecture seule les versions retenues par le plan sous <mount>/<slug>/ (fichier rules.yaml, gitleaks.toml ou policies.yaml ; requêtes KICS dépliées en <id>/query.rego et metadata.json), toujours, vide si aucun jeu n'est rattaché ; leurs sha256 sont figés dans le plan (G11). required : sans jeu de règles du moteur rattaché au profil, le module n'est pas planifié (Semgrep CE). Le code de sortie 3 de l'outil signale un jeu de règles refusé par le moteur (E_RULESET_INVALID, classe input).",
+          "properties": {
+            "engine": {
+              "enum": ["opengrep", "semgrep", "gitleaks", "checkov", "kics"]
+            },
+            "mount": {
+              "const": "/rules"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "env": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,40}$",
+              "description": "Moteur à un seul fichier de configuration (gitleaks : GITLEAKS_CONFIG) : un seul jeu de règles est retenu, et son chemin passe dans cette variable."
+            }
+          }
         }
       }
     },

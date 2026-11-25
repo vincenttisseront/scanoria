@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module scorecard (0.7, chantier A, H2) : posture du dépôt par OpenSSF
+# Scorecard, en mode --local (sources montées, réseau none) : contrôles fondés
+# sur les fichiers seulement (Dangerous-Workflow, Token-Permissions,
+# Pinned-Dependencies, Binary-Artifacts, Security-Policy, License,
+# Dependency-Update-Tool, Fuzzing, SAST, Packaging…). Les contrôles qui
+# exigent l'API de la forge (Branch-Protection, Code-Review, Maintained,
+# Signed-Releases…) sont omis par Scorecard et notés en couverture ; ils
+# seront calculés plus tard depuis le client de forge (contrat 30). Le mode
+# local marche pour toutes les forges, Forgejo compris.
+#
+# Seuil par défaut (principe 8, sans réglage) : option min_score ; un score
+# global en dessous produit le résultat « scorecard/score-below-threshold »,
+# de gravité high, catégorie ci, donc bloquant par la règle sast_block_from du
+# quality gate. Les contrôles faibles sont des résultats informatifs ou
+# faibles (zizmor porte déjà l'audit bloquant des workflows). Le score est
+# recalculé à chaque analyse complète, donc chaque nuit sur la branche
+# principale (contrat 33).
+#
+# Amont relevé le 2026-11-25 : Scorecard v5.7.0 (ghcr.io/ossf/scorecard, index
+# OCI), Apache-2.0. Image d'outil Scanoria (image/Containerfile).
+id: scorecard
+name: OpenSSF Scorecard
+description:
+  fr: Posture de sécurité du dépôt selon OpenSSF Scorecard (workflows dangereux, droits des jetons, dépendances épinglées, binaires, politique de sécurité…).
+  en: Repository security posture according to OpenSSF Scorecard (dangerous workflows, token permissions, pinned dependencies, binaries, security policy…).
+type: scanner
+categories: [ci]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/ossf/scorecard/blob/v5.7.0/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: Binaire Scorecard (Apache-2.0) copié tel quel de l'image amont ; image de base python:3.13-slim (PSF-2.0).
+upstream:
+  homepage: https://scorecard.dev
+  source: https://github.com/ossf/scorecard
+image_pending: true
+version: "5.7.0"
+resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 200 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties:
+    min_score:
+      type: number
+      minimum: 0
+      maximum: 10
+      default: 4
+      title: Score minimal
+      description: Score global de Scorecard (contrôles locaux) en dessous duquel un résultat bloquant est produit.
+options_i18n:
+  min_score:
+    fr: { title: Score minimal, description: Score global de Scorecard (contrôles locaux) en dessous duquel un résultat bloquant est produit. }
+    en: { title: Minimum score, description: Aggregate Scorecard score (local checks) below which a blocking finding is produced. }
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/sast_run.py", "scorecard", "--min-score={opt.min_score}"]
+  tool: sast
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+  timeout_s: 600
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/scorecard.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    - { rule: scorecard/Token-Permissions, category: ci, min: 1 }
+    - { rule: scorecard/score-below-threshold, category: ci, min: 1 }
+health: { command: ["scorecard", "version"] }
+upgrade: { policy: on-demand }

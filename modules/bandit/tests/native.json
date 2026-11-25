@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-11-25T00:00:00Z",
+  "errors": [{"filename": "/src/svc/broken.py", "reason": "syntax error while parsing AST from file"}],
+  "metrics": {},
+  "results": [
+    {"test_id": "B602", "test_name": "subprocess_popen_with_shell_equals_true", "issue_severity": "HIGH", "issue_confidence": "HIGH",
+     "issue_text": "subprocess call with shell=True identified, security issue.", "filename": "/src/svc/handlers.py", "line_number": 9,
+     "code": "8 def ping(host):\n9     return subprocess.check_output('ping -c 1 ' + host, shell=True)\n",
+     "issue_cwe": {"id": 78, "link": "https://cwe.mitre.org/data/definitions/78.html"},
+     "more_info": "https://bandit.readthedocs.io/en/latest/plugins/b602_subprocess_popen_with_shell_equals_true.html"},
+    {"test_id": "B301", "test_name": "blacklist", "issue_severity": "MEDIUM", "issue_confidence": "HIGH",
+     "issue_text": "Pickle and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue.",
+     "filename": "/src/svc/handlers.py", "line_number": 13, "code": "13     return pickle.loads(blob)\n",
+     "issue_cwe": {"id": 502, "link": "https://cwe.mitre.org/data/definitions/502.html"},
+     "more_info": "https://bandit.readthedocs.io/en/latest/blacklists/blacklist_calls.html#b301-pickle"},
+    {"test_id": "B506", "test_name": "yaml_load", "issue_severity": "MEDIUM", "issue_confidence": "LOW",
+     "issue_text": "Use of unsafe yaml load.", "filename": "/src/svc/handlers.py", "line_number": 17, "code": "17     return yaml.load(text)\n",
+     "issue_cwe": {"id": 20, "link": "https://cwe.mitre.org/data/definitions/20.html"}, "more_info": "https://bandit.readthedocs.io/"},
+    {"test_id": "B105", "test_name": "hardcoded_password_string", "issue_severity": "LOW", "issue_confidence": "MEDIUM",
+     "issue_text": "Possible hardcoded password: 'valeur-de-test'", "filename": "/src/svc/settings.py", "line_number": 3,
+     "code": "3 PASSWORD = 'valeur-de-test'\n", "issue_cwe": {"id": 259, "link": "https://cwe.mitre.org/data/definitions/259.html"}}
+  ]
+}

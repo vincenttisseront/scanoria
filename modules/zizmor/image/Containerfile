@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Image d'outil Scanoria pour zizmor (0.7, chantier A, H1). L'image amont
+# (ghcr.io/zizmorcore/zizmor) n'a pas d'interpréteur, et zizmor n'écrit son
+# SARIF que sur la sortie standard : l'enveloppe sast_run.py de l'appliance
+# (Python) le range dans /out. zizmor est installé depuis sa roue PyPI
+# (binaire Rust, MIT), à l'empreinte épinglée (requirements.lock).
+FROM docker.io/library/python@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
+
+ARG SOURCE_DATE_EPOCH
+
+LABEL org.opencontainers.image.source="https://github.com/zizmorcore/zizmor" \
+      org.opencontainers.image.revision="v1.33.1" \
+      org.opencontainers.image.version="1.33.1" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.description="zizmor for Scanoria (PyPI wheel, hash-pinned)" \
+      io.scanoria.module="zizmor"
+
+COPY requirements.lock /tmp/requirements.lock
+RUN python3 -m pip install --no-cache-dir --require-hashes --no-deps -r /tmp/requirements.lock \
+    && rm /tmp/requirements.lock \
+    && zizmor --version
+
+USER 65534:65534
