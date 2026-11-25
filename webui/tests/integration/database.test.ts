@@ -148,6 +148,11 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
       await q.query('DELETE FROM projects WHERE id = $1', [project])
     })
 
+    it('demande validate-ruleset (017) acceptée, types de 012 conservés', async () => {
+      const def = (await db.pool.query<{ def: string }>(`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'helper_requests_type_check'`)).rows[0]!.def
+      for (const t of ['validate-ruleset', 'prefetch-images', 'start-trial', 'set-hostname', 'package-dates']) expect(def).toContain(`'${t}'`)
+    })
+
     it('inventaire des agents (016) : cadres connus, taille bornée, suppression en cascade', async () => {
       const q = db.pool
       const p = (await q.query<{ id: string }>(`SELECT id FROM profiles ORDER BY slug LIMIT 1`)).rows[0]!.id
@@ -214,7 +219,7 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
       ])
       const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       const files = loadMigrationsFromDir(MIGRATIONS_DIR)
-      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql', '012_offline.sql', '013_triage_forges.sql', '014_profiles.sql', '015_forges.sql', '016_agent_inventories.sql'])
+      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql', '012_offline.sql', '013_triage_forges.sql', '014_profiles.sql', '015_forges.sql', '016_agent_inventories.sql', '017_validate_ruleset.sql'])
       expect(mig.rows).toEqual(files.map((f, i) => ({ version: i + 1, name: f.name, checksum: f.checksum })))
     })
 
