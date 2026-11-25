@@ -65,8 +65,9 @@ describe.skipIf(!DATABASE_URL || !FORGEJO)('b37-live : vrai Forgejo, gate de rel
     expect(res.status).toBe(200)
     return Buffer.from(await res.arrayBuffer())
   }
-  const gateStatus = async (sha: string) => ((await fj(tokens.admin, 'GET', `/repos/equipe/app/commits/${sha}/statuses`)) as Json[])
-    .find(s => s.context === 'scanoria/release-gate')
+  // Dernier statut du contexte (Forgejo garde l'historique ; l'ordre de la liste n'est pas garanti).
+  const gateStatus = async (sha: string) => ((await fj(tokens.admin, 'GET', `/repos/equipe/app/commits/${sha}/statuses?limit=50`)) as Json[])
+    .filter(s => s.context === 'scanoria/release-gate').sort((a, b) => b.id - a.id)[0]
 
   async function tag(name: string, prerelease: boolean): Promise<{ sha: string, releaseId: number }> {
     await fj(tokens.admin, 'POST', '/repos/equipe/app/tags', { tag_name: name, target: 'main' })
