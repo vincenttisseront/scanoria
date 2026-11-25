@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# F19 : SBOM de la console et des images des modules installés, comparés
+# chaque jour aux bases hors ligne (Syft, Grype, OSV-Scanner confinés, s'ils
+# sont installés ; rien n'est installé d'office). Basse priorité.
+[Unit]
+Description=Scanoria appliance SBOM and vulnerability check
+After=scanoria-feeds-refresh.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/scanoria-helper exec --origin timer --type self-sbom --params {}
+Nice=15
+IOSchedulingClass=idle
+UMask=0022
+PrivateTmp=yes
+ProtectHome=read-only

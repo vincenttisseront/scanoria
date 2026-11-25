@@ -54,6 +54,8 @@ export async function listScans(db: Queryable, q: ScanListQuery) {
   else if (q.status) add('s.status = ?', q.status)
   if (q.verdict) add('s.verdict = ?', q.verdict)
   if (q.trigger) add('s.trigger = ?', q.trigger)
+  // Les analyses d'essai (F13) se consultent depuis la fiche du module, pas dans la file ni l'historique.
+  else where.push(`s.trigger <> 'trial'`)
   const cond = where.length ? `WHERE ${where.join(' AND ')}` : ''
   // File active : dans l'ordre où le worker la prendra (G17) ; historique : le plus récent d'abord.
   const order = q.status === 'active' || q.status === 'queued'

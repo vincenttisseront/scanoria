@@ -63,6 +63,7 @@ async function runSelftest() {
       :failed="failed"
     />
     <SbomExposureBanner />
+    <VigilanceBanner />
     <div
       v-if="diag.alerts.value.length"
       class="space-y-2"

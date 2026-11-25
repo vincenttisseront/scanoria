@@ -28,7 +28,7 @@ import shutil
 import time
 import uuid
 
-from . import backup, catalogverify, common, feeds, pgadmin, quadlet, schema, services, testbed, variants
+from . import backup, catalogverify, common, feeds, pgadmin, quadlet, schema, services, testbed, variants, vigilance
 from .common import Fail
 
 MODULES_DIR = common.VARLIB + "/modules"
@@ -364,6 +364,9 @@ def remove_image(reg, image):
     if not image:
         return
     if any(e["manifest"].get("image") == image for e in reg["modules"].values()):
+        return
+    # 0.6 (G6, F13) : image d'une version figée par un projet ou d'un essai en cours.
+    if vigilance.image_retained(image):
         return
     podman("rmi", "--ignore", image, timeout=300)
 
@@ -1090,7 +1093,19 @@ def act_update_module(c):
     e.update(manifest=new, options=options, testbed=tb, last_error=None)
     if same_variant_change:
         refresh_dependents(reg, mid, log)
-    remove_image(reg, old.get("image"))
+    # 0.6 (G6) : une version figée par un projet garde son image et son manifeste.
+    # La mise à jour est déjà faite : un incident ici est journalisé sans la défaire,
+    # et l'ancienne image est gardée (le ménage nocturne la libère).
+    try:
+        if not vigilance.keep_pinned(old):
+            remove_image(reg, old.get("image"))
+        # Essai adopté (F13) : la candidate est désormais la version installée.
+        trial = vigilance.retained_for(mid, new["version"])
+        if trial and trial["kind"] == "trial":
+            vigilance.release(reg, mid, new["version"], remove_image=False)
+            vigilance.publish_state()
+    except (OSError, Fail) as exc:
+        common.log("update of %s: retained images not updated: %s" % (mid, exc))
     apply_sysctl(reg)
     if old["type"] == "service":
         op.step("route", 90)

@@ -68,6 +68,7 @@ REQUEST_TYPES = (
     "backup-module", "restore-module",
     "reset-service-admin",
     "package-dates",
+    "self-sbom", "run-canaries", "start-trial",
     "prefetch-images",
 )
 REJECT_CODES = frozenset((
@@ -86,6 +87,7 @@ ERROR_CODES = frozenset((
     "E_SONAR_UNAVAILABLE", "E_SONAR_ADMIN", "E_SONAR_API",
     "E_DTRACK_UNAVAILABLE", "E_DTRACK_ADMIN", "E_DTRACK_API",
     "E_EXPORT_FAILED",
+    "E_CANARY_FAILED", "E_TRIAL_INVALID", "E_TRIAL_IMAGE", "E_SELFSBOM_IMAGE", "E_SELFSBOM_OUTPUT",
     "E_PREFETCH_FAILED", "E_PREFETCH_UNKNOWN_IMAGE",
 ))
 ALL_CODES = frozenset(("OK",)) | REJECT_CODES | ERROR_CODES

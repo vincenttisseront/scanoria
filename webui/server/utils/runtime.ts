@@ -16,6 +16,7 @@ import { purgeSessions } from './sessions'
 import { syncIntel } from '../intel/import'
 import { backfillCorrelationKeys } from '../findings/correlation'
 import { packageDatesTick } from '../sbom/dates'
+import { vigilanceTick } from '../vigilance/tick'
 import { UUID_V4_RE } from '#shared/schemas'
 
 let readyResolve: () => void
@@ -65,6 +66,8 @@ export async function ingestNow(): Promise<void> {
     ticks += 1
     // H3 (0.5) : exports EPSS et KEV du helper importés environ chaque minute.
     if (ticks % 12 === 1) await syncIntelNow(pool, cfg.modulesStateFile)
+    // 0.6 (B) : versions figées, essais F13, canaris G14, vulnérabilités de l'appliance F19.
+    if (ticks % 12 === 1) await vigilanceTick(pool, cfg)
     if (ticks % 720 === 1) {
       await purgeSessions(pool)
       await purgeOldUploads(cfg.uploadsDir, await referencedUploads(pool))

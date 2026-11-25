@@ -178,6 +178,8 @@ canoniques).
 | `scanoria-firewall.service` | charge les règles au démarrage, avant le réseau |
 | `scanoria-firstboot.service` | lot C ; tant que `firstboot.done` est absent |
 | `scanoria-dns-check.timer` + `.path` + `.service` | 0.2 : `exec --origin timer --type check-dns` toutes les heures, à chaque réécriture de `appliance.json` (changement de nom) et après chaque changement de routage (§ 4.1) |
+| `scanoria-canaries.timer` + `.service` | 0.6 : chaque nuit (02:30, délai aléatoire 90 min), `exec --origin timer --type run-canaries`, priorité basse (`Nice=15`, E/S `idle`) |
+| `scanoria-self-sbom.timer` + `.service` | 0.6 : 40 min après le démarrage puis chaque jour (05:00, délai aléatoire 1 h), `exec --origin timer --type self-sbom` |
 
 ### 3.6 Environnement de la console (`/etc/scanoria/console.env`)
 
@@ -274,6 +276,9 @@ routing_resynced}`. Sans nom : `E_PRECONDITION` et `fqdn: null`.
 | `set-update-policy` | `channel`, `auto_check`, `auto_apply`, `maintenance_window` | `update.json` ; `auto_apply` exige une fenêtre | 30 s |
 | `run-selftest` | `quick` | `scanoria-selftest --json` ; rapport dans `output` | 300 s |
 | `check-dns` | aucun | 0.2, § 4.2 : sites des modules régénérés si le nom a changé, puis vérification DNS | 180 s |
+| `self-sbom` | aucun | 0.6, § 13 : SBOM de la console et des images installées, comparés par Grype et OSV-Scanner confinés (F19) | 3300 s |
+| `run-canaries` | `ids?` | 0.6, § 13 : banc d'essai F12 rejoué (G14) ; `E_CANARY_FAILED` si un canari échoue, sans jamais désactiver | 3300 s |
+| `start-trial` | `module`, `version`, `trial_id?`, `action?` (`start`, `abandon`) | 0.6, § 13 : candidate de l'index vérifié tirée par empreinte et retenue (F13), ou retirée | 1200 s |
 
 Schémas complets (JSON Schema 2020-12, `additionalProperties: false` partout) :
 `src/rootfs/usr/share/scanoria/requests/<type>.schema.json`. La console valide
@@ -749,3 +754,38 @@ SHA-256 est gardée). `POST /api/projects/:id/scans {ref, profile?}` → `202
 /api/scans/:id` est la route de la console, par session). Le client
 `scanoria-scan` attend le verdict et rend 0 (passed), 1 (failed), 2
 (inconclusive), 3 (erreur d'utilisation ou d'accès).
+
+## 13. Vigilance de l'appliance (0.6, chantier B)
+
+- **Images retenues** (`/var/lib/scanoria/modules/retained/<id>/<version>.json`,
+  root 0600) : manifeste vérifié et empreinte d'une version **figée** par un
+  projet (G6) ou **candidate** d'un essai (F13). Le runner ne lance une autre
+  version que l'installée que si elle est retenue et que l'empreinte concorde ;
+  sinon le module est `missing`, classe `infra` (G12), et le verdict non
+  concluant (G13). `modules.remove_image` ne retire jamais une image retenue.
+- **Versions figées** : la console publie `/var/lib/scanoria/pins/pins.json`
+  (`{version: 1, pins: [{module, version, image_digest}]}`), lu sans confiance
+  par le helper (fichier régulier, propriétaire `scanoria`, ≤ 1 Mio, JSON
+  strict). À la mise à jour d'un module, l'ancienne version figée est retenue.
+  Les versions qu'aucun projet ne fige plus et les essais de plus de 14 jours
+  sont retirés lors des passages `run-canaries` et `self-sbom`. Si `pins.json`
+  est illisible (absent : aucune version figée), le helper échoue fermé : aucune version figée n'est
+  retirée et l'ancienne version d'un module mis à jour est gardée.
+- **Essais et versions figées au runner** : une candidate d'essai ne sert qu'une
+  tâche marquée `trial` (le rejeu d'une analyse d'essai est refusé par la
+  console), et toute version autre que l'installée exige son empreinte.
+- **Canaris** : un échec est classé `detection` (le module tourne sans trouver
+  le cas connu, alerte et audit `module.canary-failed`) ou `infra` (délai,
+  mémoire, image, runner resté occupé : gardé dans l'historique, sans alerte).
+- **État publié** : `/var/lib/scanoria/vigilance/state.json` (root:scanoria
+  0640) : images retenues et dernier relevé `self-sbom` ; les SARIF des
+  comparateurs sont sous `vigilance/self/<console|module-<id>>/`.
+- **Analyses d'essai** (trigger `trial`, `trial_id`, `replay_of`, ref
+  `trial:<ref>`) : priorité 5, plan réduit au module essayé ; la tâche du runner
+  porte `trial: true` et l'empreinte de la candidate. Aucune ingestion : les
+  sorties sont comparées par empreinte G19 aux résultats de l'analyse d'origine
+  (`module_trials.summary`) ; ni verdict, ni statut, ni liste, ni statistique.
+- **SBOM de la console** : produit par `build.sh` (`npm sbom`, CycloneDX,
+  déterministe) et livré dans le lot signé sous
+  `/usr/share/scanoria/sbom/console.cdx.json`.
+

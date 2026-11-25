@@ -565,6 +565,15 @@ const testbedDetails = computed(() => {
         </div>
       </UCard>
 
+      <VigilanceModulePanel
+        v-if="inst"
+        :module-id="id"
+        :is-admin="isAdmin"
+        :scanner="inst.type === 'scanner'"
+        :busy="anyRunning"
+        @changed="load"
+      />
+
       <UsageModulePanel
         v-if="inst"
         :module-id="id"

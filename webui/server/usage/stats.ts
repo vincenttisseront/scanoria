@@ -22,7 +22,9 @@ export const USAGE_WINDOW_DAYS = 30
 export const DEFAULT_UNUSED_DAYS = 30
 
 /** Statuts d'un module d'analyse qui signifient qu'il a réellement tourné. */
-const RAN = `status NOT IN ('pending', 'running', 'missing', 'skipped')`
+// Les analyses d'essai (F13) mesurent une autre version : elles n'entrent pas dans l'usage du module.
+const RAN = `status NOT IN ('pending', 'running', 'missing', 'skipped')
+  AND NOT EXISTS (SELECT 1 FROM scans t WHERE t.id = scan_id AND t.trigger = 'trial')`
 
 export interface ScannerStats {
   runs: number
