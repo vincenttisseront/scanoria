@@ -17,6 +17,7 @@ import { readModulesState } from '../utils/catalog'
 import { logExcerpt, MAX_AI_EXCERPT } from '../health/log'
 import { FAILED_MODULE_STATUSES } from '../health/scans'
 import { gitRef, scanJobSchema, type JobCredential, type RunnerError, type ScanJob, type ScanResult } from './contract'
+import { checkEarlyFailure } from './early'
 import { copyModuleLog, jobPending, listIncomingJobs, readResult, readRunnerState, resultDir, withdrawJob, writeJob } from './files'
 import { defaultIntegrations, pendingGate, type Integrations } from './integrations'
 import {
@@ -57,6 +58,9 @@ interface QueuedRow {
   plan: unknown
   profile_id: string
   gate_id: string
+  /** 0.7 (D, contrat 33) : analyse de PR et analyse incrémentale (G18). */
+  pull_request?: unknown
+  incremental?: boolean
 }
 
 interface ActiveRow {
@@ -165,7 +169,8 @@ export class ScanWorker {
         return 'empty'
       }
       const r = await client.query<QueuedRow>(
-        `SELECT s.id, s.project_id, s.trigger, s.ref, s.commit_sha, s.upload_id, s.attempt, s.plan, s.profile_id, s.gate_id
+        `SELECT s.id, s.project_id, s.trigger, s.ref, s.commit_sha, s.upload_id, s.attempt, s.plan, s.profile_id, s.gate_id,
+                s.pull_request, s.incremental
            FROM scans s
           WHERE s.status = 'queued'
             AND (s.error ->> 'retry_at' IS NULL OR (s.error ->> 'retry_at')::timestamptz <= now())
@@ -292,7 +297,11 @@ export class ScanWorker {
     const plan: ScanPlan = {
       version: PLAN_VERSION,
       created_at: new Date().toISOString(),
-      source: { kind: recorrelate ? 'sbom' : project.source_kind, ref: scan.ref, commit: scan.commit_sha, history: recorrelate ? 'shallow' : planHistory(modules) },
+      source: {
+        kind: recorrelate ? 'sbom' : project.source_kind, ref: scan.ref, commit: scan.commit_sha, history: recorrelate ? 'shallow' : planHistory(modules),
+        // 0.7 (D, contrat 33) : fichiers modifiés d'une PR, figés dans le plan (G11, G18).
+        ...(incrementalFiles(scan) && !recorrelate ? { changed_files: incrementalFiles(scan) } : {}),
+      },
       profile: prof.rows[0]!,
       gate: { id: gate.rows[0]!.id, slug: gate.rows[0]!.slug, rules: rules.data },
       modules,
@@ -350,6 +359,8 @@ export class ScanWorker {
         ...(m.alternate && m.image_digest ? { image_digest: m.image_digest } : {}) })),
       ...(scan.trigger === TRIAL_TRIGGER ? { trial: true } : {}),
       cache: scan.trigger !== TRIAL_TRIGGER,
+      // 0.7 (D, contrat 33) : le runner les passe aux modules scan.incremental (G18).
+      ...(plan.source.changed_files ? { changed_files: plan.source.changed_files } : {}),
     }
     const parsed = scanJobSchema.safeParse(job)
     // Message générique : la tâche peut contenir un secret, jamais recopié.
@@ -405,6 +416,8 @@ export class ScanWorker {
     if (scan.status === 'dispatched' && !(await jobPending(this.cfg.scansDir, scan.job_id))) {
       await this.pool.query(`UPDATE scans SET status = 'running' WHERE id = $1 AND status = 'dispatched' AND job_id = $2`, [scan.id, scan.job_id])
     }
+    // 0.7 (D, V8) : blocage certain déjà connu → échec anticipé publié (contrat 35).
+    if (scan.status === 'running' && this.integrations.publishScan) await this.earlyCheck(scan)
     const plan = parsePlan(scan.plan)
     const deadline = (scan.started_at?.getTime() ?? now.getTime()) + ((plan?.timeout_s ?? 0) + this.cfg.resultMarginS) * 1000
     if (now.getTime() > deadline) {
@@ -414,6 +427,24 @@ export class ScanWorker {
         await this.failInfra(scan, err('E_RESULT_TIMEOUT', 'infra', 'no result from the runner before the plan deadline'))
       })
     }
+  }
+
+  /** Modules ingérés en avance par analyse (V8) ; oubliés à la fin de l'analyse. */
+  private readonly early = new Map<string, Set<string>>()
+
+  private async earlyCheck(scan: ActiveRow): Promise<void> {
+    const seen = this.early.get(scan.id) ?? new Set<string>()
+    this.early.set(scan.id, seen)
+    await this.withScanLock(scan.id, async () => {
+      if (!(await this.stillCurrent(scan))) return
+      const reasons = await checkEarlyFailure(this.pool, {
+        ingestModuleOutputs: this.integrations.ingestModuleOutputs,
+        finalizeScanFindings: this.integrations.finalizeScanFindings,
+        evaluateGate: this.integrations.evaluateGate,
+        publish: (db, id, why) => this.integrations.publishScan!(db, id, { phase: 'early', earlyReasons: why }),
+      }, scan, this.cfg.scansDir, seen)
+      if (reasons) this.log(`scan ${scan.id}: early failure (${reasons.join(', ')})`)
+    }).catch((e: unknown) => this.log(`scan ${scan.id}: early check failed: ${(e as Error).message}`))
   }
 
   /** Verrou consultatif par analyse : un seul worker ingère une analyse donnée. */
@@ -698,7 +729,9 @@ export class ScanWorker {
     }
     // 0.5 (B) : une re-corrélation ne déclare jamais un résultat corrigé (contrat 16) ;
     // une release attend les dates de publication de ses composants (H5).
-    const complete = outcome.complete && !(await isRecorrelation(this.pool, scanId))
+    // 0.7 (D) : une analyse de PR ne déclare jamais un résultat corrigé (la branche cible l'a encore).
+    this.early.delete(scanId)
+    const complete = outcome.complete && !(await isRecorrelation(this.pool, scanId)) && !(await isPullRequestScan(this.pool, scanId))
     // H5 : une release attend les dates (90 s au plus) ; au-delà, les dates manquantes restent visibles dans la couverture (G15).
     const dated = await awaitPackageDates(this.pool, scanId).catch((e: unknown) => {
       this.log(`scan ${scanId}: package dates: ${(e as Error).message}`)
@@ -711,6 +744,9 @@ export class ScanWorker {
     catch (e) {
       this.log(`scan ${scanId}: finalize failed: ${(e as Error).message}`)
     }
+    // 0.7 (D, contrat 33) : « nouveau » d'une PR = absent de la base de la PR (G18).
+    await this.integrations.applyPullRequestBaseline?.(this.pool, scanId)
+      .catch((e: unknown) => this.log(`scan ${scanId}: PR baseline: ${(e as Error).message}`))
     let details: VerdictDetails
     try {
       details = VerdictDetails.parse(await this.integrations.evaluateGate(this.pool, scanId))
@@ -740,6 +776,9 @@ export class ScanWorker {
       this.log(`scan ${scanId}: AI task not queued: ${(e as Error).message}`)
     }
     await this.requestDiagnosis(scanId, r.rows[0].project_id)
+    // 0.7 (D, contrat 30) : statut de commit, commentaire de PR et annotations ; ne lève jamais.
+    await this.integrations.publishScan?.(this.pool, scanId, { phase: 'final' })
+      .catch((e: unknown) => this.log(`scan ${scanId}: forge publication: ${(e as Error).message}`))
     await reportRecorrelation(this.pool, scanId).catch((e: unknown) => this.log(`scan ${scanId}: recorrelation report: ${(e as Error).message}`))
   }
 

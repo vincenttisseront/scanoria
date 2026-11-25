@@ -2,13 +2,15 @@
 // Copyright (C) 2026 Vincent Tisseront
 //
 // Contrat 3 de la 0.3 : forgeClient(forge) → client commun. Forgejo d'abord
-// (D4), GitHub ensuite ; GitLab n'est pas pris en charge en 0.3.
+// (D4), GitHub ensuite, GitLab depuis la 0.7 (chantier D).
 
 import type { Queryable } from '../utils/db'
 import { decryptSecret } from '../utils/secrets'
 import { ForgeError, normalizeBaseUrl } from './http'
 import { forgejoClient } from './forgejo'
 import { githubClient } from './github'
+import { gitlabClient } from './gitlab'
+import { getForgeApp, installationToken } from './apps'
 import type { ForgeAccess, ForgeClient } from './types'
 
 export { ForgeError, FORGE_ERROR_CODES, normalizeBaseUrl, setForgeTransport } from './http'
@@ -16,28 +18,12 @@ export type { ForgeErrorCode } from './http'
 export type { ForgeAccess, ForgeClient, ForgeRepo, ForgeTree, TreeEntry } from './types'
 export { checkFullName, checkRef, isSafeRef } from './types'
 
-function gitlabStub(): ForgeClient {
-  const unsupported = async (): Promise<never> => {
-    throw new ForgeError('E_FORGE_UNSUPPORTED')
-  }
-  return {
-    kind: 'gitlab',
-    check: unsupported,
-    listRepos: unsupported,
-    repo: unsupported,
-    branches: unsupported,
-    latestCommit: unsupported,
-    listTree: unsupported,
-    readFile: unsupported,
-  }
-}
-
 export function forgeClient(forge: ForgeAccess): ForgeClient {
   const access = { ...forge, base_url: normalizeBaseUrl(forge.base_url) }
   switch (forge.kind) {
     case 'forgejo': return forgejoClient(access)
     case 'github': return githubClient(access)
-    case 'gitlab': return gitlabStub()
+    case 'gitlab': return gitlabClient(access)
     default: throw new ForgeError('E_FORGE_UNSUPPORTED')
   }
 }
@@ -65,6 +51,21 @@ export async function getForge(db: Queryable, id: string): Promise<ForgeRow | nu
 
 /** Client d'une forge enregistrée (jeton déchiffré côté serveur seulement). */
 export async function openForge(db: Queryable, forge: ForgeRow): Promise<ForgeClient> {
+  return forgeClient(await forgeAccess(db, forge))
+}
+
+/**
+ * Accès à une forge enregistrée : jeton d'installation d'une application
+ * GitHub (J1, 0.7) s'il y en a une, sinon le jeton enregistré.
+ */
+export async function forgeAccess(db: Queryable, forge: ForgeRow): Promise<ForgeAccess> {
+  if (forge.kind === 'github') {
+    const app = await getForgeApp(db, forge.id)
+    if (app?.kind === 'github-app') {
+      const token = await installationToken(db, forge.base_url, app)
+      if (token) return { kind: forge.kind, base_url: forge.base_url, token }
+    }
+  }
   const token = forge.credential_id ? (await decryptSecret(db, forge.credential_id)).value : null
-  return forgeClient({ kind: forge.kind, base_url: forge.base_url, token })
+  return { kind: forge.kind, base_url: forge.base_url, token }
 }

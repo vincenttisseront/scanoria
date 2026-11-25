@@ -754,6 +754,10 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
             # Objets de l'historique : ceux du miroir (alternates de /git, V2), en lecture seule.
             mounts.append((ctx["mirror"], "/mirror", "ro"))
     mounts += spec.get("mounts") or []
+    # G18 (0.7, contrat 33) : un module incrémental lit la liste des fichiers modifiés de la PR.
+    changed = changed_files_mount(job, m, ws)
+    if changed:
+        mounts.append((changed, CHANGED_FILES_MOUNT, "ro"))
     cache = scan_cache_dir(m, job)
     if cache:
         mounts.append((cache, "/cache", "rw"))
@@ -785,6 +789,8 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
             args += ["--env", "%s=%s" % (k, scan["env"][k])]
         if cache:
             args += ["--env", "SCANORIA_CACHE_DIR=/cache"]
+        if changed:
+            args += ["--env", "SCANORIA_CHANGED_FILES=" + CHANGED_FILES_MOUNT]
         cmd = spec["command"]
         if use_sbom:
             cmd = spec["sbom_command"]
@@ -912,15 +918,73 @@ def inspect_source(job, ws, source, runnable):
     return kept
 
 
+# --------------------------------------------------------------------------
+# 0.7 (chantier D) : analyse incrémentale des PR (G18) et avancement (V8)
+# --------------------------------------------------------------------------
+
+CHANGED_FILES_MOUNT = "/changed-files.txt"
+MAX_CHANGED_FILES = 3000
+CHANGED_PATH_RE = re.compile(r"[^\x00-\x1f\x7f]{1,1024}\Z")
+
+
+def is_incremental(m):
+    return (m.get("scan") or {}).get("incremental") is True
+
+
+def changed_files(job):
+    """Fichiers modifiés de la PR (contrat 33), revalidés ; None : analyse complète."""
+    files = job.get("changed_files")
+    if not isinstance(files, list) or len(files) > MAX_CHANGED_FILES:
+        return None
+    out = []
+    for f in files:
+        if not isinstance(f, str) or not CHANGED_PATH_RE.match(f) or f.startswith("/") \
+                or any(seg in ("", ".", "..") for seg in f.split("/")):
+            return None
+        out.append(f)
+    return out
+
+
+def changed_files_mount(job, m, ws):
+    """Liste des fichiers modifiés (un par ligne) pour un module incrémental, ou None."""
+    files = changed_files(job) if is_incremental(m) else None
+    if files is None:
+        return None
+    path = os.path.join(ws, "changed-files.txt")
+    if not os.path.exists(path):
+        common.atomic_write(path, ("\n".join(files) + ("\n" if files else "")).encode("utf-8"), 0o644)
+    return path
+
+
+PROGRESS_LOCK = threading.Lock()
+
+
+def write_progress(rdir, entries):
+    """V8 (contrat 35) : results/<id>/progress.json, modules finis et leurs sorties validées,
+    réécrit de façon atomique après chaque module ; la console y lit un blocage certain
+    avant la fin de l'analyse. result.json reste la seule source du verdict complet."""
+    done = [{"id": e["id"], "status": e.get("status"), "outputs": e.get("outputs") or {}}
+            for e in entries if e.get("status") not in (None, "pending", "running")]
+    with PROGRESS_LOCK:
+        try:
+            write_result_file(os.path.join(rdir, "progress.json"),
+                              json.dumps({"schema": 1, "modules": done}, sort_keys=True).encode("utf-8"))
+        except OSError as e:
+            common.log("runner: progress not written: %r" % e)
+
+
 def run_modules(job, runnable, ws, rdir, reg, secrets, ctx=None):
     """Modules de la tâche, graphe et budget respectés (V3, V5) ; ctx : bases louées,
     miroir et masques de l'analyse (0.6, chantier C)."""
+    entries = [e for e, _ in runnable]
+
     def one(ent, spec):
         try:
             run_module(job, ent, spec, ws, rdir, reg, secrets, ctx)
         except Exception as e:  # noqa: BLE001 — une erreur d'un module n'arrête pas les autres
             common.log("runner: module %s failed: %r" % (ent["id"], e))
             ent.update(status="error", error=_err("E_RUNNER_INTERNAL", "infra", "internal runner error"))
+        write_progress(rdir, entries)
     def not_started(ent, e):
         common.log("runner: module %s not started: %r" % (ent["id"], e))
         ent.update(status="error", error=_err("E_RUNNER_INTERNAL", "infra", "module could not be started"))

@@ -59,7 +59,6 @@ export async function createForge(
   body: { kind: ForgeRow['kind'], name: string, base_url: string, token?: string, discovery: boolean },
   actor: AuditActor,
 ): Promise<{ forge: ForgeView, login: string | null }> {
-  if (body.kind === 'gitlab') throw projectError(501, 'E_FORGE_UNSUPPORTED')
   let baseUrl: string
   try {
     baseUrl = normalizeBaseUrl(body.base_url)

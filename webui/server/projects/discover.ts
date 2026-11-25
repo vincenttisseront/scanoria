@@ -81,7 +81,7 @@ export const DISCOVERY_INTERVAL_MS = 60 * 60 * 1000
 export async function dueForges(db: Queryable, now: Date): Promise<ForgeRow[]> {
   const { rows } = await db.query<{ id: string }>(
     `SELECT id::text FROM forges
-      WHERE discovery AND credential_id IS NOT NULL AND kind <> 'gitlab'
+      WHERE discovery AND credential_id IS NOT NULL
         AND (last_discovery_at IS NULL OR last_discovery_at <= $1::timestamptz - interval '1 hour')
       ORDER BY last_discovery_at NULLS FIRST LIMIT 20`,
     [now.toISOString()],
