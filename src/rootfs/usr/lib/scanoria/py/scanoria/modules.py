@@ -516,6 +516,11 @@ def provision(m, entry, phase, timeout):
                  "network": quadlet.PREFIX + m["id"], "timeout": max(1, int(timeout)), "phase": phase})
 
 
+def dtmirror_unregister(m):
+    from . import dtmirror
+    dtmirror.unregister_truststore(m)
+
+
 def write_units(m, entry, options):
     """Secrets Podman, fichier d'environnement et unités Quadlet du module."""
     mid = m["id"]
@@ -532,9 +537,11 @@ def write_units(m, entry, options):
         variants.remove_leaves(m)
     _, ulimits = services.requirements(m)
     sub = services.subnet(entry["subnet"]) if isinstance(entry.get("subnet"), int) else None
+    from . import dtmirror
+    extra = dtmirror.unit_extras(m, entry)
     quadlet.write(mid, quadlet.render(m, entry["host_port"], entry["enabled"], has_env, subnet=sub,
                                       secrets=[(services.podman_secret(mid, n), n, env) for n, env in secs],
-                                      ulimits=ulimits))
+                                      ulimits=ulimits, trust=extra.get("trust"), hosts=extra.get("hosts", ())))
 
 
 def stop_service(mid):
@@ -704,6 +711,7 @@ def undo_install(reg, mid):
         quadlet.remove(mid)
         systemctl("daemon-reload", check=False)
         services.unregister_podman_secrets(m)
+        dtmirror_unregister(m)
     if e.get("created_db"):
         pgadmin.drop_database(mid)
     if e.get("created_db") or e.get("created_dir"):
@@ -813,6 +821,7 @@ def act_uninstall_module(c):
             quadlet.remove(mid)
             systemctl("daemon-reload")
             services.unregister_podman_secrets(m)
+            dtmirror_unregister(m)
         if not keep:
             op.step("data", 50)
             remove_data(m)

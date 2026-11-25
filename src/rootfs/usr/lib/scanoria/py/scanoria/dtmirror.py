@@ -16,8 +16,13 @@ par la passerelle de Podman, sans filtrage. Désormais :
 2. Bases servies par l'appliance. Les bases des modules feed déjà tenues à
    jour par le helper (téléchargement, lot signé ou miroir F17) sont recopiées,
    en lecture seule, sous /var/lib/scanoria-feeds-mirror et servies par nginx
-   sur le port PORT, joignable depuis les seuls réseaux des modules (pare-feu
-   et allow nginx) :
+   en HTTPS sur le port PORT, sous le nom feeds.<nom de l'appliance>
+   (certificat de l'AC interne, scanoria-ca issue-feeds), joignable depuis le
+   seul réseau de Dependency-Track (règle d'entrée de la table ci-dessus et
+   allow nginx). Le conteneur résout ce nom vers la passerelle de son réseau
+   (AddHost) et fait confiance à l'AC interne par son magasin Java : copie du
+   cacerts de son image, AC ajoutée par le keytool de cette même image, monté
+   en lecture seule par un secret Podman (truststore) :
      /osv/<écosystème>/all.zip          base osv-db (mêmes fichiers qu'OSV) ;
      /osv/<écosystème>/modified_id.csv  vide : Dependency-Track ne fait alors
                                         aucune mise à jour incrémentale et
@@ -40,10 +45,14 @@ par la passerelle de Podman, sans filtrage. Désormais :
 """
 
 import gzip
+import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
+import ssl
+import tempfile
 
 from . import common
 from .common import Fail
@@ -54,6 +63,22 @@ PORT = 9790
 NFT_FILE = common.ETC + "/nftables/svc-egress.nft"
 TABLE = "scanoria_svc_egress"
 STATUS = common.VARLIB + "/offline/dtrack-sources.json"
+FEEDS_LABEL = "feeds"
+CA_CERT = common.ETC + "/pki/ca/ca.crt"
+TRUST_SECRET = "truststore"
+TRUST_ALIAS = "scanoria-appliance-ca"
+MAX_TRUSTSTORE = 400 << 10          # sous la limite des secrets Podman (512 Kio)
+JAVA_HOME_RE = re.compile(r"/[A-Za-z0-9._/-]{1,120}\Z")
+# Magasin Java de l'image + AC interne, par le keytool de l'image elle-même
+# (même format et même version de Java que Dependency-Track). « changeit » est
+# le mot de passe public, documenté, du cacerts des JDK : le magasin ne
+# contient que des certificats publics.
+TRUST_SCRIPT = (
+    'set -eu; cp "$JAVA_HOME/lib/security/cacerts" /out/cacerts; '
+    'keytool -importcert -noprompt -keystore /out/cacerts -storepass changeit '
+    '-alias %(alias)s -file /in/ca.crt > /dev/null 2>&1; '
+    'keytool -list -v -keystore /out/cacerts -storepass changeit -alias %(alias)s > /out/list.txt; '
+    'printf %%s "$JAVA_HOME" > /out/java_home' % {"alias": TRUST_ALIAS})
 GAPS = (
     {"id": "nvd", "reason": "no-feed"},
     {"id": "ghsa", "reason": "token-required"},
@@ -80,6 +105,157 @@ def gateway(reg=None):
     return services.gateway(e["subnet"]) if isinstance(e.get("subnet"), int) else None
 
 
+def dt_subnet(reg=None):
+    """Réseau de Dependency-Track (seul autorisé à joindre le miroir), ou None."""
+    from . import services
+    e = (reg or _registry())["modules"].get(DT_ID) or {}
+    return str(services.subnet(e["subnet"])) if isinstance(e.get("subnet"), int) else None
+
+
+def feeds_host(fqdn):
+    return "%s.%s" % (FEEDS_LABEL, fqdn)
+
+
+def _fqdn():
+    from . import routing
+    fqdn = routing.appliance_fqdn()
+    if fqdn is None:
+        raise Fail("E_PRECONDITION", "appliance name not set")
+    return fqdn
+
+
+# --------------------------------------------------------------------------
+# TLS du miroir : certificat de l'AC interne et magasin Java du conteneur
+# --------------------------------------------------------------------------
+
+def ensure_tls(timeout=120):
+    """Certificat feeds.<nom> émis ou renouvelé par l'AC interne (scanoria-ca)."""
+    out, _ = common.run_protocol("scanoria-ca", ["issue-feeds", "--fqdn", _fqdn()], timeout=timeout)
+    return out
+
+
+def _ca_sha256():
+    try:
+        with open(CA_CERT, encoding="ascii") as f:
+            der = ssl.PEM_cert_to_DER_cert(f.read(64 << 10))
+    except (OSError, ValueError, UnicodeDecodeError):
+        raise Fail("E_PRECONDITION", "internal CA missing")
+    return hashlib.sha256(der).hexdigest()
+
+
+def _trust_meta_path(mid):
+    from . import services
+    return os.path.join(services.secrets_dir(mid), TRUST_SECRET + ".json")
+
+
+def _read_trust_meta(mid):
+    try:
+        meta = common.load_json_file(_trust_meta_path(mid), 1 << 16)
+    except (OSError, common.JsonError):
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
+def _listed_sha256(text):
+    m = re.search(r"SHA256:\s*([0-9A-Fa-f:]{95})", text)
+    return m.group(1).replace(":", "").lower() if m else None
+
+
+def build_truststore(m, timeout=600):
+    """Construit le magasin Java (si l'AC ou l'image ont changé) ; True s'il a été refait."""
+    from . import services
+    mid = m["id"]
+    want = {"ca_sha256": _ca_sha256(), "image": m["image"]}
+    meta = _read_trust_meta(mid) or {}
+    path = services.secret_path(mid, TRUST_SECRET)
+    if all(meta.get(k) == v for k, v in want.items()) and JAVA_HOME_RE.match(str(meta.get("java_home"))) \
+            and os.path.isfile(path) and not os.path.islink(path):
+        return False
+    os.makedirs(services.secrets_dir(mid), mode=0o700, exist_ok=True)
+    work = tempfile.mkdtemp(prefix=".truststore-", dir=services.module_dir(mid))
+    try:
+        indir, outdir = os.path.join(work, "in"), os.path.join(work, "out")
+        os.mkdir(indir, 0o700)
+        os.mkdir(outdir, 0o700)
+        shutil.copyfile(CA_CERT, os.path.join(indir, "ca.crt"))
+        r = common.run("podman", [
+            "run", "--rm", "--pull=never", "--network=none", "--read-only", "--cap-drop=ALL",
+            "--security-opt=no-new-privileges", "--user", "0:0", "--memory=512m", "--pids-limit=256",
+            "--entrypoint", "/bin/sh", "-v", indir + ":/in:ro", "-v", outdir + ":/out",
+            m["image"], "-c", TRUST_SCRIPT], timeout=timeout, stderr_tail=400)
+        if r.returncode != 0:
+            raise Fail("E_INTERNAL", "Java trust store of %s could not be built (%s)" % (
+                mid, (r.stderr or b"").decode("utf-8", "replace").strip()[-200:] or "podman %d" % r.returncode))
+        store = os.path.join(outdir, "cacerts")
+        with open(os.path.join(outdir, "java_home"), encoding="ascii") as f:
+            java_home = f.read(200)
+        with open(os.path.join(outdir, "list.txt"), encoding="utf-8", errors="replace") as f:
+            listed = _listed_sha256(f.read(64 << 10))
+        if not JAVA_HOME_RE.match(java_home) or ".." in java_home.split("/"):
+            raise Fail("E_INTERNAL", "unexpected JAVA_HOME in the image of %s" % mid)
+        if listed != want["ca_sha256"]:
+            raise Fail("E_INTERNAL", "internal CA not found in the trust store of %s" % mid)
+        if os.path.islink(store) or not os.path.isfile(store) or not 0 < os.path.getsize(store) <= MAX_TRUSTSTORE:
+            raise Fail("E_INTERNAL", "unexpected trust store size for %s" % mid)
+        with open(store, "rb") as f:
+            common.atomic_write(path, f.read(), 0o600, group_scanoria=False)
+    except (OSError, UnicodeDecodeError) as e:
+        raise Fail("E_INTERNAL", "Java trust store of %s could not be built (%s)" % (mid, e.__class__.__name__))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    common.write_json(_trust_meta_path(mid), dict(want, java_home=java_home, built_at=common.iso(common.now())),
+                      0o600)
+    return True
+
+
+def register_truststore(m):
+    from . import services
+    mid = m["id"]
+    name = services.podman_secret(mid, TRUST_SECRET)
+    common.run("podman", ["secret", "rm", name], timeout=120)
+    if common.run("podman", ["secret", "create", name, services.secret_path(mid, TRUST_SECRET)],
+                  timeout=120).returncode != 0:
+        raise Fail("E_INTERNAL", "podman secret of %s could not be created" % mid)
+
+
+def unregister_truststore(m):
+    from . import services
+    if m.get("id") == DT_ID:
+        common.run("podman", ["secret", "rm", services.podman_secret(DT_ID, TRUST_SECRET)], timeout=120)
+
+
+def unit_extras(m, entry, timeout=600):
+    """Pour Dependency-Track (avant d'écrire ses unités) : certificat du miroir,
+    magasin Java monté en lecture seule et nom du miroir vers la passerelle.
+    Autres modules : rien. Retourne {trust: (secret, cible), hosts: [(nom, ip)]}."""
+    from . import services
+    if m.get("id") != DT_ID:
+        return {}
+    if not isinstance(entry.get("subnet"), int):
+        raise Fail("E_INTERNAL", "Dependency-Track has no module network")
+    ensure_tls()
+    build_truststore(m, timeout=timeout)
+    register_truststore(m)
+    java_home = (_read_trust_meta(m["id"]) or {}).get("java_home")
+    return {"trust": (services.podman_secret(m["id"], TRUST_SECRET), java_home + "/lib/security/cacerts"),
+            "hosts": [(feeds_host(_fqdn()), str(services.gateway(entry["subnet"])))]}
+
+
+def refresh_tls(reg=None, timeout=600):
+    """Renouvellement (cert-renew) et changement d'AC : certificat refait au besoin ;
+    magasin reconstruit et Dependency-Track redémarré si l'AC a changé."""
+    reg = reg or _registry()
+    e = reg["modules"].get(DT_ID)
+    if not e:
+        return None
+    out = ensure_tls()
+    m = e.get("manifest") or {}
+    if m.get("image") and build_truststore(dict(m, id=DT_ID), timeout=timeout):
+        register_truststore(dict(m, id=DT_ID))
+        common.run("systemctl", ["try-restart", "scanoria-mod-%s.service" % DT_ID], timeout=300)
+    return out
+
+
 # --------------------------------------------------------------------------
 # Sortie des modules permanents
 # --------------------------------------------------------------------------
@@ -98,7 +274,14 @@ def render_egress(reg):
             continue
         lines.append("\t\tip saddr %s counter reject" % services.subnet(e["subnet"]))
         closed.append(mid)
-    lines += ["\t}", "}", ""]
+    lines.append("\t}")
+    # Miroir des bases (PORT) : réservé au réseau de Dependency-Track ; tout
+    # autre réseau de module est rejeté avant nginx (qui le refuse aussi).
+    dt = dt_subnet(reg)
+    lines += ["\tchain input {", "\t\ttype filter hook input priority filter - 4; policy accept;",
+              ("\t\tiifname \"podman*\" tcp dport %d ip saddr != %s counter drop" % (PORT, dt)) if dt
+              else ("\t\tiifname \"podman*\" tcp dport %d counter drop" % PORT),
+              "\t}", "}", ""]
     return "\n".join(lines), closed
 
 
@@ -233,10 +416,10 @@ def status():
     return _read_status()
 
 
-def properties(gw, sources):
+def properties(host, sources):
     osv = next((s for s in sources if s["id"] == "osv"), {})
     epss = next((s for s in sources if s["id"] == "epss"), {})
-    base = "http://%s:%d" % (gw, PORT)
+    base = "https://%s:%d" % (host, PORT)
     props = [
         ("vuln-source", "google.osv.base.url", base + "/osv/"),
         ("vuln-source", "google.osv.enabled", ";".join(osv.get("ecosystems") or [])),
@@ -262,8 +445,8 @@ def configure(http, jwt):
         error = "no module network"
     else:
         try:
-            code, _, _ = http.call("POST", "api/v1/configProperty/aggregate", body=properties(gw, st["sources"]),
-                                   jwt=jwt)
+            code, _, _ = http.call("POST", "api/v1/configProperty/aggregate",
+                                   body=properties(feeds_host(_fqdn()), st["sources"]), jwt=jwt)
         except Fail as e:
             code, error = 0, e.message[:200]
         if error is None and code not in (200, 201, 304):

@@ -687,7 +687,15 @@ def cmd_scheduled(job):
             return 0
         return cmd_exec("timer", "export-bundle", '{"scheduled": true}')
     if job == "cert-renew":
-        if tls_mode() != "internal" or appliance_fqdn() is None:
+        if appliance_fqdn() is None:
+            return 0
+        # Certificat du miroir des bases (feeds.<nom>), quel que soit le mode TLS.
+        try:
+            from . import dtmirror
+            dtmirror.refresh_tls()
+        except Fail as e:
+            common.log("feeds mirror certificate not renewed: %s" % e.message)
+        if tls_mode() != "internal":
             return 0
         return cmd_exec("timer", "issue-certificate", '{"force": false}')
     if job == "update-apply":

@@ -46,6 +46,7 @@ RESERVED_PORTS = frozenset((3000, 5432))
 PORT_MIN, PORT_MAX = 1024, 65535
 MAX_SERVICES = 200
 SAFE_RE = re.compile(r"[a-z0-9.-]{1,253}\Z", re.ASCII)
+ALLOW_RE = re.compile(r"(-|[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2})\Z", re.ASCII)
 PLACEHOLDER_RE = re.compile(r"@[A-Z_]+@")
 
 
@@ -93,8 +94,10 @@ def _template(name):
         return f.read()
 
 
-def _render(name, fqdn, tls, sid="-", host="-", port="-"):
-    text = _template(name)
+def _render(name, fqdn, tls, sid="-", host="-", port="-", allow="-"):
+    if not ALLOW_RE.match(allow):
+        raise Fail("E_INVALID_PARAM", "unsafe value for nginx template")
+    text = _template(name).replace("@ALLOW@", allow)
     for key, val in (("@ID@", sid), ("@HOST@", host), ("@PORT@", port),
                      ("@FQDN_RE@", _safe(fqdn).replace(".", "\\.")), ("@FQDN@", fqdn)):
         text = text.replace(key, val if key == "@FQDN_RE@" else _safe(val))
@@ -125,7 +128,14 @@ def extra_sites(fqdn, tls):
     if mirror.published():
         out[MIRROR_SITE] = _render("mirror.conf.tmpl", fqdn, tls, host="mirror.%s" % fqdn)
     if dtmirror.dt_installed():
-        out[FEEDS_SITE] = _render("feeds-mirror.conf.tmpl", fqdn, tls, port=str(dtmirror.PORT))
+        # Réseau de Dependency-Track seul (adresse validée ici, jamais lue telle quelle) ;
+        # sans réseau connu, personne : « 127.0.0.1/32 » ne passe ni nftables ni un module.
+        import ipaddress
+        sub = dtmirror.dt_subnet()
+        allow = str(ipaddress.IPv4Network(sub)) if sub else "127.0.0.1/32"
+        if not os.path.isfile(common.ETC + "/pki/feeds/fullchain.pem"):
+            dtmirror.ensure_tls()
+        out[FEEDS_SITE] = _render("feeds-mirror.conf.tmpl", fqdn, tls, port=str(dtmirror.PORT), allow=allow)
     return out
 
 

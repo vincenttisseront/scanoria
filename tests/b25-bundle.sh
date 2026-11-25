@@ -313,6 +313,51 @@ expect "export périodique dû : lot produit" "$(code)/$(jq -r .scheduled "$A/va
 hx "$A" export-bundle '{"scheduled": true}'
 expect "export périodique pas encore dû : rien" "$(code)/$(out .skipped)" OK/not-due
 
+# --- Miroir des bases servi à Dependency-Track : HTTPS, réseau de DT seul ---------------
+DTR=$(py "$A" '
+import ipaddress, json
+from scanoria import dtmirror, quadlet, routing, services
+reg = {"modules": {"dependency-track": {"subnet": 3, "manifest": {"type": "service", "service": {}}},
+                   "other": {"subnet": 4, "manifest": {"type": "service", "service": {}}}}}
+nft, _ = dtmirror.render_egress(reg)
+none, _ = dtmirror.render_egress({"modules": {}})
+props = {p["propertyName"]: p["propertyValue"] for p in dtmirror.properties("feeds.analyse.exemple.test", [])}
+m = {"id": "dependency-track", "type": "service", "image": "docker.io/x/y@sha256:" + "a" * 64,
+     "service": {"port": 8080}}
+unit = quadlet.render(m, 18001, True, False, trust=("scanoria-mod-dependency-track-truststore", "/opt/java/lib/security/cacerts"),
+                      hosts=[("feeds.analyse.exemple.test", "10.90.3.1")])["scanoria-mod-dependency-track.container"]
+bad = []
+for kw in ({"trust": ("scanoria-mod-dependency-track-truststore", "/opt/../etc/passwd")},
+           {"trust": ("autre", "/opt/java/lib/security/cacerts")},
+           {"hosts": [("feeds.analyse.exemple.test\nExec=x", "10.90.3.1")]},
+           {"hosts": [("feeds.analyse.exemple.test", "10.90.3.1\nExec=x")]}):
+    try:
+        quadlet.render(m, 18001, True, False, **kw)
+        bad.append("accepté")
+    except Exception as e:
+        bad.append(getattr(e, "code", "?"))
+site = routing._render("feeds-mirror.conf.tmpl", "analyse.exemple.test", "", port="9790", allow="10.90.3.0/24")
+try:
+    routing._render("feeds-mirror.conf.tmpl", "analyse.exemple.test", "", port="9790", allow="all; allow 0.0.0.0/0")
+    hostile = "accepté"
+except Exception as e:
+    hostile = e.code
+print(json.dumps({"nft_dt": "tcp dport 9790 ip saddr != %s counter drop" % services.subnet(3) in nft,
+                  "nft_none": "tcp dport 9790 counter drop" in none,
+                  "urls": sorted({v.split("/")[2] for k, v in props.items() if k.endswith("url")}),
+                  "schemes": sorted({v.split(":")[0] for k, v in props.items() if k.endswith("url")}),
+                  "secret": "Secret=scanoria-mod-dependency-track-truststore,type=mount,target=/opt/java/lib/security/cacerts,mode=0444" in unit,
+                  "host": "AddHost=feeds.analyse.exemple.test:10.90.3.1" in unit, "bad": bad,
+                  "listen": "listen 9790 ssl;" in site, "name": "server_name feeds.analyse.exemple.test;" in site,
+                  "allow": "allow 10.90.3.0/24;" in site and "10.90.0.0/16" not in site,
+                  "cert": "ssl_certificate /etc/scanoria/pki/feeds/fullchain.pem;" in site, "hostile": hostile}))')
+expect "miroir DT : port réservé au réseau de Dependency-Track (nftables)" "$(jq -r '"\(.nft_dt)/\(.nft_none)"' <<< "$DTR")" true/true
+expect "miroir DT : adresses HTTPS sous feeds.<nom>" "$(jq -c '[.schemes, .urls]' <<< "$DTR")" '[["https"],["feeds.analyse.exemple.test:9790"]]'
+expect "miroir DT : magasin monté en lecture seule, nom vers la passerelle" "$(jq -r '"\(.secret)/\(.host)"' <<< "$DTR")" true/true
+expect "miroir DT : chemin, secret, nom et adresse hostiles refusés" "$(jq -c .bad <<< "$DTR")" '["E_INVALID_PARAM","E_INVALID_PARAM","E_INVALID_PARAM","E_INVALID_PARAM"]'
+expect "miroir DT : site nginx en TLS, certificat feeds, réseau de DT seul" "$(jq -r '"\(.listen)/\(.name)/\(.cert)/\(.allow)"' <<< "$DTR")" true/true/true/true
+expect "miroir DT : réseau autorisé hostile refusé" "$(jq -r .hostile <<< "$DTR")" E_INVALID_PARAM
+
 echo
 echo "b25 : $PASS réussis, $FAIL échoués"
 [[ "$FAIL" -eq 0 ]]
