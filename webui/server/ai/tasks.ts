@@ -27,6 +27,7 @@ import { diagnoseAppliance } from './tasks/diagnose-appliance'
 import { nlSearch } from './tasks/nl-search'
 import { generateRule } from './tasks/rulegen'
 import { draftException } from './tasks/exception'
+import { releaseNotes } from './tasks/release-notes'
 
 export type { FindingInput, TaskContext, TaskDefinition } from './task-kit'
 
@@ -153,7 +154,8 @@ export const explainVerdict: TaskDefinition<VerdictInput, ExplainVerdictOutput> 
 
 export const TASKS: Record<string, TaskDefinition> = Object.fromEntries(
   [explainFinding, explainVerdict, triageFinding, summarizeScan, classifySecret, diagnoseScan, translateRule,
-    embedFinding, assessReachability, explainLicense, diagnoseAppliance, draftException, nlSearch, generateRule]
+    embedFinding, assessReachability, explainLicense, diagnoseAppliance, draftException, nlSearch, generateRule,
+    releaseNotes]
     .map(d => [d.kind, d as unknown as TaskDefinition]),
 )
 export const TASK_KINDS = Object.keys(TASKS)

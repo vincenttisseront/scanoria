@@ -9,6 +9,8 @@
 #   SCANORIA_TOKEN=scn_… scanoria-scan --url https://analyse.exemple.test \
 #       --project <id> --ref <branche|tag|commit> [--profile <profil>] \
 #       [--wait] [--timeout <s>] [--cacert <ac.pem>]
+#   SCANORIA_TOKEN=scn_… scanoria-scan --url … --project <id> --profile release \
+#       --ref <tag> [--commit <sha>] --wait [--report rapport.json]
 #   SCANORIA_TOKEN=scn_… scanoria-scan --url … --scan <id> --wait
 #   SCANORIA_TOKEN=scn_… scanoria-scan upload <résultats.sarif|sbom.cdx.json> --url … \
 #       --project <id> [--ref <réf>] [--commit <sha>] [--tool <nom>] [--tool-version <v>] \
@@ -17,6 +19,12 @@
 # « upload » (0.6, J6) téléverse des résultats produits ailleurs (SARIF 2.1.0 ou
 # CycloneDX 1.5/1.6, 32 Mo au plus) : la console les valide, crée une analyse
 # « externe », évalue le quality gate et le client en affiche le verdict.
+#
+# « --profile release » (0.8, § 7.2, mode poussé) demande l'analyse de release
+# du tag (une seule par tag : un second appel rend la même analyse) ; avec
+# --report, le rapport signé est téléchargé une fois le verdict rendu, à
+# vérifier par scanoria-verify. --commit est requis si l'appliance n'a pas
+# accès à la forge du projet.
 #
 # Le jeton est lu dans SCANORIA_TOKEN, jamais en argument (il apparaîtrait
 # dans la liste des processus et dans les journaux de CI). Les options ont
@@ -45,6 +53,7 @@ COMMIT=
 TOOL=
 TOOL_VERSION=
 CATEGORY=
+REPORT=
 QUIET=0
 case ${SCANORIA_LANG:-${LC_ALL:-${LANG:-}}} in
   en*) L=en ;;
@@ -70,6 +79,8 @@ usage() {
   cat <<'EOF'
 scanoria-scan --url URL (--project ID --ref REF [--profile P] | --scan ID)
               [--wait] [--timeout S] [--cacert FILE] [--quiet]
+scanoria-scan --url URL --project ID --profile release --ref TAG [--commit SHA]
+              --wait [--report FILE]
 scanoria-scan upload FILE --url URL --project ID [--ref REF] [--commit SHA]
               [--tool NAME] [--tool-version V] [--category C] [--cacert FILE] [--quiet]
 Token: SCANORIA_TOKEN environment variable (never an argument).
@@ -100,6 +111,7 @@ while [ $# -gt 0 ]; do
     --scan) need_value "$@"; SCAN=$2; shift 2 ;;
     --timeout) need_value "$@"; TIMEOUT=$2; shift 2 ;;
     --cacert) need_value "$@"; CACERT=$2; shift 2 ;;
+    --report) need_value "$@"; REPORT=$2; shift 2 ;;
     --wait) WAIT=1; shift ;;
     --quiet|-q) QUIET=1; shift ;;
     --token|--token=*) die 3 "le jeton se passe par la variable SCANORIA_TOKEN, jamais en argument" "pass the token in SCANORIA_TOKEN, never as an argument" ;;
@@ -136,6 +148,14 @@ elif [ -n "$SCAN" ]; then
 else
   printf '%s' "$PROJECT" | grep -Eq "$UUID_RE" || die 3 "--project doit être l'identifiant du projet (page Intégration CI)" "--project must be the project id (CI integration page)"
   [ -n "$REF" ] || die 3 "--ref requis" "--ref is required"
+  if [ "$PROFILE" = release ]; then
+    [ -z "$COMMIT" ] || printf '%s' "$COMMIT" | grep -Eq '^[0-9a-f]{40,64}$' || die 3 "--commit attend une empreinte de commit complète" "--commit expects a full commit hash"
+  fi
+fi
+if [ -n "$REPORT" ]; then
+  [ "$PROFILE" = release ] || [ -n "$SCAN" ] || die 3 "--report exige --profile release (ou --scan)" "--report requires --profile release (or --scan)"
+  [ -z "$UPLOAD" ] || die 3 "upload et --report sont incompatibles" "upload and --report cannot be combined"
+  WAIT=1
 fi
 case $TIMEOUT in
   ''|*[!0-9]*) die 3 "--timeout attend un nombre de secondes" "--timeout expects a number of seconds" ;;
@@ -206,11 +226,34 @@ if [ -n "$UPLOAD" ]; then
     "scanoria-scan: $(jq -r '.results' "$TMP/body") external results ($(jq -r '.source.tool' "$TMP/body")): scan #$(jq -r '.number' "$TMP/body")"
   printf '%s\n' "$SCAN"
 elif [ -z "$SCAN" ]; then
-  body=$(jq -cn --arg ref "$REF" --arg profile "$PROFILE" '{ref: $ref} + (if $profile == "" then {} else {profile: $profile} end)')
-  status=$(api POST "/api/projects/$PROJECT/scans" "$body")
-  if [ "$status" != 202 ]; then
-    api_error "$status"
-    exit 3
+  if [ "$PROFILE" = release ]; then
+    # Mode poussé (§ 7.2) : une analyse de release par tag, jamais deux.
+    body=$(jq -cn --arg tag "$REF" --arg commit "$COMMIT" '{tag: $tag} + (if $commit == "" then {} else {commit: $commit} end)')
+    status=$(api POST "/api/projects/$PROJECT/releases" "$body")
+    case $status in
+      200|202) ;;
+      404|409)
+        code=$(jq -r '.data.code // empty' "$TMP/body" 2>/dev/null)
+        case $code in
+          E_RELEASE_TAG) die 3 "tag introuvable dans la forge : $REF" "tag not found in the forge: $REF" ;;
+          E_RELEASE_TAG_MOVED) die 3 "le tag $REF a été déplacé depuis son analyse : refusé et signalé dans l'audit" "tag $REF moved since it was analysed: refused and reported in the audit log" ;;
+          E_RELEASE_COMMIT) die 3 "--commit ne correspond pas au commit du tag dans la forge" "--commit does not match the tag commit in the forge" ;;
+          E_RELEASE_MODE) die 3 "gate de release désactivée pour ce projet" "release gate disabled for this project" ;;
+          *) api_error "$status"; exit 3 ;;
+        esac ;;
+      400)
+        die 3 "requête refusée : --commit est requis quand l'appliance n'a pas accès à la forge" "request refused: --commit is required when the appliance cannot reach the forge" ;;
+      *) api_error "$status"; exit 3 ;;
+    esac
+    [ "$(jq -r '.existing // false' "$TMP/body")" != true ] \
+      || info "scanoria-scan: $REF a déjà son analyse de release (jamais réanalysé)" "scanoria-scan: $REF already has its release scan (never re-analysed)"
+  else
+    body=$(jq -cn --arg ref "$REF" --arg profile "$PROFILE" '{ref: $ref} + (if $profile == "" then {} else {profile: $profile} end)')
+    status=$(api POST "/api/projects/$PROJECT/scans" "$body")
+    if [ "$status" != 202 ]; then
+      api_error "$status"
+      exit 3
+    fi
   fi
   SCAN=$(jq -r '.scan_id // empty' "$TMP/body")
   printf '%s' "$SCAN" | grep -Eq "$UUID_RE" || die 3 "réponse inattendue de la console" "unexpected console response"
@@ -293,6 +336,29 @@ else
   ' "$TMP/body"
 fi
 say "rapport : $URL$url" "report: $URL$url"
+
+# Rapport de release signé (§ 7.3) : attendu tant que la signature n'est pas
+# revenue (409 E_RELEASE_NOT_SIGNED), au plus 10 minutes ; écrit atomiquement.
+if [ -n "$REPORT" ]; then
+  tries=0
+  while :; do
+    status=$(api GET "/api/releases/$SCAN/report.json")
+    case $status in
+      200) break ;;
+      409|404|000|5*)
+        tries=$((tries + 1))
+        if [ "$tries" -ge 60 ]; then
+          say "scanoria-scan: rapport signé indisponible ($(jq -r '.data.code // empty' "$TMP/body" 2>/dev/null))" "scanoria-scan: signed report unavailable ($(jq -r '.data.code // empty' "$TMP/body" 2>/dev/null))" >&2
+          exit 2
+        fi
+        sleep 10 ;;
+      *) api_error "$status"; exit 3 ;;
+    esac
+  done
+  grep -q '"schema":"scanoria-signed-release-report/1"' "$TMP/body" || die 3 "réponse inattendue pour le rapport" "unexpected report response"
+  { cp "$TMP/body" "$REPORT.tmp.$$" && mv "$REPORT.tmp.$$" "$REPORT"; } || die 3 "écriture impossible : $REPORT" "cannot write: $REPORT"
+  info "scanoria-scan: rapport signé écrit dans $REPORT (scanoria-verify $REPORT --key appliance.pem)" "scanoria-scan: signed report written to $REPORT (scanoria-verify $REPORT --key appliance.pem)"
+fi
 
 case $verdict in
   passed) exit 0 ;;

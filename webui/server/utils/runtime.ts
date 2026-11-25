@@ -18,6 +18,7 @@ import { backfillCorrelationKeys } from '../findings/correlation'
 import { packageDatesTick } from '../sbom/dates'
 import { vigilanceTick } from '../vigilance/tick'
 import { triageTick } from '../findings/tick'
+import { releaseTick } from '../release/tick'
 import { UUID_V4_RE } from '#shared/schemas'
 
 let readyResolve: () => void
@@ -64,6 +65,8 @@ export async function ingestNow(): Promise<void> {
     await ingestResults(pool, cfg.requestsDir, memory)
     // 0.5 (B, H5) : dates de publication des composants, par le helper.
     await packageDatesTick(pool, cfg.requestsDir)
+    // 0.8 (A, § 7.3) : rapports de release, signature par le helper, statut release-gate, contrat 40.
+    await releaseTick(pool, cfg.requestsDir)
     ticks += 1
     // H3 (0.5) : exports EPSS et KEV du helper importés environ chaque minute.
     if (ticks % 12 === 1) await syncIntelNow(pool, cfg.modulesStateFile)
