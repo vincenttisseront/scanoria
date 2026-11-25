@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Vincent Tisseront
 """Définitions et configurations MCP du dépôt (module mcp-scanner, K5, 0.7).
 
-Usage : python3 -I mcp_sarif.py <sources> <sortie.sarif>
+Usage : python3 -I mcp_sarif.py /src /out/<nom>.sarif
 
 Relève, SANS RIEN EXÉCUTER ni joindre aucun serveur, ce que le dépôt déclare
 sur des serveurs MCP :
@@ -43,7 +43,7 @@ MAX_TEXT = 300
 SKIP_DIRS = {".git", "node_modules", "vendor", ".venv", "venv", "env", "__pycache__", ".tox", "dist", "build", "site-packages"}
 CODE_EXT = {".py", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"}
 DATA_EXT = {".json"}
-CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f​-‏‪-‮⁦-⁩﻿]")
+CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 LEVELS = {"HIGH": "error", "MEDIUM": "warning", "LOW": "note"}
 JS_TOOL_RE = re.compile(
@@ -249,11 +249,33 @@ def sarif(found, tool_version=None):
     }
 
 
+
+SRC_DIR = "/src"
+OUT_DIR = "/out"
+NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,100}")
+
+
+def out_path(arg, ext):
+    """Chemin de sortie reconstruit sous OUT_DIR depuis un nom validé ; None si l'argument n'est pas /out/<nom><ext>."""
+    if os.path.dirname(arg) != OUT_DIR:
+        return None
+    m = NAME_RE.fullmatch(os.path.basename(arg))
+    if not m or not m.group(0).endswith(ext) or m.group(0) in (".", ".."):
+        return None
+    path = os.path.realpath(os.path.join(OUT_DIR, m.group(0)))
+    return path if os.path.dirname(path) == os.path.realpath(OUT_DIR) else None
+
+
+def write_json(path, doc):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+
+
 def main(argv):
-    if len(argv) != 3:
+    out = out_path(argv[2], ".sarif") if len(argv) == 3 else None
+    if out is None or argv[1] != SRC_DIR:
         print(__doc__, file=sys.stderr)
         return 2
-    src, out = argv[1], argv[2]
     for k in list(os.environ):
         if k.startswith(("MCP_SCANNER_", "VIRUSTOTAL_", "OPENAI_", "AZURE_OPENAI_")):
             del os.environ[k]
@@ -263,10 +285,9 @@ def main(argv):
         tv = version("cisco-ai-mcp-scanner")
     except Exception:
         tv = None
-    items = discover(src)
+    items = discover(SRC_DIR)
     doc = sarif(scan(items, YaraAnalyzer()), tv)
-    with open(out, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh)
+    write_json(out, doc)
     print("mcp-scanner: %d element(s), %d result(s)" % (len(items), len(doc["runs"][0]["results"])))
     return 0
 

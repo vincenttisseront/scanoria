@@ -3,8 +3,9 @@
 """Inventaire des workflows d'agents (module agentic-radar, K7, 0.7).
 
 Usage :
-  python3 -I radar_sarif.py <sources> <sortie.sarif> [graphes-bruts.json]
-  python3 -I radar_sarif.py --convert <graphes-bruts.json> <sources> <sortie.sarif>
+  python3 -I radar_sarif.py /src /out/<nom>.sarif [/out/<nom>.json]
+  python3 -I radar_sarif.py --convert < graphes-bruts.json > sortie.sarif
+    (conversion seule ; sources = répertoire courant)
 
 Lance les analyseurs statiques d'Agentic Radar (LangGraph, CrewAI, n8n,
 OpenAI Agents, AutoGen) sur le dépôt, SANS RIEN EXÉCUTER ni appeler aucun
@@ -46,7 +47,7 @@ MAX_INVENTORY = 900_000
 MAX_FILES = 20000
 MAX_FILE_BYTES = 1 << 20
 SKIP_DIRS = {".git", "node_modules", "vendor", ".venv", "venv", "env", "__pycache__", ".tox", "dist", "build", "site-packages"}
-CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f​-‏‪-‮⁦-⁩﻿]")
+CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 # Catégories d'outils qui exécutent du code ou lisent le système : gravité « error ».
 HIGH_CATEGORIES = {"code_interpreter"}
@@ -257,23 +258,42 @@ def sarif(raw, src):
     }
 
 
+
+SRC_DIR = "/src"
+OUT_DIR = "/out"
+NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,100}")
+
+
+def out_path(arg, ext):
+    """Chemin de sortie reconstruit sous OUT_DIR depuis un nom validé ; None si l'argument n'est pas /out/<nom><ext>."""
+    if os.path.dirname(arg) != OUT_DIR:
+        return None
+    m = NAME_RE.fullmatch(os.path.basename(arg))
+    if not m or not m.group(0).endswith(ext) or m.group(0) in (".", ".."):
+        return None
+    path = os.path.realpath(os.path.join(OUT_DIR, m.group(0)))
+    return path if os.path.dirname(path) == os.path.realpath(OUT_DIR) else None
+
+
+def write_json(path, doc):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+
+
 def main(argv):
-    if len(argv) == 5 and argv[1] == "--convert":
-        with open(argv[2], encoding="utf-8") as fh:
-            raw = json.load(fh)
-        src, out = argv[3], argv[4]
-    elif len(argv) in (3, 4):
-        src, out = argv[1], argv[2]
-        raw = analyze(src)
-        if len(argv) == 4:
-            with open(argv[3], "w", encoding="utf-8") as fh:
-                json.dump(raw, fh)
-    else:
+    if argv[1:] == ["--convert"]:
+        # Conversion seule (diagnostic, tests) : graphes bruts sur l'entrée standard, sources = répertoire courant.
+        json.dump(sarif(json.load(sys.stdin), os.getcwd()), sys.stdout)
+        return 0
+    outs = [out_path(a, ext) for a, ext in zip(argv[2:], (".sarif", ".json"))]
+    if len(argv) not in (3, 4) or argv[1] != SRC_DIR or None in outs:
         print(__doc__, file=sys.stderr)
         return 2
-    doc = sarif(raw, src)
-    with open(out, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh)
+    raw = analyze(SRC_DIR)
+    if len(outs) == 2:
+        write_json(outs[1], raw)
+    doc = sarif(raw, SRC_DIR)
+    write_json(outs[0], doc)
     inv = doc["runs"][0]["properties"]["scanoria/agent-inventory"]
     print(f"agentic-radar: {len(inv['workflows'])} workflow(s), {len(doc['runs'][0]['results'])} result(s)")
     return 0

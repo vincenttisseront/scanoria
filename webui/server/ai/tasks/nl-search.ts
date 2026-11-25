@@ -56,7 +56,7 @@ export function boundNlContext(context: unknown): NlContext | null {
   if (!parsed.success) return null
   const phrase = redactText(parsed.data.phrase).text.replace(/\s+/g, ' ').trim().slice(0, MAX_PHRASE)
   if (!phrase) return null
-  const uniq = <T>(a: T[]) => [...new Set(a)].sort()
+  const uniq = <T>(a: T[]) => [...new Set(a)].sort((x, y) => Number(x > y) - Number(x < y))
   return {
     ...parsed.data,
     phrase,

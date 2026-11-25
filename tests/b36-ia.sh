@@ -85,7 +85,7 @@ done
 
 # --- 2. agentic-radar (K7) ---------------------------------------------------------------------
 RAD="$ROOT/modules/agentic-radar"
-python3 -I "$RADAR" --convert "$RAD/tests/recorded-graphs.json" "$RAD/testbed" "$TMP/radar.sarif" > /dev/null
+(cd "$RAD/testbed" && python3 -I "$RADAR" --convert < "$RAD/tests/recorded-graphs.json" > "$TMP/radar.sarif")
 expect "radar : SARIF identique à l'enregistrement" \
 	"$(jq -S . "$TMP/radar.sarif" | sha256sum | cut -c1-64)" "$(jq -S . "$RAD/tests/recorded.sarif" | sha256sum | cut -c1-64)"
 if python3 "$MODCHECK" expect "$RAD/module.yaml" "$TMP/radar.sarif" > "$TMP/exp.log"; then ok "radar : attentes du banc d'essai"
@@ -117,7 +117,7 @@ for w in (g if isinstance(g, list) else [g]):
         w.setdefault("agents", []).append({"name": "a", "llm": "m", "system_prompt": "CANARY-PROMPT-7171", "is_guardrail": False})
 json.dump(g, open(sys.argv[2], "w"))
 EOF
-python3 -I "$RADAR" --convert "$TMP/graphs-prompt.json" "$RAD/testbed" "$TMP/radar-p.sarif" > /dev/null
+(cd "$RAD/testbed" && python3 -I "$RADAR" --convert < "$TMP/graphs-prompt.json" > "$TMP/radar-p.sarif")
 if grep -q CANARY-PROMPT "$TMP/radar-p.sarif"; then ko "radar : texte d'invite système sorti"; else ok "radar : invites système jamais recopiées"; fi
 # Lien symbolique vers l'extérieur et fichier énorme : jamais lus pour localiser un outil.
 mkdir -p "$TMP/hostile/src"
@@ -131,12 +131,12 @@ expect "radar : localisation dans un fichier ordinaire" \
 rc=0; python3 -I "$RADAR" > /dev/null 2>&1 || rc=$?
 expect "radar : arguments manquants refusés" "$rc" 2
 printf '{' > "$TMP/bad.json"
-rc=0; python3 -I "$RADAR" --convert "$TMP/bad.json" "$RAD/testbed" "$TMP/x.sarif" > /dev/null 2>&1 || rc=$?
+rc=0; (cd "$RAD/testbed" && python3 -I "$RADAR" --convert < "$TMP/bad.json" > "$TMP/x.sarif" 2> /dev/null) || rc=$?
 if [[ "$rc" -ne 0 && ! -s "$TMP/x.sarif" ]]; then ok "radar : graphe invalide refusé, aucune sortie"; else ko "radar : graphe invalide accepté"; fi
 
 # --- 3. skill-scanner (K6) ---------------------------------------------------------------------
 SKM="$ROOT/modules/skill-scanner"
-python3 -I "$SKILL" --merge /src "$TMP/skill.sarif" "skills/rapport=$SKM/tests/upstream-rapport.sarif" > /dev/null
+jq -n --slurpfile r "$SKM/tests/upstream-rapport.sarif" '{"skills/rapport": $r[0]}' | python3 -I "$SKILL" --merge > "$TMP/skill.sarif"
 expect "skill : fusion identique à l'enregistrement" \
 	"$(jq -S . "$TMP/skill.sarif" | sha256sum | cut -c1-64)" "$(jq -S . "$SKM/tests/recorded.sarif" | sha256sum | cut -c1-64)"
 if python3 "$MODCHECK" expect "$SKM/module.yaml" "$TMP/skill.sarif" > "$TMP/exp.log"; then ok "skill : attentes du banc d'essai"
@@ -153,7 +153,7 @@ jq '.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri = "..
   | .runs[0].results[1].locations[0].physicalLocation.artifactLocation.uri = "file:///etc/shadow"
   | .runs[0].results[2].locations[0].physicalLocation.artifactLocation.uri = "/root/.ssh/id_ed25519"' \
 	"$SKM/tests/upstream-rapport.sarif" > "$TMP/hostile.sarif"
-python3 -I "$SKILL" --merge /src "$TMP/skill-h.sarif" "skills/rapport=$TMP/hostile.sarif" "skills/autre=$TMP/bad.json" > /dev/null 2>&1 || true
+jq -n --slurpfile r "$TMP/hostile.sarif" '{"skills/rapport": $r[0], "skills/autre": "{"}' | python3 -I "$SKILL" --merge > "$TMP/skill-h.sarif" 2> /dev/null || true
 if grep -qE 'etc/passwd|etc/shadow|id_ed25519' "$TMP/skill-h.sarif"; then ko "skill : chemin hors du dépôt recopié"; else ok "skill : chemins hors du dépôt écartés"; fi
 expect "skill : SARIF amont invalide compté en échec" "$(jq -c '.runs[0].properties["scanoria/skills"].failed' "$TMP/skill-h.sarif")" '["skills/autre"]'
 # Découverte : SKILL.md en lien symbolique ignoré, dossiers exclus.
@@ -216,6 +216,14 @@ printf 'def f(:\n' > "$TMP/mh/casse.py"
 expect "mcp : entrées hostiles ignorées" "$(pycall "$MCP" 'print(len(m.discover(args[0])))' "$TMP/mh")" 0
 rc=0; python3 -I "$MCP" > /dev/null 2>&1 || rc=$?
 expect "mcp : arguments manquants refusés" "$rc" 2
+for t in "$RADAR" "$MCP" "$SKILL"; do
+	rc=0; python3 -I "$t" "$TMP" /out/x.sarif > /dev/null 2>&1 || rc=$?
+	expect "$(basename "$t") : sources hors de /src refusées" "$rc" 2
+	for o in /tmp/x.sarif /out/../x.sarif "/out/a b.sarif" /out/x.txt; do
+		rc=0; python3 -I "$t" /src "$o" > /dev/null 2>&1 || rc=$?
+		expect "$(basename "$t") : sortie « $o » refusée" "$rc" 2
+	done
+done
 
 echo
 echo "b36-ia : $PASS réussis, $FAIL échoués"

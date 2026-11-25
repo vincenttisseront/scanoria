@@ -34,10 +34,10 @@ describe('inventaire des agents (K7)', () => {
     const inv = inventoryFromSarif(wrap({
       version: 1,
       frameworks: ['autogen', 'crewai'],
-      workflows: [{ framework: 'crewai', name: '<script>x</script>équipe‮', tools: [{ name: 'shell', vulnerabilities: ['<b>ACE</b>'] }] }],
+      workflows: [{ framework: 'crewai', name: '<script>x</script>équipe\u202e', tools: [{ name: 'shell', vulnerabilities: ['<b>ACE</b>'] }] }],
     }))!
     expect(inv.frameworks).toEqual(['crewai'])
-    expect(inv.workflows[0]!.name).not.toMatch(/[<>‮]/)
+    expect(inv.workflows[0]!.name).not.toMatch(/[<>\u202e]/)
     expect(inv.workflows[0]!.tools[0]!.vulnerabilities[0]).not.toMatch(/[<>]/)
   })
 })

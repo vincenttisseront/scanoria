@@ -121,16 +121,16 @@ export function ruleLooksValid(engine: RuleEngine, rule: string): boolean {
   switch (engine) {
     case 'opengrep':
     case 'semgrep':
-      return /^rules:\s*$/m.test(rule) && /^\s*-\s+id:\s*\S/m.test(rule) && /^\s+(message|severity|languages):/m.test(rule)
-        && /^\s+(pattern|patterns|pattern-either|pattern-regex|pattern-sources|pattern-sinks):/m.test(rule)
+      return /^rules:[ \t]*$/m.test(rule) && /^[ \t]*-[ \t]+id:[ \t]*\S/m.test(rule) && /^[ \t]+(message|severity|languages):/m.test(rule)
+        && /^[ \t]+(pattern|patterns|pattern-either|pattern-regex|pattern-sources|pattern-sinks):/m.test(rule)
         // Aucune balise YAML (objets arbitraires), aucune inclusion d'autres fichiers.
-        && !/!!|!<|^\s*(include|paths|import)\s*:/m.test(rule)
+        && !/!!|!<|^[ \t]*(include|paths|import)[ \t]*:/m.test(rule)
     case 'gitleaks':
-      return /^\[\[rules\]\]\s*$/m.test(rule) && /^\s*id\s*=/m.test(rule) && /^\s*(regex|path)\s*=/m.test(rule)
+      return /^\[\[rules\]\][ \t]*$/m.test(rule) && /^[ \t]*id[ \t]*=/m.test(rule) && /^[ \t]*(regex|path)[ \t]*=/m.test(rule)
         // Aucune extension d'une autre configuration du disque.
-        && !/^\s*\[extend\]/m.test(rule)
+        && !/^[ \t]*\[extend\]/m.test(rule)
     case 'checkov':
-      return /^metadata:\s*$/m.test(rule) && /^\s+id:\s*\S/m.test(rule) && /^definition:\s*$/m.test(rule) && !/!!|!</.test(rule)
+      return /^metadata:[ \t]*$/m.test(rule) && /^[ \t]+id:[ \t]*\S/m.test(rule) && /^definition:[ \t]*$/m.test(rule) && !/!!|!</.test(rule)
   }
 }
 

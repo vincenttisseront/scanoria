@@ -3,8 +3,8 @@
 """Paquets de skills d'agents du dépôt (module skill-scanner, K6, 0.7).
 
 Usage :
-  python3 -I skill_sarif.py <sources> <sortie.sarif>
-  python3 -I skill_sarif.py --merge <sources> <sortie.sarif> <dossier-skill>=<sarif> …
+  python3 -I skill_sarif.py /src /out/<nom>.sarif
+  python3 -I skill_sarif.py --merge < { "<dossier-skill>": <sarif> … } > sortie.sarif
 
 Trouve chaque skill du dépôt (dossier qui contient SKILL.md) et le fait
 analyser par Cisco Skill Scanner, hors ligne : analyseurs statiques (règles
@@ -36,7 +36,7 @@ MAX_RESULTS = 10000
 MAX_SARIF = 32 << 20
 SKILL_TIMEOUT = 300
 SKIP_DIRS = {".git", "node_modules", "vendor", ".venv", "venv", "__pycache__", "dist", "build", "site-packages"}
-CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f​-‏‪-‮⁦-⁩﻿]")
+CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 RULE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 SCANNER = ["skill-scanner"]
 OFFLINE_FLAGS = ["--use-behavioral", "--format", "sarif"]
@@ -186,31 +186,46 @@ def _version():
         return None
 
 
+
+SRC_DIR = "/src"
+OUT_DIR = "/out"
+NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,100}")
+
+
+def out_path(arg, ext):
+    """Chemin de sortie reconstruit sous OUT_DIR depuis un nom validé ; None si l'argument n'est pas /out/<nom><ext>."""
+    if os.path.dirname(arg) != OUT_DIR:
+        return None
+    m = NAME_RE.fullmatch(os.path.basename(arg))
+    if not m or not m.group(0).endswith(ext) or m.group(0) in (".", ".."):
+        return None
+    path = os.path.realpath(os.path.join(OUT_DIR, m.group(0)))
+    return path if os.path.dirname(path) == os.path.realpath(OUT_DIR) else None
+
+
+def write_json(path, doc):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+
+
 def main(argv):
-    if len(argv) >= 4 and argv[1] == "--merge":
-        src, out, per = argv[2], argv[3], []
-        for spec in argv[4:]:
-            rel, _, path = spec.partition("=")
-            try:
-                with open(path, encoding="utf-8") as fh:
-                    per.append((rel, json.load(fh)))
-            except (OSError, ValueError):
-                per.append((rel, None))  # compté en échec par merge()
-        doc = merge(src, per, None)
-    elif len(argv) == 3:
-        src, out = argv[1], argv[2]
-        with tempfile.TemporaryDirectory(prefix="skills-") as tmp:
-            per = [(rel, run_skill(src, rel, tmp)) for rel in skills(src)]
-        doc = merge(src, per, _version())
-        failed = doc["runs"][0]["properties"]["scanoria/skills"]["failed"]
-        if per and len(failed) == len(per):
-            print("skill-scanner: every skill analysis failed", file=sys.stderr)
-            return 3
-    else:
+    if argv[1:] == ["--merge"]:
+        # Fusion seule (diagnostic, tests) : { "<dossier-skill>": <SARIF amont> } sur l'entrée standard.
+        per = [(str(rel), doc if isinstance(doc, dict) else None) for rel, doc in json.load(sys.stdin).items()]
+        json.dump(merge(SRC_DIR, per, None), sys.stdout)
+        return 0
+    out = out_path(argv[2], ".sarif") if len(argv) == 3 else None
+    if out is None or argv[1] != SRC_DIR:
         print(__doc__, file=sys.stderr)
         return 2
-    with open(out, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh)
+    with tempfile.TemporaryDirectory(prefix="skills-") as tmp:
+        per = [(rel, run_skill(SRC_DIR, rel, tmp)) for rel in skills(SRC_DIR)]
+    doc = merge(SRC_DIR, per, _version())
+    failed = doc["runs"][0]["properties"]["scanoria/skills"]["failed"]
+    if per and len(failed) == len(per):
+        print("skill-scanner: every skill analysis failed", file=sys.stderr)
+        return 3
+    write_json(out, doc)
     print("skill-scanner: %d result(s)" % len(doc["runs"][0]["results"]))
     return 0
 

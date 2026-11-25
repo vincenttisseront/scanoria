@@ -225,7 +225,7 @@ describe.skipIf(!DATABASE_URL)('générateur de règles I12 (PostgreSQL réel, f
     expect(ruleLooksValid('gitleaks', '[extend]\npath = "/etc/x"\n[[rules]]\nid = "a"\nregex = \'\'\'x\'\'\'\n')).toBe(false)
     expect(ruleLooksValid('checkov', 'metadata:\n  id: CKV2_X\ndefinition:\n  cond_type: attribute\n')).toBe(true)
     expect(ruleLooksValid('checkov', 'nothing')).toBe(false)
-    expect(cleanCode('a‮b\r\nc\u0007', 100)).toBe('ab\nc')
+    expect(cleanCode('a\u202eb\r\nc\u0007', 100)).toBe('ab\nc')
     expect(judgeTest({ ok: true, errors: [], samples: [{ name: 'positive', matches: 2 }, { name: 'negative', matches: 1 }] }).passed).toBe(false)
     expect(judgeTest({ ok: false, errors: ['parse error'], samples: [] })).toMatchObject({ passed: false, positive_matches: -1, errors: ['parse error'] })
   })

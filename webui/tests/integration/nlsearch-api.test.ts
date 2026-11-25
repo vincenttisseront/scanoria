@@ -167,7 +167,7 @@ describe.skipIf(!DATABASE_URL)('recherche en langage naturel I8 (PostgreSQL rée
     const input: NlContext = { phrase: 'x', target: 'findings', today: '2026-11-25', vocabulary: { projects: ['boutique'], tools: ['trivy'], ecosystems: ['npm'] } }
     const out = NlSearchOutput.parse({
       target: 'components',
-      findings: { epss_min: 0.3, text: '<b>login</b>‮', tool: 'trivy' },
+      findings: { epss_min: 0.3, text: '<b>login</b>\u202e', tool: 'trivy' },
       components: { name: 'x' },
       explanation: 'e',
       unsupported: [],
@@ -176,7 +176,7 @@ describe.skipIf(!DATABASE_URL)('recherche en langage naturel I8 (PostgreSQL rée
     expect(r.target).toBe('findings')
     expect(r.components).toBeUndefined()
     expect(r.findings).toMatchObject({ epss_min: 0.1, tool: 'trivy' })
-    expect(r.findings!.text).not.toMatch(/[<>‮]/)
+    expect(r.findings!.text).not.toMatch(/[<>\u202e]/)
     const tiny = checkFilters(NlSearchOutput.parse({ target: 'findings', findings: { epss_min: 0.001 }, explanation: 'e', unsupported: [] }), input)
     expect(tiny.unsupported).toContain('epss_min=0.001')
   })

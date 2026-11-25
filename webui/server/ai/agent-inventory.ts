@@ -57,7 +57,7 @@ export function inventoryFromSarif(doc: unknown): AgentInventory | null {
   if (raw === undefined) return null
   const parsed = AgentInventory.safeParse(raw)
   if (!parsed.success) return null
-  const inv = { ...parsed.data, frameworks: [...new Set(parsed.data.workflows.map(w => w.framework))].sort() }
+  const inv = { ...parsed.data, frameworks: [...new Set(parsed.data.workflows.map(w => w.framework))].sort((x, y) => Number(x > y) - Number(x < y)) }
   return Buffer.byteLength(JSON.stringify(inv)) <= MAX_BYTES ? inv : null
 }
 
