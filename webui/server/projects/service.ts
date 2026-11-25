@@ -5,6 +5,8 @@
 // modification, archivage, suppression, et détection F1 rattachée au projet.
 // Requêtes SQL explicites ; aucun secret n'est renvoyé (seulement son indice).
 
+import { applySlotDefaults } from '../profiles/resolve'
+import { syncAiOptOut } from '../profiles/service'
 import type { Queryable } from '../utils/db'
 import { getConfig } from '../utils/config'
 import { readCatalogIndex, readModulesState, latestModules } from '../utils/catalog'
@@ -172,6 +174,9 @@ export async function createProject(db: Queryable, p: NewProject): Promise<Proje
         p.detection ? JSON.stringify(p.detection) : null, p.createdBy ?? null, p.archived ?? false,
       ],
     )
+    // 0.7 (G9) : profils par déclencheur de l'entreprise ; (G8) « aucun envoi à l'IA » imposé par un verrou.
+    await applySlotDefaults(db, rows[0]!.id)
+    await syncAiOptOut(db, rows[0]!.id)
     return (await getProject(db, rows[0]!.id))!
   }
   catch (err) {

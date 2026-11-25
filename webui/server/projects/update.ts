@@ -14,6 +14,7 @@ import { parseGitUrl } from './git-url'
 import { parseKnownHosts } from './ssh'
 import { removeUpload, uploadReady } from './uploads'
 import type { projectUpdateSchema } from './schemas'
+import { aiOptOutLocked, syncAiOptOut } from '../profiles/service'
 import { dropUnusedCredential, getProject, updateProject, type ProjectPatch, type ProjectRow } from './service'
 
 type Body = z.infer<typeof projectUpdateSchema>
@@ -30,6 +31,8 @@ export async function patchFromBody(db: Queryable, project: ProjectRow, body: Bo
   set('name', body.name)
   set('tracked_branches', body.tracked_branches)
   set('schedule', body.schedule)
+  // 0.7 (G8) : « aucun envoi à l'IA » imposé par un verrou de profil ne se lève pas.
+  if (body.ai_opt_out === false && project.ai_opt_out && await aiOptOutLocked(db, project.id)) throw projectError(409, 'E_AI_OPT_OUT_LOCKED')
   set('ai_opt_out', body.ai_opt_out)
 
   if (body.profile_id) {
@@ -96,6 +99,7 @@ export async function patchFromBody(db: Queryable, project: ProjectRow, body: Bo
   }
 
   await updateProject(db, project.id, patch)
+  if (patch.profile_id) await syncAiOptOut(db, project.id)
   if (patch.credential_id !== undefined && oldCredential && patch.credential_id !== oldCredential) {
     await dropUnusedCredential(db, oldCredential)
   }

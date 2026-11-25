@@ -25,6 +25,7 @@ import type { enqueueScan } from './enqueue'
 import { decryptSecret } from '../utils/secrets'
 import { runProjectSchedules } from '../projects/schedule'
 import { ingestSbomFile } from '../sbom/ingest'
+import { applyGateFloor, planGateFloor } from '../profiles/locks'
 import { applyPullRequestBaseline } from '../gates/pr-baseline'
 import { publishScan } from '../forges/publish'
 
@@ -63,11 +64,12 @@ export interface Integrations {
 
 /** Bouchon du contrat 6 : verdict non concluant, sans raison inventée. */
 export async function pendingGate(db: Queryable, scanId: string): Promise<VerdictDetails> {
-  const r = await db.query<{ gate_id: string, rules: unknown, plan_rules: unknown }>(
-    `SELECT s.gate_id, g.rules, s.plan -> 'gate' -> 'rules' AS plan_rules
+  const r = await db.query<{ gate_id: string, rules: unknown, plan_rules: unknown, plan: unknown }>(
+    `SELECT s.gate_id, g.rules, s.plan -> 'gate' -> 'rules' AS plan_rules, s.plan
        FROM scans s JOIN gates g ON g.id = s.gate_id WHERE s.id = $1`, [scanId])
   const row = r.rows[0]
-  const rules = GateRules.parse(row?.plan_rules ?? row?.rules ?? {})
+  // Règles affichées = règles appliquées : plancher des verrous du profil compris (G8).
+  const rules = applyGateFloor(GateRules.parse(row?.plan_rules ?? row?.rules ?? {}), planGateFloor(row?.plan))
   return {
     verdict: 'inconclusive',
     gate_id: row?.gate_id ?? scanId,
