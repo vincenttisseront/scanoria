@@ -19,6 +19,7 @@ import type { Queryable } from '../utils/db'
 import type { ScanTrigger } from '#shared/analysis'
 import { ForgeError } from '../forges/http'
 import { discoverForge, dueForges } from './discover'
+import { nightlyFullScans, pollPullRequests } from '../forges/poll'
 import { getProject, projectClient, refreshDetection, type ProjectRow } from './service'
 
 /** Contrat 4 (chantier C) : webui/server/scans/enqueue.ts. */
@@ -133,7 +134,7 @@ export async function runProjectSchedules(db: ScheduleDb, now: Date, enqueue: En
 
   const { rows: toDetect } = await db.query<{ id: string }>(
     `SELECT id::text FROM projects
-      WHERE archived_at IS NULL AND source_kind = 'git'
+      WHERE archived_at IS NULL AND suspended_at IS NULL AND source_kind = 'git'
         AND (detection IS NULL OR (detection ? 'error' AND (detection->>'analyzed_at')::timestamptz <= $1::timestamptz - interval '${DETECTION_RETRY}'))
       ORDER BY created_at LIMIT ${DETECTIONS_PER_CYCLE}`,
     [now.toISOString()],
@@ -148,7 +149,7 @@ export async function runProjectSchedules(db: ScheduleDb, now: Date, enqueue: En
 
   const { rows: due } = await db.query<{ id: string }>(
     `SELECT id::text FROM projects
-      WHERE archived_at IS NULL AND schedule <> 'none'
+      WHERE archived_at IS NULL AND suspended_at IS NULL AND schedule <> 'none'
         AND (last_polled_at IS NULL OR last_polled_at <= $1::timestamptz - interval '5 minutes')
       ORDER BY last_polled_at NULLS FIRST, created_at LIMIT ${POLLS_PER_CYCLE}`,
     [now.toISOString()],
@@ -173,5 +174,12 @@ export async function runProjectSchedules(db: ScheduleDb, now: Date, enqueue: En
       if (!(err instanceof ForgeError)) console.error('[schedule] project', p.id, (err as Error)?.message)
     }
   }
+  // 0.7 (D, J1, G18) : mode tiré des PR et analyse complète nocturne ; ne lève jamais.
+  const pr = await pollPullRequests(db, now).catch(() => null)
+  if (pr) {
+    result.enqueued += pr.scans
+    result.errors += pr.errors
+  }
+  result.enqueued += await nightlyFullScans(db, now).catch(() => 0)
   return result
 }

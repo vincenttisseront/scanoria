@@ -17,7 +17,7 @@ interface Op { summary: string, role: Role, body?: string, status?: number }
 export const PROJECT_OPS: Record<string, Record<string, Op>> = {
   '/api/forges': {
     get: { summary: 'Known forges (token hint only, never the token)', role: 'viewer' },
-    post: { summary: 'Add a forge (Forgejo, GitHub); access checked immediately, repository discovery started', role: 'admin', body: 'ForgeCreate', status: 201 },
+    post: { summary: 'Add a forge (Forgejo, GitHub, GitLab) with a service account token; access checked immediately, discovery and webhooks started', role: 'admin', body: 'ForgeCreate', status: 201 },
   },
   '/api/forges/{id}': {
     get: { summary: 'Forge and its projects', role: 'viewer' },
@@ -25,6 +25,10 @@ export const PROJECT_OPS: Record<string, Record<string, Op>> = {
     delete: { summary: 'Remove a forge and its token (409 E_FORGE_IN_USE while projects use it)', role: 'admin' },
   },
   '/api/forges/{id}/discover': { post: { summary: 'Discover repositories now (otherwise hourly)', role: 'operator' } },
+  '/api/forges/{id}/webhook': { post: { summary: 'Signed forge webhook (HMAC with the forge secret, replay refused, 1 MiB max); push, pull request, PR comment, installation', role: 'public', status: 202 } },
+  '/api/forges/github/manifest': { post: { summary: 'Start the one-click GitHub App creation (J1): manifest and signed state, posted to GitHub by the console', role: 'admin' } },
+  '/api/forges/github/convert': { post: { summary: 'GitHub App creation callback: state checked, code exchanged, forge saved; returns the install URL', role: 'admin', status: 201 } },
+  '/api/forges/github/install': { post: { summary: 'GitHub App installation callback: installation confirmed with GitHub, repository discovery started', role: 'admin' } },
   '/api/forges/{id}/repos': { get: { summary: 'Repositories reachable with the forge token, with their project if any', role: 'operator' } },
   '/api/projects': {
     get: { summary: 'Projects (?archived=1 for archived ones)', role: 'viewer' },

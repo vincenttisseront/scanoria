@@ -35,7 +35,7 @@ import urllib.parse
 
 import contextlib
 
-from . import applicability, catalogverify, codeowners, common, feeds, fetch, gitmirror, modules, resultcache, sbom, \
+from . import airelay, applicability, catalogverify, codeowners, common, feeds, fetch, gitmirror, modules, resultcache, sbom, \
     schedule, schema, svcnet, testbed, vigilance, workspace
 from .common import Fail
 
@@ -352,6 +352,9 @@ def recover():
     feeds.release_all()
     shutil.rmtree(fetch.CRED_DIR, ignore_errors=True)
     svcnet.remove_orphan_secrets()
+    # 0.7 (contrat 31) : jetons et secrets du relais IA laissés par un arrêt brutal.
+    airelay.remove_orphan_secrets()
+    airelay.purge_tokens(everything=True)
     fetch.reset_network()
 
 
@@ -421,6 +424,13 @@ def plan(reg, job):
             out.append((_module_entry(mid, ver, "skipped", _err(
                 "E_NETWORK_UNSUPPORTED", "input", "networked scanners are not supported yet"), m), None))
             continue
+        if airelay.uses_relay(m):
+            # 0.7 (contrat 31) : module d'analyse par IA ; le relais est vérifié juste avant le conteneur.
+            try:
+                airelay.python_of(m)
+            except airelay.Unavailable as u:
+                out.append((_module_entry(mid, ver, "missing", _err(u.code, "input", u.message), m), None))
+                continue
         # Contrat 12 (0.4) : branche par défaut seulement, puis service joignable.
         # Branches et PR (option « branches » du service) : sinon branche par défaut seulement.
         feats = svcnet.service_features(reg, m)
@@ -690,6 +700,13 @@ def feed_mounts(m, leases):
     return out
 
 
+def relay_lease(m, job, timeout, ws):
+    """Bail du relais IA d'un module (contrat 31) : jeton lié à l'analyse, au projet et au module."""
+    airelay.purge_tokens()
+    return airelay.Lease(m, project_id=job.get("project_id"), scan_id=job.get("scan_id"),
+                         timeout_s=timeout + 60, workdir=ws)
+
+
 def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
     """Lance un module confiné sur ws/src ; complète entry (statut, sorties, journal, mesures).
 
@@ -713,7 +730,20 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
     if not common.TEST_ROOT:
         os.chown(mdir, 0, common.scanoria_ids()[1])
 
+    ai_relay = airelay.uses_relay(m)
+    if ai_relay:
+        # 0.7 (contrat 32) : la console marque ses résultats « IA » d'après le
+        # manifeste réellement lancé, sans relire l'index du catalogue.
+        entry["ai_relay"] = True
+
     def finish(status, error=None, rc=None):
+        if ai_relay and status in ("error", "timeout", "oom"):
+            # § 3.5 : l'indisponibilité de l'IA (502, disjoncteur, file pleine,
+            # opt-out posé en cours d'analyse) ne rend jamais un verdict non
+            # concluant ; l'erreur reste lisible dans l'entrée du module.
+            status = "skipped"
+            error = dict(error or {}, message=("AI module, outside the verdict: %s"
+                                               % (error or {}).get("message", "failed"))[:2000])
         entry.update(status=status, error=error, exit_code=rc, finished_at=common.iso(common.now()))
         entry.setdefault("stats", {})["duration_ms"] = int((time.monotonic() - t0) * 1000)
         if os.path.isfile(log_tmp):
@@ -754,10 +784,18 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
             # Objets de l'historique : ceux du miroir (alternates de /git, V2), en lecture seule.
             mounts.append((ctx["mirror"], "/mirror", "ro"))
     mounts += spec.get("mounts") or []
+    # G18 (0.7, contrat 33) : un module incrémental lit la liste des fichiers modifiés de la PR.
+    changed = changed_files_mount(job, m, ws)
+    if changed:
+        mounts.append((changed, CHANGED_FILES_MOUNT, "ro"))
     cache = scan_cache_dir(m, job)
     if cache:
         mounts.append((cache, "/cache", "rw"))
-    if reuse_cached(job, entry, spec, ws, mdir, sbom_dir, use_sbom):
+    relay = ai_relay
+    if relay:
+        # 0.7 (contrat 31) : une sortie d'IA dépend du modèle du moment ; jamais reprise (V4).
+        entry.pop("cache_key", None)
+    elif reuse_cached(job, entry, spec, ws, mdir, sbom_dir, use_sbom):
         finish("ok")
         _drop_stats(entry)
         return None
@@ -768,6 +806,19 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
         return finish("error", _err("E_MODULE_INVALID", "input", f.message))
     svc = spec.get("service")
     stack = contextlib.ExitStack()
+    if relay:
+        try:
+            lease = stack.enter_context(relay_lease(m, job, timeout, ws))
+        except airelay.Unavailable as u:
+            stack.close()
+            # Sans connecteur, projet « aucun envoi à l'IA », disjoncteur ouvert :
+            # module « skipped », jamais une erreur au sens de G13 (§ 3.5).
+            return finish("skipped", _err(u.code, "input", u.message))
+        except (Fail, OSError) as f:
+            stack.close()
+            return finish("error", _err(airelay.E_RELAY_UNAVAILABLE, "infra", getattr(f, "message", str(f))))
+        args = args + lease.args()
+        secrets = list(secrets or []) + [lease.token]
     if svc:
         try:
             att = stack.enter_context(svcnet.Attachment(svc, svc["key"], budget_s=max(60, timeout - 60)))
@@ -785,9 +836,17 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
             args += ["--env", "%s=%s" % (k, scan["env"][k])]
         if cache:
             args += ["--env", "SCANORIA_CACHE_DIR=/cache"]
+        if changed:
+            args += ["--env", "SCANORIA_CHANGED_FILES=" + CHANGED_FILES_MOUNT]
         cmd = spec["command"]
         if use_sbom:
             cmd = spec["sbom_command"]
+        if relay:
+            try:
+                cmd = lease.wrap(cmd)
+            except (airelay.Unavailable, OSError) as u:
+                stack.close()
+                return finish("error", _err("E_MODULE_INVALID", "input", getattr(u, "message", str(u))))
         args += ["--entrypoint", json.dumps([cmd[0]]), m["image"]] + list(cmd[1:])
         sampler = Sampler(name)
         sampler.start()
@@ -912,15 +971,73 @@ def inspect_source(job, ws, source, runnable):
     return kept
 
 
+# --------------------------------------------------------------------------
+# 0.7 (chantier D) : analyse incrémentale des PR (G18) et avancement (V8)
+# --------------------------------------------------------------------------
+
+CHANGED_FILES_MOUNT = "/changed-files.txt"
+MAX_CHANGED_FILES = 3000
+CHANGED_PATH_RE = re.compile(r"[^\x00-\x1f\x7f]{1,1024}\Z")
+
+
+def is_incremental(m):
+    return (m.get("scan") or {}).get("incremental") is True
+
+
+def changed_files(job):
+    """Fichiers modifiés de la PR (contrat 33), revalidés ; None : analyse complète."""
+    files = job.get("changed_files")
+    if not isinstance(files, list) or len(files) > MAX_CHANGED_FILES:
+        return None
+    out = []
+    for f in files:
+        if not isinstance(f, str) or not CHANGED_PATH_RE.match(f) or f.startswith("/") \
+                or any(seg in ("", ".", "..") for seg in f.split("/")):
+            return None
+        out.append(f)
+    return out
+
+
+def changed_files_mount(job, m, ws):
+    """Liste des fichiers modifiés (un par ligne) pour un module incrémental, ou None."""
+    files = changed_files(job) if is_incremental(m) else None
+    if files is None:
+        return None
+    path = os.path.join(ws, "changed-files.txt")
+    if not os.path.exists(path):
+        common.atomic_write(path, ("\n".join(files) + ("\n" if files else "")).encode("utf-8"), 0o644)
+    return path
+
+
+PROGRESS_LOCK = threading.Lock()
+
+
+def write_progress(rdir, entries):
+    """V8 (contrat 35) : results/<id>/progress.json, modules finis et leurs sorties validées,
+    réécrit de façon atomique après chaque module ; la console y lit un blocage certain
+    avant la fin de l'analyse. result.json reste la seule source du verdict complet."""
+    done = [{"id": e["id"], "status": e.get("status"), "outputs": e.get("outputs") or {}}
+            for e in entries if e.get("status") not in (None, "pending", "running")]
+    with PROGRESS_LOCK:
+        try:
+            write_result_file(os.path.join(rdir, "progress.json"),
+                              json.dumps({"schema": 1, "modules": done}, sort_keys=True).encode("utf-8"))
+        except OSError as e:
+            common.log("runner: progress not written: %r" % e)
+
+
 def run_modules(job, runnable, ws, rdir, reg, secrets, ctx=None):
     """Modules de la tâche, graphe et budget respectés (V3, V5) ; ctx : bases louées,
     miroir et masques de l'analyse (0.6, chantier C)."""
+    entries = [e for e, _ in runnable]
+
     def one(ent, spec):
         try:
             run_module(job, ent, spec, ws, rdir, reg, secrets, ctx)
         except Exception as e:  # noqa: BLE001 — une erreur d'un module n'arrête pas les autres
             common.log("runner: module %s failed: %r" % (ent["id"], e))
             ent.update(status="error", error=_err("E_RUNNER_INTERNAL", "infra", "internal runner error"))
+        write_progress(rdir, entries)
     def not_started(ent, e):
         common.log("runner: module %s not started: %r" % (ent["id"], e))
         ent.update(status="error", error=_err("E_RUNNER_INTERNAL", "infra", "module could not be started"))

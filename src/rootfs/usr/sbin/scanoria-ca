@@ -15,6 +15,9 @@
 #                                             (Dependency-Track, 0.6), quel que soit le
 #                                             mode TLS de la console ; renouvelé à
 #                                             moins de 30 jours
+#   scanoria-ca issue-relay --fqdn NOM [--force]
+#                                             certificat interne ai-relay.NOM du relais
+#                                             IA des modules (0.7), mêmes règles
 #
 # Appelé par scanoria-helper, qui a validé les paramètres. Réponse sur la
 # sortie standard : {"code", "message", "output"} ; jamais de clé privée.
@@ -247,23 +250,26 @@ cmd_issue() {
 # Sépare un fichier PEM en certificats (un fichier par certificat, ré-encodés).
 # Certificat du miroir des bases (port interne, lu par Dependency-Track) :
 # toujours émis par l'AC interne, que la console soit en mode interne ou importé.
-feeds_ok() {
-	local d="$PKI/feeds"
+leaf_ok() { # répertoire nom
+	local d="$PKI/$1"
 	[[ -f "$d/fullchain.pem" && -f "$d/privkey.pem" ]] || return 1
 	openssl x509 -in "$d/fullchain.pem" -noout -checkend "$RENEW_SECONDS" > /dev/null 2>&1 || return 1
-	grep -qxF -- "feeds.$FQDN" <<< "$(san_list "$d/fullchain.pem")" || return 1
+	grep -qxF -- "$2" <<< "$(san_list "$d/fullchain.pem")" || return 1
 	openssl verify -x509_strict -CAfile "$CA_DIR/ca.crt" "$d/fullchain.pem" > /dev/null 2>&1 || return 1
 	[[ "$(pub_sha x509 "$d/fullchain.pem")" == "$(pub_sha pkey "$d/privkey.pem")" ]]
 }
 
-cmd_issue_feeds() {
-	local name="feeds.$FQDN"
+# Certificat interne d'un service de l'appliance (nom unique sous NOM), émis
+# par l'AC interne quel que soit le mode TLS de la console, renouvelé à moins
+# de 30 jours. Rend 0 si un nouveau certificat est en place dans $PKI/<dir>.new.
+issue_leaf() { # répertoire nom
+	local dir=$1 name=$2
 	[[ -f "$CA_DIR/ca.crt" && -f "$CA_DIR/ca.key" ]] || emit E_PRECONDITION "internal CA missing"
 	openssl x509 -in "$CA_DIR/ca.crt" -noout -subject -nameopt RFC2253 \
 		| grep -qxF "subject=CN=Scanoria CA $FQDN" \
 		|| emit E_PRECONDITION "internal CA does not match the appliance name"
-	if [[ $FORCE -eq 0 ]] && feeds_ok; then
-		emit OK "certificate still valid" "$(cert_json "$PKI/feeds/fullchain.pem" | jq -c '. + {issued: false}')"
+	if [[ $FORCE -eq 0 ]] && leaf_ok "$dir" "$name"; then
+		emit OK "certificate still valid" "$(cert_json "$PKI/$dir/fullchain.pem" | jq -c '. + {issued: false}')"
 	fi
 	openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$WORK/privkey.pem" 2>/dev/null
 	openssl req -new -key "$WORK/privkey.pem" -subj "/CN=$name" -out "$WORK/req.csr"
@@ -281,13 +287,17 @@ cmd_issue_feeds() {
 		-extfile "$WORK/ext.cnf" -extensions v3 -out "$WORK/cert.pem" 2>/dev/null
 	openssl verify -x509_strict -CAfile "$CA_DIR/ca.crt" "$WORK/cert.pem" > /dev/null \
 		|| emit E_INTERNAL "issued certificate does not verify"
-	rm -rf "$PKI/feeds.new"
-	install -d -m 0700 "$PKI/feeds.new"
+	rm -rf "$PKI/$dir.new"
+	install -d -m 0700 "$PKI/$dir.new"
 	own root:root 0600 "$WORK/privkey.pem"
 	own root:root 0600 "$WORK/cert.pem"
-	mv "$WORK/privkey.pem" "$PKI/feeds.new/privkey.pem"
-	mv "$WORK/cert.pem" "$PKI/feeds.new/fullchain.pem"
-	swap_in feeds
+	mv "$WORK/privkey.pem" "$PKI/$dir.new/privkey.pem"
+	mv "$WORK/cert.pem" "$PKI/$dir.new/fullchain.pem"
+	swap_in "$dir"
+}
+
+cmd_issue_feeds() {
+	issue_leaf feeds "feeds.$FQDN"
 	# Site du miroir déjà en place : rechargé, sinon routing.apply le contrôlera.
 	if [[ -e "$R/etc/nginx/scanoria.d/10-feeds-mirror.conf" ]]; then
 		if ! { sys nginx -t -q && sys systemctl try-reload-or-restart nginx.service; }; then
@@ -298,6 +308,15 @@ cmd_issue_feeds() {
 	fi
 	rm -rf "${PKI:?}/feeds.old"
 	emit OK "certificate issued" "$(cert_json "$PKI/feeds/fullchain.pem" | jq -c '. + {issued: true}')"
+}
+
+# 0.7 (contrat 31) : relais IA de scanoria-ai (ai-relay.NOM), servi sur un
+# socket Unix et joint par le pont des modules d'analyse par IA ; copié dans
+# /run/scanoria-ai par scanoria-ai-setup prestart, qui redémarre avec lui.
+cmd_issue_relay() {
+	issue_leaf ai-relay "ai-relay.$FQDN"
+	rm -rf "${PKI:?}/ai-relay.old"
+	emit OK "certificate issued" "$(cert_json "$PKI/ai-relay/fullchain.pem" | jq -c '. + {issued: true}')"
 }
 
 split_certs() { # fichier préfixe -> nombre de certificats
@@ -380,6 +399,7 @@ case "$cmd" in
 	issue) parse_opts "$@"; cmd_issue ;;
 	import) parse_opts "$@"; cmd_import ;;
 	issue-feeds) parse_opts "$@"; cmd_issue_feeds ;;
+	issue-relay) parse_opts "$@"; cmd_issue_relay ;;
 	status) [[ $# -eq 0 ]] || emit E_INVALID_PARAM "no option expected"; cmd_status ;;
-	*) echo "usage: scanoria-ca init|issue|import|issue-feeds|status [options]" >&2; exit 2 ;;
+	*) echo "usage: scanoria-ca init|issue|import|issue-feeds|issue-relay|status [options]" >&2; exit 2 ;;
 esac

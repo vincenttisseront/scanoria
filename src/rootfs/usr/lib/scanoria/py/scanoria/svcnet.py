@@ -51,9 +51,10 @@ NOBODY = 65534
 
 
 def service_of(m):
-    """Identifiant du service visé par scan.network, ou None (réseau « none » ou « target »)."""
+    """Identifiant du service visé par scan.network, ou None (réseau « none », « target » ou « ai-relay »)."""
     net = (m.get("scan") or {}).get("network", "none")
-    if net in ("none", "target"):
+    # « ai-relay » (0.7, contrat 31) : aucun réseau, relais IA par socket Unix (airelay).
+    if net in ("none", "target", "ai-relay"):
         return None
     mm = SERVICE_RE.match(net) if isinstance(net, str) else None
     if not mm:

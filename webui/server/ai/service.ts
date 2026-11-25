@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto'
 import type { Queryable } from '../utils/db'
 import type { ActiveEndpoint, AiEndpoint } from './config'
 import { loadAiSettings } from './config'
-import { contextFor, modelInfo, selectModels, type ModelInfo, type Selection } from './models'
+import { contextFor, modelInfo, RELAY_KEY, selectModels, type ModelInfo, type Selection } from './models'
 import { EMBED_MAX_INPUTS, OllamaError, type ChatRequest, type ChatResult, type EmbedResult } from './ollama'
 import { buildMessages, promptChars, type Locale } from './prompt'
 import { COMPLETION_KINDS, EMBED_KINDS, PROMPT_VERSION, TASKS, TASK_KINDS, type TaskDefinition } from './tasks'
@@ -523,7 +523,8 @@ export class AiService {
       await this.callLog(task, 'probe', null, 0, latency, 'ok')
       this.circuit.success()
       const settings = await loadAiSettings(this.deps.db)
-      const selection = selectModels(models, COMPLETION_KINDS, settings.models)
+      // 0.7 (contrat 31) : le relais IA des modules prend le modèle de rédaction par défaut.
+      const selection = selectModels(models, [...COMPLETION_KINDS, RELAY_KEY], settings.models)
       await this.finish(task.id, 'done', {
         output: { version, latency_ms: latency, models, selection, checked_at: new Date(this.now()).toISOString() },
       })

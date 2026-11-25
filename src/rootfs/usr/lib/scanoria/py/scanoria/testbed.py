@@ -487,7 +487,25 @@ def run(manifest, timeout=None):
             # le banc d'essai porte son SBOM, sbom.cdx.json, à la racine.
             mounts.append((src, "/sbom", "ro"))
         started = time.monotonic()
-        if svc:
+        from . import airelay
+        if airelay.uses_relay(manifest):
+            # 0.7 (contrat 31, I23) : module d'analyse par IA, banc d'essai passé par le
+            # relais (jeton « testbed », sans projet) ; sans connecteur, il ne peut pas
+            # être vérifié, donc pas activé.
+            try:
+                with airelay.Lease(manifest, project_id=None, scan_id=None, timeout_s=t + 60,
+                                   workdir=work, purpose="testbed") as lease:
+                    rc, hint = run_confined(manifest, lease.wrap(cmd), mounts, timeout=t,
+                                            env=scan.get("env"), with_stderr=True,
+                                            network=["--network=none"] + lease.args())
+                    hint = hint.replace(lease.token, "***")
+            except airelay.Unavailable as u:
+                if u.code == "E_MODULE_INVALID":
+                    raise Fail(u.code, u.message)
+                raise Fail("E_RELAY_UNAVAILABLE" if u.code != airelay.E_RELAY_TOKEN else "E_RELAY_TOKEN",
+                           "%s: activate the AI connector (System › AI) before this module" % u.message
+                           if u.code == airelay.E_RELAY_UNAVAILABLE else u.message)
+        elif svc:
             try:
                 with svcnet.Attachment(svc, svcnet.TESTBED_KEY, budget_s=max(60, t - 60)) as att:
                     rc, hint = run_confined(manifest, cmd, mounts, timeout=t, env=scan.get("env"),
@@ -505,6 +523,11 @@ def run(manifest, timeout=None):
                        "(container limit %d MB from resources.min_ram_mb)" % (manifest["id"], memory_mb(manifest)))
             elif rc == KILLED_RC:
                 msg = "scanner %s timed out on its testbed after %d s" % (manifest["id"], t)
+            if airelay.uses_relay(manifest):
+                # Module d'IA : un outil qui s'arrête en erreur vient le plus souvent du
+                # relais ou du modèle (502, disjoncteur, file pleine) ; classé infra (G12),
+                # jamais une détection perdue. Seules les attentes non tenues comptent (I23).
+                raise Fail("E_RELAY_UNAVAILABLE", msg + (": " + hint if hint else ""))
             raise Fail("E_TESTBED", msg + (": " + hint if hint else ""))
         details = check_expect(collect(manifest, out), tb["expect"])
         bad = [d for d in details if not d["ok"]]

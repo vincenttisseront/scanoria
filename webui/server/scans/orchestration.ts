@@ -41,6 +41,11 @@ export function orchestrationGaps(result: ScanResult): CoverageGap[] {
   for (const m of result.modules) {
     if (m.status === 'not-applicable') gaps.push({ kind: 'not-applicable', code: 'not-applicable', module: m.id, reason: 'no-matching-files' })
     else if (m.sbom_fallback) gaps.push({ kind: 'sbom-fallback', module: m.id })
+    // 0.7 (§ 3.5) : panne d'un module d'IA rendue « skipped » par le runner ; la classe
+    // « input » (pas de connecteur, « aucun envoi à l'IA ») est un choix, pas une panne.
+    else if (m.ai_relay && m.status === 'skipped' && m.error && m.error.class !== 'input') {
+      gaps.push({ kind: 'ai-module-failed', module: m.id, code: m.error.code })
+    }
   }
   return gaps
 }
@@ -56,7 +61,7 @@ export async function recordOrchestration(db: Queryable, result: ScanResult, inp
        ON CONFLICT (tree_sha) DO UPDATE SET detected = EXCLUDED.detected, computed_at = now()`,
       [result.source.tree, JSON.stringify({ v: 1, keys: detectionOf(result.source.detection), files: result.source.files })])
   }
-  await mergeCoverageGaps(db, input.scanId, orchestrationGaps(result), ['not-applicable', 'sbom-fallback'])
+  await mergeCoverageGaps(db, input.scanId, orchestrationGaps(result), ['not-applicable', 'sbom-fallback', 'ai-module-failed'])
   const rows = await db.query<{ module_id: string, status: string, image_digest: string | null, results_count: number | null, duration_ms: number | null }>(
     'SELECT module_id, status, image_digest, results_count, duration_ms FROM scan_modules WHERE scan_id = $1', [input.scanId])
   const byId = new Map(rows.rows.map(r => [r.module_id, r]))

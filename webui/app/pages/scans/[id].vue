@@ -105,6 +105,8 @@ function gapText(g: CoverageGap): string {
   if (g.kind === 'not-applicable' || g.kind === 'sbom-fallback') {
     return t(g.kind === 'not-applicable' ? 'scans.gaps.notApplicable' : 'scans.gaps.sbomFallback', { module: g.module ?? '?' })
   }
+  // 0.7 (§ 3.5) : module d'analyse par IA en échec, hors verdict mais signalé.
+  if (g.kind === 'ai-module-failed') return t('scans.gaps.aiModuleFailed', { module: g.module ?? '?', code: g.code ?? '?' })
   if (g.kind === 'profile-module' || (!g.kind && g.module)) {
     return t('scans.gaps.module', { module: g.module ?? '?', reason: label('gapReason', g.reason) })
   }
