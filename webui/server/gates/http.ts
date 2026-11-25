@@ -17,10 +17,25 @@ export function gateError(statusCode: number, code: GateErrorCode, extra: Record
 }
 
 export interface ApiTokenContext {
+  /** Identifiant du jeton d'API, ou libellé de l'identité OIDC (J4, 0.8). */
   id: string
+  /** Ligne de api_tokens (null pour un jeton OIDC) : colonnes *.api_token_id. */
+  apiTokenId?: string | null
   projectId: string
   scopes: string[]
   prefix: string
+  /** Libellé d'audit (contrat 41) : « api-token:scn_abcd » ou « oidc:<dépôt>@<ref> ». */
+  label?: string
+}
+
+/** Colonne api_token_id d'un appel de CI (null pour OIDC). */
+export function tokenRowId(token: ApiTokenContext): string | null {
+  return token.apiTokenId === undefined ? token.id : token.apiTokenId
+}
+
+/** Libellé d'audit d'un appel de CI (identité non humaine). */
+export function tokenLabel(token: ApiTokenContext): string {
+  return token.label ?? `api-token:${token.prefix}`
 }
 
 declare module 'h3' {

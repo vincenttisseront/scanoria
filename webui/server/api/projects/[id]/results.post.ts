@@ -17,7 +17,7 @@ import { getPool } from '../../../utils/db'
 import { apiError, clientAddress, queryValidated } from '../../../utils/http'
 import { writeAudit } from '../../../utils/audit'
 import { getProjectRef } from '../../../gates/gates'
-import { ciCaller, gateError, uuidParam } from '../../../gates/http'
+import { ciCaller, gateError, uuidParam, tokenLabel, tokenRowId } from '../../../gates/http'
 import { acquireExternalSlot, ExternalError, ingestExternal, parseJson, readBoundedBody } from '../../../external/ingest'
 
 const query = z.strictObject({
@@ -59,12 +59,12 @@ export default defineEventHandler(async (event) => {
       category: q.category ?? null,
       uploadedVia: caller.kind === 'token' ? 'api-token' : 'console',
       requestedBy: caller.kind === 'user' ? caller.auth.user.id : null,
-      apiTokenId: caller.kind === 'token' ? caller.token.id : null,
+      apiTokenId: caller.kind === 'token' ? tokenRowId(caller.token) ?? null : null,
     })
     await writeAudit(pool, {
       actor: caller.kind === 'user'
         ? { type: 'user', userId: caller.auth.user.id, username: caller.auth.user.username, ip: clientAddress(event) }
-        : { type: 'system', username: `api-token:${caller.token.prefix}`, ip: clientAddress(event) },
+        : { type: 'system', username: tokenLabel(caller.token), ip: clientAddress(event) },
       action: 'scan.external', outcome: 'success', targetType: 'scan', targetId: out.scanId,
       details: { project: project.slug, number: out.number, module: out.moduleId, ...out.source, results: out.count, verdict: out.verdict },
     })
@@ -79,7 +79,7 @@ export default defineEventHandler(async (event) => {
       await writeAudit(pool, {
         actor: caller.kind === 'user'
           ? { type: 'user', userId: caller.auth.user.id, username: caller.auth.user.username, ip: clientAddress(event) }
-          : { type: 'system', username: `api-token:${caller.token.prefix}`, ip: clientAddress(event) },
+          : { type: 'system', username: tokenLabel(caller.token), ip: clientAddress(event) },
         action: 'scan.external', outcome: 'failure', targetType: 'project', targetId: projectId,
         details: { project: project.slug, code: err.code, issues: err.issues.length },
       }).catch(() => {})

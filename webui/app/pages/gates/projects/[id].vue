@@ -342,6 +342,8 @@ const example = computed(() => {
           <pre class="overflow-x-auto rounded-md bg-elevated p-3 text-xs"><code data-testid="ci-example">{{ example }}</code></pre>
         </div>
       </UCard>
+
+      <CiProjectIntegration :project-id="info.project.id" />
     </template>
 
     <UModal

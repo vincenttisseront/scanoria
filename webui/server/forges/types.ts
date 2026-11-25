@@ -18,6 +18,15 @@ export interface ForgeRepo {
   clone_url: string
   ssh_url: string | null
   html_url: string | null
+  /** Identifiant immuable du dépôt dans la forge (J4 : épingle des liaisons OIDC), s'il est connu. */
+  id?: string
+}
+
+/** Identifiant numérique de dépôt (GitHub, Forgejo, GitLab), en chaîne. */
+export function repoId(v: unknown): string | undefined {
+  if (typeof v === 'number' && Number.isSafeInteger(v) && v > 0) return String(v)
+  if (typeof v === 'string' && /^[1-9][0-9]{0,19}$/.test(v)) return v
+  return undefined
 }
 
 export interface TreeEntry {
@@ -116,6 +125,7 @@ export function toRepo(raw: unknown): ForgeRepo | null {
     clone_url: cloneUrl,
     ssh_url: str(r.ssh_url),
     html_url: str(r.html_url),
+    ...(repoId(r.id) ? { id: repoId(r.id) } : {}),
   }
 }
 

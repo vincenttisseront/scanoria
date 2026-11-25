@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Composant GitLab CI Scanoria (J3, 0.8). Ajouté par la PR d'intégration (J2)
+# dans .gitlab/scanoria.yml et inclus en une ligne :
+#   include: [{ local: .gitlab/scanoria.yml, inputs: { url: https://…, project: … } }]
+# Sans secret : jeton OIDC de GitLab (id_tokens, audience scanoria). L'étape
+# commune scanoria-ci.sh est copiée à côté (.gitlab/scanoria-ci.sh).
+spec:
+  inputs:
+    url:
+      description: Adresse de l'appliance (https://…)
+    project:
+      description: Identifiant du projet Scanoria
+    profile:
+      default: ""
+    client-sha256:
+      default: ""
+    stage:
+      default: test
+    # Alpine 3.24.4 (index multi-architecture), empreinte relevée le 2026-11-25.
+    image:
+      default: docker.io/library/alpine@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+---
+scanoria:
+  stage: $[[ inputs.stage ]]
+  image: $[[ inputs.image ]]
+  timeout: 70 minutes
+  id_tokens:
+    SCANORIA_ID_TOKEN:
+      aud: scanoria
+  variables:
+    SCANORIA_URL: $[[ inputs.url ]]
+    SCANORIA_PROJECT: $[[ inputs.project ]]
+    SCANORIA_PROFILE: $[[ inputs.profile ]]
+    SCANORIA_CLIENT_SHA256: $[[ inputs.client-sha256 ]]
+    SCANORIA_OIDC: "1"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - command -v curl > /dev/null && command -v jq > /dev/null || apk add --no-cache curl jq
+    - sh .gitlab/scanoria-ci.sh

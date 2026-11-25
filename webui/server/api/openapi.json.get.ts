@@ -11,6 +11,7 @@ import { VIGILANCE_OPS, vigilanceSchemas } from '../vigilance/openapi'
 import { PROFILE_OPS, profileSchemas } from '../profiles/openapi'
 import { RULESET_OPS, rulesetSchemas } from '../rulesets/openapi'
 import { TRIAGE_OPS, triageSchemas } from '../findings/openapi-07'
+import { CI_OPS, ciSchemas } from '../ci/openapi'
 import { RELEASE_OPS, releaseSchemas } from '../release/openapi'
 import { GATE_VEX_OPS, gateVexSchemas } from '../gates/openapi-08'
 
@@ -149,6 +150,7 @@ const OPS: Record<string, Record<string, Op>> = {
   ...PROFILE_OPS,
   ...RULESET_OPS,
   ...TRIAGE_OPS,
+  ...CI_OPS,
   ...RELEASE_OPS,
   ...GATE_VEX_OPS,
   '/api/scans': {
@@ -274,7 +276,7 @@ export default defineEventHandler(async () => {
     components: {
       securitySchemes: {
         session: { type: 'apiKey', in: 'cookie', name: '__Host-scanoria_session' },
-        apiToken: { type: 'http', scheme: 'bearer', description: 'Project API token scn_… (CI routes only: queue a scan, read a verdict)' },
+        apiToken: { type: 'http', scheme: 'bearer', description: 'Project API token scn_…, or since 0.8 (J4) a CI OIDC token (GitHub Actions, Forgejo Actions, GitLab id_tokens; audience scanoria) bound to the project by repository and ref. CI routes only: queue a scan, read a verdict, upload results, request an exception. Always a non-human identity' },
       },
       schemas: {
         AiConnector: {
@@ -419,6 +421,7 @@ export default defineEventHandler(async () => {
         ...profileSchemas(),
         ...rulesetSchemas(),
         ...triageSchemas(),
+        ...ciSchemas(),
         ...releaseSchemas(),
         ...gateVexSchemas(),
         FindingStatus: {

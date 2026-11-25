@@ -12,7 +12,7 @@ import { apiError, clientAddress, readValidated } from '../../../utils/http'
 import { writeAudit } from '../../../utils/audit'
 import { enqueueScan } from '../../../scans/enqueue'
 import { getProjectRef, scanCreateSchema } from '../../../gates/gates'
-import { ciCaller, gateError, uuidParam } from '../../../gates/http'
+import { ciCaller, gateError, uuidParam, tokenLabel, tokenRowId } from '../../../gates/http'
 
 export default defineEventHandler(async (event) => {
   const caller = ciCaller(event, 'scan:create', 'operator')
@@ -34,7 +34,7 @@ export default defineEventHandler(async (event) => {
       trigger: caller.kind === 'token' ? 'api' : 'manual',
       profileSlug: body.profile,
       requestedBy: caller.kind === 'user' ? caller.auth.user.id : undefined,
-      apiTokenId: caller.kind === 'token' ? caller.token.id : undefined,
+      apiTokenId: caller.kind === 'token' ? tokenRowId(caller.token) ?? undefined : undefined,
     })
   }
   catch (err) {
@@ -51,7 +51,7 @@ export default defineEventHandler(async (event) => {
   await writeAudit(pool, {
     actor: caller.kind === 'user'
       ? { type: 'user', userId: caller.auth.user.id, username: caller.auth.user.username, ip: clientAddress(event) }
-      : { type: 'system', username: `api-token:${caller.token.prefix}`, ip: clientAddress(event) },
+      : { type: 'system', username: tokenLabel(caller.token), ip: clientAddress(event) },
     action: 'scan.request', outcome: 'success', targetType: 'scan', targetId: res.scanId,
     details: { project: project.slug, ref: body.ref, profile: body.profile ?? null, number: res.number, via: caller.kind },
   })

@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Tâche Tekton Scanoria (J3, 0.8) : une ligne dans un Pipeline,
+#   - {name: scanoria, taskRef: {name: scanoria}, params: [{name: url, value: …}, {name: project, value: …}]}
+# Le jeton d'API du projet vient d'un Secret Kubernetes (clé « token »), jamais
+# en clair ; l'étape commune scanoria-ci.sh vient d'un ConfigMap « scanoria-ci ».
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: scanoria
+  labels:
+    app.kubernetes.io/name: scanoria
+spec:
+  params:
+    - name: url
+      type: string
+    - name: project
+      type: string
+    - name: ref
+      type: string
+    - name: profile
+      type: string
+      default: ""
+    - name: client-sha256
+      type: string
+      default: ""
+    - name: token-secret
+      type: string
+      default: scanoria-token
+    # Alpine 3.24.4 (index multi-architecture), empreinte relevée le 2026-11-25.
+    - name: image
+      type: string
+      default: docker.io/library/alpine@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+  results:
+    - name: verdict
+      type: string
+  volumes:
+    - name: scanoria-ci
+      configMap:
+        name: scanoria-ci
+  steps:
+    - name: scan
+      image: $(params.image)
+      securityContext:
+        runAsNonRoot: false
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+      volumeMounts:
+        - name: scanoria-ci
+          mountPath: /scanoria
+          readOnly: true
+      env:
+        - name: SCANORIA_URL
+          value: $(params.url)
+        - name: SCANORIA_PROJECT
+          value: $(params.project)
+        - name: SCANORIA_REF
+          value: $(params.ref)
+        - name: SCANORIA_PROFILE
+          value: $(params.profile)
+        - name: SCANORIA_CLIENT_SHA256
+          value: $(params.client-sha256)
+        - name: SCANORIA_OIDC
+          value: "0"
+        - name: SCANORIA_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: $(params.token-secret)
+              key: token
+      script: |
+        #!/bin/sh
+        set -u
+        apk add --no-cache curl jq > /dev/null
+        GITHUB_OUTPUT=/tmp/out sh /scanoria/scanoria-ci.sh
+        rc=$?
+        sed -n 's/^verdict=//p' /tmp/out 2> /dev/null | head -n 1 | tr -d '\n' > "$(results.verdict.path)"
+        exit "$rc"

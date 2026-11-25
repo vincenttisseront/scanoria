@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Vincent Tisseront
 #
 # Installe les outils de la CI demandés (gitleaks, actionlint, osv-scanner,
-# ShellCheck) dans un répertoire, après vérification de l'empreinte épinglée
+# ShellCheck, zizmor) dans un répertoire, après vérification de l'empreinte épinglée
 # dans .github/tools.env. Usage : install-tools.sh RÉPERTOIRE OUTIL…
 set -euo pipefail
 
@@ -53,6 +53,11 @@ for tool in "$@"; do
 			"$dest/.venv-shellcheck/bin/pip" install --quiet --disable-pip-version-check \
 				"shellcheck-py==$(get SHELLCHECK_PY_VERSION)"
 			ln -sf "$dest/.venv-shellcheck/bin/shellcheck" "$dest/shellcheck" ;;
+		zizmor)
+			python3 -m venv "$dest/.venv-zizmor"
+			"$dest/.venv-zizmor/bin/pip" install --quiet --disable-pip-version-check \
+				"zizmor==$(get ZIZMOR_VERSION)"
+			ln -sf "$dest/.venv-zizmor/bin/zizmor" "$dest/zizmor" ;;
 		*) echo "install-tools: outil inconnu : $tool" >&2; exit 2 ;;
 	esac
 	echo "install-tools: $tool installé"

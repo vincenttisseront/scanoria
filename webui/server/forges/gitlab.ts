@@ -8,7 +8,7 @@
 import { ForgeError, forgeGet, forgeGetJson, type ForgeRequest } from './http'
 import {
   DEFAULT_FILE_BYTES, DEFAULT_TREE_ENTRIES, MAX_REPOS, checkCommit, checkFullName, checkPath, checkRef,
-  isSafeRef, type ForgeAccess, type ForgeClient, type ForgeRepo, type TreeEntry,
+  isSafeRef, repoId, type ForgeAccess, type ForgeClient, type ForgeRepo, type TreeEntry,
 } from './types'
 
 const PAGE = 100
@@ -43,6 +43,7 @@ export function gitlabToRepo(raw: unknown): ForgeRepo | null {
     clone_url: cloneUrl,
     ssh_url: str(r.ssh_url_to_repo),
     html_url: str(r.web_url),
+    ...(repoId(r.id) ? { id: repoId(r.id) } : {}),
   }
 }
 

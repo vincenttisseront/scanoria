@@ -11,7 +11,7 @@
 import { defineEventHandler, getRouterParam, setResponseStatus } from 'h3'
 import { getPool, withTransaction } from '../../../utils/db'
 import { readValidated } from '../../../utils/http'
-import { ciCaller, uuidParam } from '../../../gates/http'
+import { ciCaller, uuidParam, tokenLabel } from '../../../gates/http'
 import { requestException } from '../../../findings/exceptions'
 import { exceptionHttpError, exceptionRequestSchema } from '../../../findings/exceptions-http'
 
@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
       scan_id: body.scan_id,
       commit_authors: body.commit_authors ?? [],
       requested_via: caller.kind === 'token' ? 'api' : 'console',
-      requester_label: caller.kind === 'token' ? `api-token:${caller.token.prefix}` : caller.auth.user.username,
+      requester_label: caller.kind === 'token' ? tokenLabel(caller.token) : caller.auth.user.username,
       requester_is_human: caller.kind !== 'token',
       requester_user_id: caller.kind === 'token' ? null : caller.auth.user.id,
     }))
