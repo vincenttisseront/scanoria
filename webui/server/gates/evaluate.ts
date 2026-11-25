@@ -579,8 +579,24 @@ export function planCompanionIds(plan: unknown): string[] {
   })
 }
 
-/** Contrat 6 : évalue le quality gate d'une analyse (sans l'enregistrer : C le fait). */
-export async function evaluateGate(db: Queryable, scanId: string, now = new Date()): Promise<VerdictDetails> {
+/**
+ * Lecture de tout ce que juge le gate pour une analyse (G11) : plan, règles
+ * figées, modules, résultats, exceptions, composants. Sans effet de bord.
+ * - options absentes : exceptions en vigueur à `now` (évaluation du contrat 6) ;
+ * - exceptionsAt (F9, rejeu du simulateur) : exceptions telles qu'elles
+ *   étaient à cet instant : approuvées avant, ni révoquées ni échues alors.
+ */
+export interface GateLoadOptions {
+  exceptionsAt?: Date
+}
+
+export interface LoadedGate {
+  input: GateInput
+  projectId: string
+  plan: unknown
+}
+
+export async function loadGateInput(db: Queryable, scanId: string, now = new Date(), opts: GateLoadOptions = {}): Promise<LoadedGate> {
   const scan = await db.query<{ project_id: string, gate_id: string, plan: unknown, coverage: unknown, gate_rules: unknown, today: string, trigger: string, sbom_source: string | null }>(
     `SELECT s.project_id, s.gate_id, s.plan, s.coverage, g.rules AS gate_rules, s.trigger, s.sbom_source::text AS sbom_source,
             to_char(($2::timestamptz AT TIME ZONE current_setting('TimeZone'))::date, 'YYYY-MM-DD') AS today
@@ -593,6 +609,20 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
   // 0.7 (G8) : plancher des verrous figé dans le plan ; sans lui (plan d'avant la 0.7), règles inchangées (G11).
   const rules = applyGateFloor(rulesFromPlan(row.plan) ?? GateRules.parse(row.gate_rules), planGateFloor(row.plan))
 
+  const exceptionsQuery = opts.exceptionsAt
+    ? db.query<GateException>(
+        `SELECT id, kind, target, reason, to_char(expires_on, 'YYYY-MM-DD') AS expires_on
+           FROM exceptions
+          WHERE project_id = $1 AND status = 'approved' AND decided_at <= $3::timestamptz
+            AND (revoked_at IS NULL OR revoked_at > $3::timestamptz) AND expires_on >= $2::date`,
+        [row.project_id, row.today, opts.exceptionsAt.toISOString()],
+      )
+    : db.query<GateException>(
+        `SELECT id, kind, target, reason, to_char(expires_on, 'YYYY-MM-DD') AS expires_on
+           FROM exceptions
+          WHERE project_id = $1 AND status = 'approved' AND revoked_at IS NULL AND expires_on >= $2::date`,
+        [row.project_id, row.today],
+      )
   const [modules, findings, exceptions] = await Promise.all([
     db.query<GateModule>('SELECT module_id, status, feeds FROM scan_modules WHERE scan_id = $1', [scanId]),
     db.query<GateFinding>(
@@ -606,18 +636,13 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
         WHERE sf.scan_id = $1`,
       [scanId],
     ),
-    db.query<GateException>(
-      `SELECT id, kind, target, reason, to_char(expires_on, 'YYYY-MM-DD') AS expires_on
-         FROM exceptions
-        WHERE project_id = $1 AND status = 'approved' AND revoked_at IS NULL AND expires_on >= $2::date`,
-      [row.project_id, row.today],
-    ),
+    exceptionsQuery,
   ])
 
   // 0.7 (D, contrat 33) : une analyse de PR compare à la base de la PR (G18).
   const baseline = await pullRequestBaseline(db, scanId)
 
-  return computeVerdict({
+  const input: GateInput = {
     gateId: row.gate_id,
     rules,
     modules: modules.rows,
@@ -632,5 +657,11 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
     trigger: row.trigger,
     components: await loadGateComponents(db, scanId, row.sbom_source, row.project_id),
     freshnessAt: planFreshnessAt(row.plan) ?? now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
-  })
+  }
+  return { input, projectId: row.project_id, plan: row.plan }
+}
+
+/** Contrat 6 : évalue le quality gate d'une analyse (sans l'enregistrer : C le fait). */
+export async function evaluateGate(db: Queryable, scanId: string, now = new Date()): Promise<VerdictDetails> {
+  return computeVerdict((await loadGateInput(db, scanId, now)).input)
 }

@@ -127,7 +127,7 @@ check "update-pubkey.pem = empreinte épinglée" test \
 	"$(env_get "$ROOT/src/iso/build.env" UPDATE_PUBKEY_SHA256)"
 check "build.env : image de construction épinglée par empreinte" bash -c '[[ $1 =~ ^docker\.io/library/ubuntu:24\.04@sha256:[0-9a-f]{64}$ ]]' _ "$(env_get "$ROOT/src/iso/build.env" BUILD_IMAGE)"
 check "packages.list : noms valides" bash -c '! grep -Ev "^[[:space:]]*(#|$)" "$1" | grep -vqE "^[a-z0-9][a-z0-9.+-]+$"' _ "$ROOT/src/iso/packages.list"
-for p in postgresql-16 nginx podman nftables jq zstd openssl curl whiptail python3; do
+for p in postgresql-16 nginx podman netavark aardvark-dns nftables jq zstd openssl curl whiptail python3; do
 	check "packages.list : $p" grep -qx "$p" "$ROOT/src/iso/packages.list"
 done
 

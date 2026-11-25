@@ -50,7 +50,7 @@ const pendingRow = (id: string, extra: Record<string, unknown> = {}) => ({
 describe('page Exceptions à approuver', () => {
   it('administrateur : demandes listées, règles rappelées, approbation par modale avec motif', async () => {
     setUser('admin')
-    route('GET', '/api/exceptions/pending', () => ({ items: [pendingRow(E1), pendingRow(E2, { cannot_decide: 'requester', requester_is_human: true, created_by: 'admin', requested_via: 'console' })] }))
+    route('GET', '/api/exceptions/pending', () => ({ items: [pendingRow(E1, { vex_status: 'not_affected' }), pendingRow(E2, { cannot_decide: 'requester', requester_is_human: true, created_by: 'admin', requested_via: 'console' })] }))
     route('GET', '/api/exceptions/pending-count', () => ({ count: 1 }))
     route('POST', `/api/exceptions/${E1}/decision`, () => ({ id: E1, status: 'approved', reevaluated: [{ scan_id: 'x', before: 'failed', after: 'passed' }] }))
     await mountIn(ApprovalsPage)
@@ -65,6 +65,9 @@ describe('page Exceptions à approuver', () => {
     await click(document.body.querySelector('[data-testid="approve"]')!)
     expect(bodyText()).toContain('Approuver l’exception')
     expect(bodyText()).toContain('2027-01-01')
+    // H7 : l'approbateur voit la déclaration VEX que l'approbation publiera.
+    expect(document.body.querySelector('[data-testid="approval-vex"]')!.textContent).toContain('non concerné')
+    expect(document.body.querySelector('[data-testid="approval-vex-note"]')!.textContent).toContain('« non concerné »')
     const confirm = document.body.querySelector<HTMLButtonElement>('[data-testid="decision-confirm"]')!
     expect(confirm.disabled).toBe(true)
     setInput(field('decision-reason', 'textarea'), 'Correctif planifié')

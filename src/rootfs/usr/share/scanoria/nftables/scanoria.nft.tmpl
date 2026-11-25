@@ -43,5 +43,11 @@ table inet scanoria {
 		# Bases de vulnérabilités servies par l'appliance aux modules permanents
 		# (Dependency-Track hors ligne, 0.6) : nginx, port 9790, lecture seule.
 		iifname "podman*" ip saddr 10.90.0.0/16 tcp dport 9790 accept
+		# Résolution des noms entre conteneurs (aardvark-dns, à l'écoute sur la
+		# passerelle de chaque réseau Podman) : sans elle, un scanner rattaché au
+		# réseau interne d'un service (dtrack-upload → Dependency-Track) ne trouve
+		# pas le service. Les conteneurs sans réseau (--network=none) ne sont pas
+		# concernés.
+		iifname "podman*" meta l4proto { tcp, udp } th dport 53 accept
 	}
 }

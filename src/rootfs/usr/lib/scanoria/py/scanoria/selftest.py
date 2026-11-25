@@ -418,6 +418,19 @@ def check_ai(rep):
         rep.add("ai.alive", "pass", "scanoria-ai running", {"addresses": conf.get("addresses", [])})
 
 
+AARDVARK_PATHS = ("/usr/lib/podman/aardvark-dns", "/usr/libexec/podman/aardvark-dns")
+
+
+def check_container_dns(rep):
+    """podman.dns : aardvark-dns présent, sinon les conteneurs d'un réseau de
+    service ne se résolvent pas par leur nom (dtrack-upload → Dependency-Track)."""
+    if any(os.path.isfile(common.p(x)) for x in AARDVARK_PATHS):
+        rep.add("podman.dns", "pass", "container name resolution available (aardvark-dns)")
+    else:
+        rep.add("podman.dns", "warn", "aardvark-dns missing: service modules cannot be reached by name "
+                "(apt install aardvark-dns)")
+
+
 def run_checks(quick):
     rep = Report()
     started = common.now()
@@ -438,6 +451,7 @@ def run_checks(quick):
     check_routing(rep)
     check_ai(rep)
     check_runner(rep)
+    check_container_dns(rep)
     if not quick:
         check_dns(rep, name)
         check_time(rep)
