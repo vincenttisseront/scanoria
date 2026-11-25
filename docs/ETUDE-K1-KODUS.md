@@ -2,9 +2,9 @@
 
 Étude du 2026-11-25 (chantier E de la 0.7), à partir des fichiers publics du
 dépôt `kodustech/kodus-ai` (branche `main`), de sa documentation et du
-registre GHCR. **Recommandation : ne pas intégrer K1 en 0.7** et garder
-PR-Agent (K2, `modules/pr-agent`) comme revue de code IA des PR. La décision
-revient à l'intégrateur.
+registre GHCR. **Recommandation : ne pas intégrer K1** et garder
+PR-Agent (K2, `modules/pr-agent`) comme revue de code IA des PR.
+**Décision du 2026-11-25 (Vincent) : K1 est écarté** (CLAUDE.md, section 14).
 
 ## Constats
 
