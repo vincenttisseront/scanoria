@@ -10,6 +10,7 @@ import { getPool, withTransaction } from '../../../utils/db'
 import { apiError, clientAddress, readValidated, requireRole } from '../../../utils/http'
 import { writeAudit } from '../../../utils/audit'
 import { getFinding, setSecretState, TriageError } from '../../../findings/triage'
+import { triageHttpError } from '../../../findings/triage-http'
 import { secretStateSchema, uuidParam } from '../../../findings/schemas'
 
 export default defineEventHandler(async (event) => {
@@ -29,11 +30,8 @@ export default defineEventHandler(async (event) => {
     })
   }
   catch (err) {
-    if (err instanceof TriageError) {
-      if (err.code === 'E_NOT_SECRET') throw apiError(409, 'E_NOT_SECRET')
-      throw apiError(404, 'E_NOT_FOUND')
-    }
-    throw err
+    if (err instanceof TriageError && err.code === 'E_NOT_FOUND') throw apiError(404, 'E_NOT_FOUND')
+    throw await triageHttpError(err, pool, actor, id, { secret_state: body.state })
   }
   return getFinding(pool, id)
 })

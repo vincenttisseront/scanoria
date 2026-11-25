@@ -102,7 +102,7 @@ onMounted(async () => {
   if (canEdit.value && (q.tool || q.rule || q.path)) {
     openCreate({
       match: { tool: str(q.tool) || undefined, rule: str(q.rule) || undefined, path: str(q.path) || undefined },
-      action: (['false-positive', 'accepted', 'confirmed'] as const).find(a => a === q.action) ?? 'false-positive',
+      action: (['false-positive', 'confirmed'] as const).find(a => a === q.action) ?? 'false-positive',
       reason: str(q.reason).slice(0, 2000),
     })
   }
@@ -112,7 +112,8 @@ const projectItems = computed(() => [
   { label: t('triage.rules.allProjects'), value: ALL },
   ...projects.value.map(p => ({ label: p.project_name, value: p.project_id })),
 ])
-const actionItems = computed(() => (['false-positive', 'confirmed', ...(isAdmin.value ? ['accepted'] as const : [])] as Action[])
+// « accepted » n'est plus une action de règle : accepter passe par une demande d'exception approuvée (F5, J15).
+const actionItems = computed(() => (['false-positive', 'confirmed'] as Action[])
   .map(a => ({ label: t(`findings.status.${a}`), value: a })))
 const severityItems = computed(() => SEVERITIES.map(s => ({ label: t(`findings.severity.${s}`), value: s })))
 

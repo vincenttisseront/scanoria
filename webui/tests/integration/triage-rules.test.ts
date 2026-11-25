@@ -3,7 +3,7 @@
 //
 // Chantier B (0.7) : règles de tri en masse (F4) contre un vrai PostgreSQL 16.
 // Simulation sans écriture, application à l'enregistrement et à l'ingestion,
-// droits (accepted et règles globales réservées à l'admin), H4 et G8,
+// droits (règles globales réservées à l'admin, plus de nouvelle règle « accepted »), H4,
 // révocation et échéance qui remettent les résultats à « nouveau », audit,
 // propositions issues du pré-tri IA (I3) sans enregistrement automatique.
 
@@ -162,7 +162,7 @@ describe.skipIf(!DATABASE_URL)('règles de tri (F4, PostgreSQL réel)', () => {
 
   it('enregistrement : appliqué, audité, triage_rule_id posé ; droits ; projet inconnu', async () => {
     const input = { project_id: projectId, match: { path: 'tests/**' }, action: 'false-positive' as const, reason: 'jeux de test', expires_on: isoDay(90) }
-    await expect(createTriageRule(db.pool, { ...input, action: 'accepted' }, op())).rejects.toThrow('E_FORBIDDEN')
+    await expect(createTriageRule(db.pool, { ...input, action: 'accepted' }, op())).rejects.toThrow('E_VALIDATION')
     await expect(createTriageRule(db.pool, { ...input, project_id: null }, op())).rejects.toThrow('E_FORBIDDEN')
     await expect(createTriageRule(db.pool, { ...input, project_id: crypto.randomUUID() }, op())).rejects.toThrow('E_NOT_FOUND')
     const { rule, applied } = await createTriageRule(db.pool, input, op())
@@ -188,19 +188,19 @@ describe.skipIf(!DATABASE_URL)('règles de tri (F4, PostgreSQL réel)', () => {
     expect((await listTriageRules(db.pool, { projectId, all: true })).map(r => r.id)).toContain(rule.id)
   })
 
-  it('accepted : admin seulement, datée ; un secret verrouillé (G8) n\'est pas accepté', async () => {
-    const sec = await finding(projectId, { category: 'secrets', tool: 'gitleaks', rule_id: 'generic', secret_type: 'generic-api-key', path: 'fixtures/k.env' })
+  it('accepted : refusé même à un administrateur (F5, J15) ; une ancienne règle ne touche plus rien, révocable par un admin', async () => {
     const other = await finding(projectId, { tool: 'gitleaks', rule_id: 'generic', path: 'fixtures/l.env' })
-    const prof = (await db.pool.query<{ id: string }>(`SELECT profile_id AS id FROM projects WHERE id = $1`, [projectId])).rows[0]!.id
-    await db.pool.query(`UPDATE profiles SET locks = '{"gate_floor": {"max_secrets": 0}}' WHERE id = $1`, [prof])
     const input = { project_id: projectId, match: { tool: 'gitleaks', rule: 'generic' }, action: 'accepted' as const, reason: 'fixtures documentées', expires_on: isoDay(30) }
-    const { rule, applied } = await createTriageRule(db.pool, input, admin())
-    expect(applied).toBe(1)
-    expect((await status(sec)).status).toBe('new')
-    expect(await status(other)).toMatchObject({ status: 'accepted', status_until: isoDay(30), triage_rule_id: rule.id })
-    await expect(revokeTriageRule(db.pool, rule.id, op())).rejects.toThrow('E_FORBIDDEN')
-    await db.pool.query(`UPDATE profiles SET locks = '{}' WHERE id = $1`, [prof])
-    await revokeTriageRule(db.pool, rule.id, admin())
+    await expect(createTriageRule(db.pool, input, admin())).rejects.toThrow('E_VALIDATION')
+    await expect(simulateTriageRule(db.pool, input)).rejects.toThrow('E_VALIDATION')
+    // Règle « accepted » enregistrée avant le suivi : lisible, sans effet à l'ingestion.
+    const legacy = (await db.pool.query<{ id: string }>(
+      `INSERT INTO triage_rules (project_id, match, action, reason, expires_on, created_by) VALUES ($1, $2, 'accepted', 'ancienne', $3::date, $4) RETURNING id`,
+      [projectId, JSON.stringify(input.match), isoDay(30), admin().id])).rows[0]!.id
+    expect(await applyTriageRulesOnIngest(db.pool, projectId, [other])).toBe(0)
+    expect((await status(other)).status).toBe('new')
+    await expect(revokeTriageRule(db.pool, legacy, op())).rejects.toThrow('E_FORBIDDEN')
+    await revokeTriageRule(db.pool, legacy, admin())
   })
 
   it('ingestion : règles actives du projet puis de l\'appliance, la plus ancienne d\'abord ; règle illisible ignorée', async () => {
@@ -266,7 +266,7 @@ describe.skipIf(!DATABASE_URL)('règles de tri (F4, PostgreSQL réel)', () => {
     await db.pool.query('UPDATE projects SET ai_opt_out = false WHERE id = $1', [projectId])
   })
 
-  it('API : lecteur lit, opérateur simule et crée, admin pour accepted ; sans connecteur, pas de propositions', async () => {
+  it('API : lecteur lit, opérateur simule et crée, accepted refusé, admin pour une règle globale ; sans connecteur, pas de propositions', async () => {
     const body = { project_id: projectId, match: { rule: 'API' }, action: 'false-positive', reason: 'bruit connu', expires_on: isoDay(20) }
     await finding(projectId, { rule_id: 'API' })
     expect((await call(`/api/triage-rules?project_id=${projectId}`, null)).status).toBe(401)
@@ -275,7 +275,8 @@ describe.skipIf(!DATABASE_URL)('règles de tri (F4, PostgreSQL réel)', () => {
     const sim = await call('/api/triage-rules/simulate', 'operator', { method: 'POST', json: body })
     expect(sim.data).toMatchObject({ total: 1 })
     expect((await call('/api/triage-rules/simulate', 'operator', { method: 'POST', json: { ...body, match: {} } })).status).toBe(400)
-    expect((await call('/api/triage-rules', 'operator', { method: 'POST', json: { ...body, action: 'accepted' } })).status).toBe(403)
+    expect((await call('/api/triage-rules', 'admin', { method: 'POST', json: { ...body, action: 'accepted' } })).status).toBe(400)
+    expect((await call('/api/triage-rules', 'operator', { method: 'POST', json: { ...body, project_id: null } })).status).toBe(403)
     expect((await db.pool.query(`SELECT 1 FROM audit_log WHERE action = 'triage-rule.create' AND outcome = 'denied'`)).rowCount).toBe(1)
     expect((await call('/api/triage-rules', 'operator', { method: 'POST', json: { ...body, expires_on: isoDay(500) } })).status).toBe(400)
     expect((await call('/api/triage-rules', 'operator', { method: 'POST', json: { ...body, project_id: crypto.randomUUID() } })).status).toBe(404)

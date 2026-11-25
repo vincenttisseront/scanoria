@@ -3,15 +3,17 @@
 //
 // Règles de tri en masse (F4) : une règle porte sur un chemin (glob), un
 // outil, une règle d'outil et des gravités, et pose un statut
-// (false-positive, accepted ou confirmed) avec une justification et une date
+// (false-positive ou confirmed) avec une justification et une date
 // de fin obligatoires.
 // - Effet simulé avant l'application : résultats touchés par projet et liste.
 // - Appliquée à la création de la règle et à chaque ingestion, aux seuls
 //   résultats « nouveaux » : une décision humaine (confirmé, faux positif,
 //   accepté) n'est jamais écrasée. findings.triage_rule_id est rempli.
-// - Une règle « accepted » vaut, pour le gate, une exception approuvée :
-//   seul un administrateur la crée, et elle suit les mêmes interdits (jamais
-//   un résultat malveillant H4, jamais un secret sous verrou G8).
+// - Plus de nouvelle règle « accepted » : accepter un risque passe par une
+//   demande d'exception approuvée (F5, J15). Les règles « accepted » déjà en
+//   base gardent leurs effets jusqu'à leur date mais ne touchent plus rien.
+// - Un faux positif n'est posé ni par la règle d'un compte non humain, ni sur
+//   un résultat d'un commit dont le créateur de la règle est l'auteur (J15).
 // - Échue ou révoquée, la règle cesse de s'appliquer et les résultats qu'elle
 //   avait triés, s'ils n'ont pas été retouchés depuis, redeviennent « nouveaux ».
 // - Audit : une ligne par résultat jusqu'à AUDIT_DETAIL_MAX, au-delà une ligne
@@ -30,6 +32,13 @@ import { redact } from './redact'
 
 export const TRIAGE_ACTIONS = ['false-positive', 'accepted', 'confirmed'] as const
 export type TriageAction = (typeof TRIAGE_ACTIONS)[number]
+/**
+ * Actions d'une NOUVELLE règle. « accepted » n'en fait plus partie : accepter
+ * un risque passe par une demande d'exception approuvée (F5, J15). Les règles
+ * « accepted » déjà enregistrées restent lisibles et révocables, et leurs
+ * effets valent jusqu'à leur date, mais elles ne touchent plus aucun résultat.
+ */
+export const RULE_INPUT_ACTIONS = ['false-positive', 'confirmed'] as const
 
 /** Au plus 8 jokers dans un glob : borne le retour arrière (comme les exceptions « path »). */
 const GLOB_RE = /^[^\0\n]{1,512}$/
@@ -45,11 +54,11 @@ export const triageRuleSchema = z.strictObject({
   /** null : règle de toute l'appliance (administrateur seulement). */
   project_id: z.string().uuid().nullable(),
   match: ruleMatchSchema,
-  action: z.enum(TRIAGE_ACTIONS),
+  action: z.enum(RULE_INPUT_ACTIONS),
   reason: z.string().trim().min(3).max(2000),
   expires_on: z.string().refine(isValidDay),
 })
-export type TriageRuleInput = z.infer<typeof triageRuleSchema>
+export type TriageRuleInput = Omit<z.infer<typeof triageRuleSchema>, 'action'> & { action: TriageAction }
 
 export class TriageRuleError extends Error {
   constructor(public code: 'E_NOT_FOUND' | 'E_VALIDATION' | 'E_FORBIDDEN', public detail: string | null = null) {
@@ -134,6 +143,7 @@ export interface Simulation {
 }
 
 function validate(input: TriageRuleInput, today: string): void {
+  if (input.action === 'accepted') throw new TriageRuleError('E_VALIDATION', 'action')
   const max = isoDay(MAX_EXCEPTION_DAYS, new Date(`${today}T00:00:00Z`))
   if (input.expires_on < today || input.expires_on > max) throw new TriageRuleError('E_VALIDATION', 'expires_on')
 }
@@ -199,15 +209,25 @@ export async function getTriageRule(db: Queryable, id: string): Promise<TriageRu
 async function applyTo(db: Queryable, rule: { id: string, action: TriageAction, reason: string, expires_on: string, created_by: number | null },
   list: Candidate[], actor: AuditActor, via: 'create' | 'ingest'): Promise<number> {
   if (!list.length) return 0
+  // Plus aucun « accepted » hors du circuit d'approbation (F5, J15).
+  if (rule.action === 'accepted') return 0
   const ids = list.map(f => f.id)
-  const accepted = rule.action === 'accepted'
+  // Un faux positif n'est jamais posé par une règle d'un compte non humain, ni
+  // sur un résultat d'un commit dont le créateur de la règle est l'auteur (J15).
   const res = await db.query<{ id: string }>(
-    `UPDATE findings SET status = $2, status_reason = $3, status_until = $4::date, status_by = $5, status_at = now(),
-            triage_rule_id = $6, updated_at = now()
+    `UPDATE findings SET status = $2, status_reason = $3, status_until = NULL, status_by = $4, status_at = now(),
+            triage_rule_id = $5, updated_at = now()
       WHERE id = ANY($1::uuid[])
         AND (status = 'new' OR (status = 'accepted' AND status_until < current_date)) AND NOT malicious
+        AND ($2 <> 'false-positive' OR (
+              EXISTS (SELECT 1 FROM users u WHERE u.id = $4 AND u.kind = 'human')
+              AND NOT EXISTS (
+                SELECT 1 FROM scan_findings sf JOIN scans s ON s.id = sf.scan_id JOIN users u ON u.id = $4
+                 WHERE sf.finding_id = findings.id
+                   AND lower(regexp_replace(btrim(s.pull_request->>'author'), '^@', ''))
+                       IN (lower(u.username), lower(coalesce(u.email, ''))))))
       RETURNING id`,
-    [ids, rule.action, rule.reason, accepted ? rule.expires_on : null, rule.created_by, rule.id],
+    [ids, rule.action, rule.reason, rule.created_by, rule.id],
   )
   const touched = res.rows.map(r => r.id)
   if (!touched.length) return 0
@@ -230,12 +250,12 @@ async function applyTo(db: Queryable, rule: { id: string, action: TriageAction, 
 }
 
 /**
- * Enregistre une règle et l'applique aussitôt. Droits : « accepted » et toute
- * règle de toute l'appliance (project_id null) exigent le rôle admin.
+ * Enregistre une règle et l'applique aussitôt. Une règle de toute l'appliance
+ * (project_id null) exige le rôle admin ; « accepted » est refusé (E_VALIDATION).
  */
 export async function createTriageRule(db: Queryable, input: TriageRuleInput, user: { id: number, username: string, role: string, ip?: string | null }, today = isoDay()): Promise<{ rule: TriageRuleRow, applied: number }> {
   validate(input, today)
-  if ((input.action === 'accepted' || input.project_id === null) && user.role !== 'admin') throw new TriageRuleError('E_FORBIDDEN')
+  if (input.project_id === null && user.role !== 'admin') throw new TriageRuleError('E_FORBIDDEN')
   if (input.project_id) {
     const p = await db.query('SELECT 1 FROM projects WHERE id = $1', [input.project_id])
     if (!p.rowCount) throw new TriageRuleError('E_NOT_FOUND')
@@ -299,6 +319,7 @@ export async function applyTriageRulesOnIngest(db: Queryable, projectId: string,
     `SELECT id, project_id, match, action, reason, to_char(expires_on, 'YYYY-MM-DD') AS expires_on, created_by::int AS created_by
        FROM triage_rules
       WHERE (project_id = $1 OR project_id IS NULL) AND revoked_at IS NULL AND expires_on >= current_date
+        AND action <> 'accepted'
       ORDER BY created_at, id LIMIT 500`,
     [projectId],
   )

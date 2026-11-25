@@ -144,10 +144,10 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/findings': { get: { summary: 'Unified findings (filters: project_id, scan_id, tool, severity, category, status, is_new, secret, malicious, q; 0.5: epss_min (0.01, 0.1, 0.5), kev=true, grouped=true for one row per correlation group (F16). grouped defaults to false in the API for backward compatibility; the console sends grouped=true by default. 0.7: owner (CODEOWNERS owner) and mine=true (findings owned by the caller, through owner mappings) (F6). Each item carries epss, epss_percentile (EPSS, FIRST.org), kev, kev_added, correlation_key, group, owners and triage_rule_id; paginated)', role: 'viewer' } },
   '/api/findings/summary': { get: { summary: 'Open findings per project and severity, secrets to revoke, malicious packages', role: 'viewer' } },
   '/api/findings/{id}': { get: { summary: 'Finding detail (masked snippet, scans where it appears); never a secret value', role: 'viewer' } },
-  '/api/findings/{id}/status': { post: { summary: 'Triage a finding (accepted needs reason and end date; refused 409 E_MALICIOUS for a malicious package)', role: 'operator', body: 'FindingStatus' } },
+  '/api/findings/{id}/status': { post: { summary: 'Triage a finding. accepted (reason and end date) files an exception request for admin approval and answers 202 with exception_request; false-positive refused 403 E_TRIAGE_NOT_ALLOWED to non-human accounts and commit authors; 409 E_MALICIOUS for a malicious package', role: 'operator', body: 'FindingStatus' } },
   '/api/findings/{id}/secret': { post: { summary: 'Secret follow-up (to-revoke, revoked, false-positive) with date and author', role: 'operator', body: 'SecretState' } },
   '/api/findings/{id}/group': { get: { summary: 'Group of correlated findings (F16): tools, confirmations (distinct tools), member findings; null without correlation. /api/findings also accepts epss_min, kev and grouped (0.5)', role: 'viewer' } },
-  '/api/findings/{id}/group-status': { post: { summary: 'Triage every finding of a correlated group (one audit line per finding; 409 E_MALICIOUS if a member is a malicious package)', role: 'operator', body: 'FindingStatus' } },
+  '/api/findings/{id}/group-status': { post: { summary: 'Triage every finding of a correlated group (one audit line per finding; accepted files one exception request per finding, 202 { requested }; same refusals as single triage)', role: 'operator', body: 'FindingStatus' } },
   '/api/intel/status': { get: { summary: 'EPSS and KEV import state (H3): CVE count, import date, published database date', role: 'viewer' } },
   '/api/severity-maps': {
     get: { summary: 'Severity normalization per module, with origin value', role: 'viewer' },
@@ -383,7 +383,7 @@ export default defineEventHandler(async () => {
           properties: {
             status: { enum: ['new', 'confirmed', 'false-positive', 'accepted'] },
             reason: { type: 'string', maxLength: 2000, description: 'Required for false-positive and accepted' },
-            until: { type: 'string', format: 'date', description: 'Required for accepted, at most one year ahead' },
+            until: { type: 'string', format: 'date', description: 'Required for accepted (end date of the requested exception), at most one year ahead' },
           },
         },
         SecretState: { type: 'object', additionalProperties: false, required: ['state'], properties: { state: { enum: ['to-revoke', 'revoked', 'false-positive'] } } },

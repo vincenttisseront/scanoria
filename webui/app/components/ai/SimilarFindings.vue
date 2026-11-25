@@ -96,7 +96,8 @@ function toggle(id: string, on: boolean | 'indeterminate') {
 const open = ref(false)
 const applying = ref(false)
 const form = reactive<{ status: 'confirmed' | 'false-positive' | 'accepted', reason: string, until: string }>({ status: 'confirmed', reason: '', until: '' })
-const statusItems = computed(() => (['confirmed', 'false-positive', 'accepted'] as const).map(s => ({ label: t(`findings.status.${s}`), value: s })))
+const statusItems = computed(() => (['confirmed', 'false-positive', 'accepted'] as const)
+  .map(s => ({ label: s === 'accepted' ? t('findings.actions.accept') : t(`findings.status.${s}`), value: s })))
 const needsReason = computed(() => form.status !== 'confirmed')
 const formValid = computed(() => (!needsReason.value || form.reason.trim().length >= 3) && (form.status !== 'accepted' || /^\d{4}-\d{2}-\d{2}$/.test(form.until)))
 
@@ -131,6 +132,8 @@ async function apply() {
   open.value = false
   toast.add({ title: t('ai.similar.applied', { ok, count: ids.length }), color: ok === ids.length ? 'success' : 'warning' })
   if (ok < ids.length) toast.add({ title: t('ai.similar.partial', { failed: ids.length - ok }), color: 'warning' })
+  // « accepted » dépose des demandes d'exception (F5, J15), approuvées par un administrateur.
+  if (ok && form.status === 'accepted') toast.add({ title: t('findings.requestSent'), color: 'info' })
   selected.value = []
   emit('triaged')
   polls = 0
