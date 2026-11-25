@@ -63,6 +63,7 @@ convertisseur n'est nécessaire.
 | `license` | oui | `spdx` (expression SPDX), `url` (https), `restrictions` (`none`, `private-code-forbidden`, `no-redistribution`, `other`), `verified_at` (date de vérification sur le dépôt amont), `notes` |
 | `upstream` | oui | `homepage`, `source` (https) |
 | `image` | sauf `feed` | `registre/chemin@sha256:<64 hex>` : registre explicite (pas de nom court), **aucune étiquette** |
+| `image_pending` | non | `true` : image construite par la CI de Scanoria et pas encore publiée (§ 8) ; exclusif avec `image`, interdit pour un `feed` |
 | `version` | oui | version de l'outil (ou du format pour un `feed`), utilisable dans un nom de fichier |
 | `resources` | oui | `min_ram_mb`, `min_cpu`, `disk_mb` : l'installation est refusée en dessous (§ 11) |
 | `hostname` | `service` | libellé DNS (`sonarqube` → `sonarqube.<appliance>`) ; `null` sinon |
@@ -455,3 +456,65 @@ la console et bloque l'activation tant que l'administrateur ne l'a pas acceptée
    conformité au schéma SARIF 2.1.0 officiel, les attentes et l'absence de
    valeur de secret dans la sortie.
 5. Le catalogue (`catalog/`) reprend le module à sa prochaine publication.
+
+## 8. Images d'outils construites par la CI de Scanoria (0.7)
+
+Certains amonts ne publient **aucune image de conteneur** (Vulnhuntr, Cisco
+MCP Scanner, Agentic Radar, Opengrep…), et leurs dépendances compilées
+interdisent de livrer les sources avec l'appliance comme `modelscan`. Leur
+image est alors construite par la CI de Scanoria, à partir d'une recette
+versionnée dans le module :
+
+```
+modules/<id>/image/
+  Containerfile        recette ; contexte de construction = ce dossier seul
+  requirements.lock    dépendances Python complètes, avec empreintes (facultatif)
+  verify.sh            vérification amont avant la construction (facultatif)
+```
+
+Règles, contrôlées par `tests/lib/modcheck.py` (b10) et par le workflow :
+
+- chaque `FROM` est épinglé par empreinte (`registre/chemin@sha256:<64 hex>`,
+  registre explicite) ;
+- dépendances Python : `pip install --require-hashes --no-deps -r requirements.lock`,
+  lock complet (transitif) produit par exemple par
+  `uv pip compile --generate-hashes` ; un binaire téléchargé est vérifié par
+  `sha256sum -c` dans le même `RUN` ; `ADD` d'une URL est refusé ;
+- `ARG SOURCE_DATE_EPOCH` ; la dernière instruction `USER` est `65534:65534` ;
+- étiquettes `org.opencontainers.image.source` (dépôt amont),
+  `.revision` (commit ou étiquette amont), `.version`, `.licenses` (SPDX) et
+  `io.scanoria.module=<id>` ;
+- aucun réseau à l'exécution : l'image contient tout ce dont l'outil a
+  besoin, et le manifeste garde `scan.network: none` (ou `ai-relay` pour un
+  module d'analyse par IA, contrat 31 de la 0.7).
+
+`verify.sh`, s'il existe, est lancé par la CI avant la construction, dans
+`image/`, avec le réseau : c'est la place d'une vérification de signature
+amont (`cosign verify-blob`…). Il doit sortir en 0.
+
+**Cycle de publication** (`.github/workflows/tool-images.yml`) :
+
+1. La PR qui ajoute ou modifie `image/` porte `image_pending: true` et aucun
+   champ `image`. Le workflow construit l'image (sans rien pousser), vérifie
+   l'utilisateur 65534 et lance la commande de santé du manifeste sans
+   réseau ; la batterie `-live` qui éprouve le module la construit aussi
+   localement pour passer le banc d'essai (`tests/b10-live.sh` écarte les
+   modules en attente d'image). `catalog/build.py`
+   écarte le module de l'index et refuse qu'un module publié ou un pack le
+   cite.
+2. Après la fusion, le workflow pousse l'image vers
+   `ghcr.io/<propriétaire du dépôt>/scanoria-<id>:<version>` (seul travail avec
+   `packages: write`), y attache une attestation de provenance
+   (`actions/attest-build-provenance`) et affiche l'empreinte dans le résumé
+   du travail. Une étiquette déjà publiée n'est jamais remplacée : modifier
+   l'image demande une nouvelle `version` dans `module.yaml`. Sans base de
+   comparaison, rien n'est publié ; `workflow_dispatch` (un module) reste le
+   moyen explicite de reconstruire une image.
+3. Une PR de suivi pose `image: ghcr.io/vincenttisseront/scanoria-<id>@sha256:…`,
+   retire `image_pending` et incrémente `catalog/VERSION` : le module entre
+   alors dans le catalogue. Une image construite ici n'est jamais publiée sous
+   un autre nom.
+
+Un nouveau paquet GHCR est **privé** à sa première publication : il doit être
+rendu public (réglage du paquet, par le propriétaire du dépôt) pour que les
+appliances le récupèrent sans jeton.

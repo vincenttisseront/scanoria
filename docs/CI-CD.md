@@ -18,6 +18,7 @@ auto-hébergé** : une PR externe y exécuterait du code.
 | `.github/workflows/iso.yml` | push sur `main`, à la demande, chaque semaine | **Test de démarrage** : construction, installation dans QEMU/KVM, premier démarrage, `scanoria-selftest`, `/api/health` ([TESTING.md](TESTING.md#4-test-de-démarrage-de-liso)). |
 | `.github/workflows/release.yml` | push sur `main` qui modifie `VERSION`, à la demande | Version candidate signée, publiée en **pré-version** ([RELEASING.md](RELEASING.md)). |
 | `.github/workflows/promote.yml` | à la demande, `repository_dispatch` `scanoria-validation` | Promotion d'une candidate en version stable, ou rejet. |
+| `.github/workflows/tool-images.yml` | PR et push sur `main` qui touchent `modules/*/image/`, à la demande | Images d'outils construites par Scanoria ([MODULES.md](MODULES.md#8-images-doutils-construites-par-la-ci-de-scanoria-07)) : construction en PR, poussée vers `ghcr.io` et attestation de provenance sur `main` seulement. |
 | `.github/dependabot.yml` | chaque semaine | Mises à jour npm (`webui/`) et des actions. |
 
 ## 2. Travaux de `ci.yml`
