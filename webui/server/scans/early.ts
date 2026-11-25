@@ -94,7 +94,7 @@ export async function checkEarlyFailure(db: pg.Pool, deps: EarlyDeps, scan: { id
     [scan.id, JSON.stringify({
       at: new Date().toISOString(),
       reasons,
-      modules: [...ingested].sort(),
+      modules: [...ingested].sort((a, b) => a.localeCompare(b)),
       finding_ids: details.reasons.filter(r => reasons.includes(r.code)).flatMap(r => r.finding_ids).slice(0, 50),
     })])
   if (!upd.rowCount) return null

@@ -9,6 +9,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { setForgeRetryDelays, setForgeTransport } from '../../server/forges/http'
 import { githubPublisher } from '../../server/forges/publish-github'
 import { gitlabPublisher } from '../../server/forges/publish-gitlab'
+import { gitlabClient, gitlabToRepo } from '../../server/forges/gitlab'
 import type { Annotation, PullRequestRef } from '../../server/forges/pr-types'
 
 const A = 'a'.repeat(40)
@@ -21,6 +22,7 @@ type Route = (c: Call) => { status: number, body?: unknown } | null
 let routes: Route[] = []
 
 function json(status: number, body: unknown): Response {
+  if (typeof body === 'string') return new Response(body, { status, headers: { 'content-type': 'text/plain' } })
   return new Response(status === 204 ? null : JSON.stringify(body ?? {}), { status, headers: { 'content-type': 'application/json' } })
 }
 
@@ -181,5 +183,55 @@ describe('client de publication GitLab', () => {
     on('POST', /\/hooks$/, 201, { id: 1 })
     expect(await gl.ensureWebhook('equipe/app', url, 's'.repeat(32))).toBe('created')
     expect(calls.at(-1)!.body).toMatchObject({ url, token: 's'.repeat(32), merge_requests_events: true, note_events: true, enable_ssl_verification: true })
+  })
+})
+
+describe('client de découverte GitLab', () => {
+  const proj = (path: string, patch: Record<string, unknown> = {}) => ({
+    path_with_namespace: path, path: path.split('/').pop(), http_url_to_repo: `https://gitlab.exemple.test/${path}.git`, ssh_url_to_repo: null,
+    web_url: `https://gitlab.exemple.test/${path}`, default_branch: 'main', visibility: 'private', description: 'd', ...patch,
+  })
+
+  it('dépôt normalisé ; entrées invalides écartées', () => {
+    expect(gitlabToRepo(proj('equipe/app', { archived: true, forked_from_project: { id: 1 }, empty_repo: true }))).toMatchObject({
+      full_name: 'equipe/app', name: 'app', private: true, archived: true, fork: true, empty: true, default_branch: 'main',
+    })
+    expect(gitlabToRepo(proj('equipe/app', { http_url_to_repo: 'git://x' }))).toBeNull()
+    expect(gitlabToRepo(proj('equipe/app', { default_branch: '../x' }))!.default_branch).toBeNull()
+    expect(gitlabToRepo(null)).toBeNull()
+  })
+
+  it('jeton : utilisateur, projets membres, dépôt, branches, dernier commit, arbre, fichier', async () => {
+    const gl = gitlabClient({ kind: 'gitlab', base_url: 'https://gitlab.exemple.test', token: TOKEN })
+    on('GET', /\/api\/v4\/user$/, 200, { username: 'scanoria-bot' })
+    expect(await gl.check()).toEqual({ login: 'scanoria-bot' })
+    on('GET', /\/projects\?membership=true/, 200, [proj('equipe/app'), { path_with_namespace: 1 }])
+    expect((await gl.listRepos()).map(r => r.full_name)).toEqual(['equipe/app'])
+    on('GET', /\/projects\/equipe%2Fapp$/, 200, proj('equipe/app'))
+    expect((await gl.repo('equipe/app')).clone_url).toBe('https://gitlab.exemple.test/equipe/app.git')
+    on('GET', /\/projects\/equipe%2Fvide$/, 200, {})
+    await expect(gl.repo('equipe/vide')).rejects.toMatchObject({ code: 'E_FORGE_RESPONSE' })
+    on('GET', /\/repository\/branches\?/, 200, [{ name: 'main' }, { name: 'dev' }, {}])
+    expect(await gl.branches('equipe/app')).toEqual(['main', 'dev'])
+    on('GET', /\/repository\/branches\/main$/, 200, { commit: { id: A } })
+    expect(await gl.latestCommit('equipe/app', 'main')).toBe(A)
+    on('GET', /\/repository\/tree\?/, 200, [{ path: 'src', type: 'tree' }, { path: 'src/a.ts', type: 'blob' }, { type: 'blob' }])
+    expect(await gl.listTree('equipe/app', 'main')).toEqual({ entries: [{ path: 'src', type: 'dir', size: null }, { path: 'src/a.ts', type: 'file', size: null }], truncated: false })
+    expect((await gl.listTree('equipe/app', 'main', { maxEntries: 1 })).truncated).toBe(true)
+    on('GET', /\/files\/package\.json\/raw\?/, 200, '{"name":"app"}')
+    expect(await gl.readFile('equipe/app', 'main', 'package.json')).toBe('{"name":"app"}')
+    expect(await gl.readFile('equipe/app', 'main', 'absent.txt')).toBeNull()
+    on('GET', /\/files\/gros\.bin\/raw\?/, 200, 'x'.repeat(64))
+    expect(await gl.readFile('equipe/app', 'main', 'gros.bin', { maxBytes: 8 })).toBeNull()
+  })
+
+  it('sans jeton : version, sinon projets publics ; dépôts publics seulement', async () => {
+    const anon = gitlabClient({ kind: 'gitlab', base_url: 'https://gitlab.exemple.test', token: null })
+    on('GET', /\/api\/v4\/version$/, 401, {})
+    on('GET', /\/projects\?per_page=1$/, 200, [])
+    expect(await anon.check()).toEqual({ login: null })
+    expect(calls.map(c => new URL(c.url).pathname + new URL(c.url).search)).toEqual(['/api/v4/version', '/api/v4/projects?per_page=1'])
+    on('GET', /\/projects\?visibility=public/, 200, [proj('public/outil', { visibility: 'public' })])
+    expect((await anon.listRepos())[0]).toMatchObject({ full_name: 'public/outil', private: false })
   })
 })

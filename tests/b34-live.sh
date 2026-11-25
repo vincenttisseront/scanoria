@@ -24,8 +24,8 @@ ENGINE=${SCANORIA_ENGINE:-podman}
 for t in openssl curl jq node "$ENGINE"; do command -v "$t" > /dev/null || { echo "outil manquant : $t" >&2; exit 2; }; done
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-# Forgejo, licence GPL-3.0-or-later ; empreinte relevée par le job forges-live (étape « relevé de l'empreinte »).
-FORGEJO_IMAGE=${SCANORIA_FORGEJO_IMAGE:-"codeberg.org/forgejo/forgejo@sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+# Forgejo 17.0.2 (licence GPL-3.0-or-later), empreinte relevée le 2026-11-25 (skopeo inspect --raw | sha256sum).
+FORGEJO_IMAGE=${SCANORIA_FORGEJO_IMAGE:-"codeberg.org/forgejo/forgejo@sha256:879f4f10a98e3e167b32cde5f7ae3af0163d50bfacf567559a27a0e95a95670c"}
 CLI=${SCANORIA_FORGEJO_CLI:-forgejo}
 NAME=scanoria-b34-forgejo
 PORT=3000

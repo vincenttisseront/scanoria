@@ -64,7 +64,7 @@ describe('sanitizeForForge (contrat 30)', () => {
   })
 
   it('caractères de contrôle, bidirectionnels et invisibles retirés', () => {
-    expect(clean('a‮b\u0000c⁦d﻿e‏f')).toBe('abcdef')
+    expect(clean('a\u202Eb\u0000c\u2066d\uFEFFe\u200Ff')).toBe('abcdef')
   })
 
   it('blocs de code : contenu gardé, info limitée, bloc ouvert refermé', () => {

@@ -10,11 +10,10 @@ import { publishScan } from './publish'
 
 let registered = false
 
-export function registerForgeVerdictHook(): boolean {
-  if (registered) return true
+export function registerForgeVerdictHook(): void {
+  if (registered) return
   onVerdictChanged(async (db, scanId) => {
     await publishScan(db, scanId, { phase: 'final' })
   })
   registered = true
-  return true
 }

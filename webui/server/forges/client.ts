@@ -40,7 +40,7 @@ const CONTEXT_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/
 /** Description d'un statut : une ligne de texte brut, sans contrôle, bornée. */
 export function statusDescription(text: string): string {
   // eslint-disable-next-line no-control-regex
-  const s = text.replace(/[\u0000-\u001F\u007F-\u009F‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim()
+  const s = text.replace(/[\u0000-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim()
   return s.length > 140 ? `${s.slice(0, 139)}…` : s
 }
 

@@ -69,7 +69,7 @@ const attacks = {
   'URL nue': ['voir https://piege.exemple.test', o => !o.includes('https://piege')],
   'URL entre parenthèses': ['(https://piege.exemple.test)', o => !o.includes('https://piege')],
   'définition de lien': ['[r]: https://piege.exemple.test', o => !/^\[r\]:/.test(o)],
-  'contrôle et bidi': ['a‮b\u0000c⁦d', o => o === 'abcd'],
+  'contrôle et bidi': ['a\u202Eb\u0000c\u2066d', o => o === 'abcd'],
   'entité HTML': ['&#64;admin', o => !o.startsWith('&#64;')],
   'bloc ouvert': ['```\nx', o => o.endsWith('```')],
 }
