@@ -315,6 +315,8 @@ export const userUpdateSchema = z.strictObject({
   role: z.enum(ROLES).optional(),
   locale: z.enum(LOCALES).optional(),
   is_active: z.boolean().optional(),
+  // J15 (0.7) : compte déclaré « agent » ou « bot » (demande, ne décide jamais).
+  kind: z.enum(['human', 'agent', 'bot']).optional(),
 })
 
 export const userPasswordResetSchema = z.strictObject({

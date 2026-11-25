@@ -9,6 +9,7 @@ import type { Queryable } from '../utils/db'
 import { redact } from './redact'
 import { INTEL_COLUMNS, intelJoin } from '../intel/lookup'
 import { groupsFor, type FindingGroup } from './correlation'
+import { mineClause } from './owners'
 
 /** Statut effectif : une acceptation échue redevient « nouveau » d'elle-même. */
 export const EFFECTIVE_STATUS = `CASE WHEN f.status = 'accepted' AND f.status_until < current_date THEN 'new' ELSE f.status END`
@@ -34,6 +35,10 @@ export interface FindingFilter {
   grouped?: boolean
   /** J6 (0.6) : origine du résultat. */
   origin?: 'module' | 'external'
+  /** F6 (0.7) : un responsable lu dans CODEOWNERS. */
+  owner?: string
+  /** F6 (0.7) : « Mes résultats », compte et ses formes directes (ownerAliases). */
+  mine?: { userId: number, aliases: string[] }
   limit: number
   offset: number
 }
@@ -73,6 +78,9 @@ export interface FindingRow {
   external_source: { tool: string, version: string | null, format: string, uploaded_via: string } | null
   correlation_key: string | null
   group?: FindingGroup | null
+  /** F6 (0.7) : responsables (CODEOWNERS). F4 (0.7) : règle de tri qui a posé le statut. */
+  owners: string[]
+  triage_rule_id: string | null
 }
 
 const TS = (col: string) => `to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`
@@ -97,6 +105,11 @@ function where(f: Omit<FindingFilter, 'limit' | 'offset'>, params: unknown[]): s
   if (f.epss_min !== undefined) add('round(intel.epss::numeric, 6) >= ?::numeric', f.epss_min)
   if (f.kev !== undefined) clauses.push(f.kev ? 'intel.kev' : 'NOT intel.kev')
   if (f.origin) add('f.origin = ?', f.origin)
+  if (f.owner) add('EXISTS (SELECT 1 FROM unnest(f.owners) o WHERE lower(o) = lower(?))', f.owner)
+  if (f.mine) {
+    params.push(f.mine.userId, f.mine.aliases)
+    clauses.push(mineClause(`$${params.length - 1}`, `$${params.length}`))
+  }
   if (f.q) {
     const like = `%${f.q.replace(/[\\%_]/g, m => `\\${m}`)}%`
     add('(f.title ILIKE ? OR f.rule_id ILIKE $X OR f.path ILIKE $X OR array_to_string(f.vuln_ids, \' \') ILIKE $X OR f.package->>\'name\' ILIKE $X)'.replace(/\$X/g, `$${params.length + 1}`), like)
@@ -110,6 +123,7 @@ const LIST_COLUMNS = `f.id, f.project_id, p.slug AS project_slug, p.name AS proj
   (${IS_NEW}) AS is_new,
   ${TS('f.created_at')} AS first_seen_at, ${TS('f.updated_at')} AS updated_at,
   ${INTEL_COLUMNS}, f.correlation_key,
+  f.owners, f.triage_rule_id,
   f.origin, (SELECT s.external_source FROM scans s WHERE s.id = f.last_scan_id AND f.origin = 'external') AS external_source`
 
 const SEV_RANK = `CASE f.severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END`
@@ -274,7 +288,9 @@ export async function setFindingStatus(db: Queryable, id: string, change: Status
   if (cur.malicious && (change.status === 'accepted' || change.status === 'false-positive')) throw new TriageError('E_MALICIOUS')
   if (change.status === 'accepted' && (!change.reason || !change.until)) throw new TriageError('E_VALIDATION')
   await db.query(
-    `UPDATE findings SET status = $2, status_reason = $3, status_until = $4::date, status_by = $5, status_at = now(), updated_at = now()
+    // Un tri humain reprend la main sur une règle F4 : sa révocation ne le défera pas.
+    `UPDATE findings SET status = $2, status_reason = $3, status_until = $4::date, status_by = $5, status_at = now(), updated_at = now(),
+            triage_rule_id = NULL
       WHERE id = $1`,
     [id, change.status, change.reason ? redact(change.reason) : null, change.status === 'accepted' ? change.until : null, userId],
   )

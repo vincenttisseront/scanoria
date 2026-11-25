@@ -9,6 +9,7 @@ import { getRunningVersion } from '../utils/appliance'
 import { PROJECT_OPS, projectSchemas } from '../projects/openapi'
 import { VIGILANCE_OPS, vigilanceSchemas } from '../vigilance/openapi'
 import { PROFILE_OPS, profileSchemas } from '../profiles/openapi'
+import { TRIAGE_OPS, triageSchemas } from '../findings/openapi-07'
 
 type Role = 'public' | 'viewer' | 'operator' | 'admin'
 
@@ -129,6 +130,7 @@ const OPS: Record<string, Record<string, Op>> = {
   ...PROJECT_OPS,
   ...VIGILANCE_OPS,
   ...PROFILE_OPS,
+  ...TRIAGE_OPS,
   '/api/scans': {
     get: { summary: 'Scan queue (status=active, in worker order) or history (filters: project, status, verdict, trigger; paginated)', role: 'viewer' },
     post: { summary: 'Queue a manual scan {project_id, ref?, profile?}; 200 when merged into an identical queued scan', role: 'operator', body: 'ScanCreate', status: 202 },
@@ -141,7 +143,7 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/usage/modules': { get: { summary: 'Real usage per installed module (F14) over 30 days and modules unused for N days (query unused_days, default 30); modules required by another are never unused', role: 'viewer' } },
   '/api/usage/modules/{id}': { get: { summary: 'Usage of one installed module (F14): scanner statistics, or memory, CPU and disk series over 7 and 30 days', role: 'viewer' } },
   '/api/health/scans': { get: { summary: 'Scan health per tool over 7 and 30 days (G20): failures by class, timeouts, out of memory, durations; recent failed scans', role: 'viewer' } },
-  '/api/findings': { get: { summary: 'Unified findings (filters: project_id, scan_id, tool, severity, category, status, is_new, secret, malicious, q; 0.5: epss_min (0.01, 0.1, 0.5), kev=true, grouped=true for one row per correlation group (F16). grouped defaults to false in the API for backward compatibility; the console sends grouped=true by default. Each item carries epss, epss_percentile (EPSS, FIRST.org), kev, kev_added, correlation_key and group; paginated)', role: 'viewer' } },
+  '/api/findings': { get: { summary: 'Unified findings (filters: project_id, scan_id, tool, severity, category, status, is_new, secret, malicious, q; 0.5: epss_min (0.01, 0.1, 0.5), kev=true, grouped=true for one row per correlation group (F16). grouped defaults to false in the API for backward compatibility; the console sends grouped=true by default. 0.7: owner (CODEOWNERS owner) and mine=true (findings owned by the caller, through owner mappings) (F6). Each item carries epss, epss_percentile (EPSS, FIRST.org), kev, kev_added, correlation_key, group, owners and triage_rule_id; paginated)', role: 'viewer' } },
   '/api/findings/summary': { get: { summary: 'Open findings per project and severity, secrets to revoke, malicious packages', role: 'viewer' } },
   '/api/findings/{id}': { get: { summary: 'Finding detail (masked snippet, scans where it appears); never a secret value', role: 'viewer' } },
   '/api/findings/{id}/status': { post: { summary: 'Triage a finding (accepted needs reason and end date; refused 409 E_MALICIOUS for a malicious package)', role: 'operator', body: 'FindingStatus' } },
@@ -149,11 +151,6 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/findings/{id}/group': { get: { summary: 'Group of correlated findings (F16): tools, confirmations (distinct tools), member findings; null without correlation. /api/findings also accepts epss_min, kev and grouped (0.5)', role: 'viewer' } },
   '/api/findings/{id}/group-status': { post: { summary: 'Triage every finding of a correlated group (one audit line per finding; 409 E_MALICIOUS if a member is a malicious package)', role: 'operator', body: 'FindingStatus' } },
   '/api/intel/status': { get: { summary: 'EPSS and KEV import state (H3): CVE count, import date, published database date', role: 'viewer' } },
-  '/api/exceptions': {
-    get: { summary: 'Project exceptions (query project_id; all=true includes expired and revoked)', role: 'viewer' },
-    post: { summary: 'Create a dated exception (at most one year; refused 409 E_MALICIOUS for MAL- advisories)', role: 'operator', body: 'ExceptionCreate', status: 201 },
-  },
-  '/api/exceptions/{id}': { delete: { summary: 'Revoke an exception (history kept)', role: 'operator' } },
   '/api/severity-maps': {
     get: { summary: 'Severity normalization per module, with origin value', role: 'viewer' },
     patch: { summary: 'Change a normalized severity, or reset it to its origin value (severity null)', role: 'admin', body: 'SeverityMapUpdate' },
@@ -383,6 +380,7 @@ export default defineEventHandler(async () => {
         ...projectSchemas(),
         ...vigilanceSchemas(),
         ...profileSchemas(),
+        ...triageSchemas(),
         FindingStatus: {
           type: 'object', additionalProperties: false, required: ['status'],
           properties: {
@@ -392,16 +390,6 @@ export default defineEventHandler(async () => {
           },
         },
         SecretState: { type: 'object', additionalProperties: false, required: ['state'], properties: { state: { enum: ['to-revoke', 'revoked', 'false-positive'] } } },
-        ExceptionCreate: {
-          type: 'object', additionalProperties: false, required: ['project_id', 'kind', 'target', 'reason', 'expires_on'],
-          properties: {
-            project_id: { type: 'string', format: 'uuid' },
-            kind: { enum: ['path', 'rule', 'vuln', 'finding', 'module'] },
-            target: { type: 'object', description: 'path {glob, tool?}; rule {rule_id, tool?}; vuln {vuln_id, package?}; finding {finding_id}; module {module_id}' },
-            reason: { type: 'string', minLength: 3, maxLength: 2000 },
-            expires_on: { type: 'string', format: 'date' },
-          },
-        },
         SeverityMapUpdate: {
           type: 'object', additionalProperties: false, required: ['module_id', 'native', 'severity'],
           properties: {

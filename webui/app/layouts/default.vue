@@ -77,6 +77,11 @@ watch(() => route.path, (to, from) => {
   if (from?.startsWith('/catalog') || Date.now() - loadedAt > 30_000) void refreshServiceApps()
 })
 
+// 0.7 (B, F5) : demandes d'exception en attente, pour les administrateurs.
+const pending = usePendingExceptions()
+onMounted(() => void pending.refresh())
+watch(() => route.path, () => void pending.refreshIfStale())
+
 /**
  * Menu latéral en sections : une section = un groupe séparé, titré quand le
  * menu est déplié (le titre disparaît, le séparateur reste, quand il est replié).
@@ -94,7 +99,8 @@ const sections = computed<NavigationMenuItem[][]>(() => {
     section(t('nav.groups.analysis'), [
       { label: t('projects.nav'), icon: 'i-lucide-folder-git-2', to: '/projects', active: under('/projects') },
       { label: t('scans.nav'), icon: 'i-lucide-scan-search', to: '/scans', active: under('/scans') && !under('/scans/health') },
-      { label: t('nav.findings'), icon: 'i-lucide-list-checks', to: '/findings', active: under('/findings') },
+      { label: t('nav.findings'), icon: 'i-lucide-list-checks', to: '/findings', active: under('/findings') && !under('/findings/approvals') },
+      session.can('admin') && { label: t('triage.approvals.nav'), icon: 'i-lucide-stamp', to: '/findings/approvals', active: under('/findings/approvals'), badge: pending.count.value ? String(pending.count.value) : undefined },
       { label: t('components.nav'), icon: 'i-lucide-boxes', to: '/components', active: under('/components') },
       { label: t('gates.nav'), icon: 'i-lucide-gauge', to: '/gates', active: under('/gates') },
       { label: t('profiles.nav'), icon: 'i-lucide-layers', to: '/profiles', active: under('/profiles') },

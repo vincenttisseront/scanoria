@@ -19,6 +19,8 @@ export interface UserRow {
   must_change_password: boolean
   locale: 'fr' | 'en'
   is_active: boolean
+  /** J15 (0.7) : « agent » ou « bot » demande, mais ne décide jamais une exception. */
+  kind: 'human' | 'agent' | 'bot'
   locked_until: string | null
   last_login_at: string | null
   created_at: string
@@ -27,7 +29,7 @@ export interface UserRow {
 
 const ts = (col: string) => `to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS ${col}`
 const USER_COLUMNS = `id::text, username, display_name, email, role, auth_source, must_change_password, locale,
-  is_active, ${ts('locked_until')}, ${ts('last_login_at')}, ${ts('created_at')}, ${ts('updated_at')}`
+  is_active, kind, ${ts('locked_until')}, ${ts('last_login_at')}, ${ts('created_at')}, ${ts('updated_at')}`
 
 export async function listUsers(db: Queryable): Promise<UserRow[]> {
   const { rows } = await db.query<UserRow>(`SELECT ${USER_COLUMNS} FROM users ORDER BY username`)
@@ -84,12 +86,13 @@ export interface UserPatch {
   role?: Role
   locale?: 'fr' | 'en'
   is_active?: boolean
+  kind?: 'human' | 'agent' | 'bot'
 }
 
 export async function updateUser(db: Queryable, id: number, patch: UserPatch): Promise<UserRow | null> {
   const sets: string[] = []
   const params: unknown[] = [id]
-  const allowed: (keyof UserPatch)[] = ['display_name', 'email', 'role', 'locale', 'is_active']
+  const allowed: (keyof UserPatch)[] = ['display_name', 'email', 'role', 'locale', 'is_active', 'kind']
   for (const key of allowed) {
     if (patch[key] === undefined) continue
     params.push(patch[key])
