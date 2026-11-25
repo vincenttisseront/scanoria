@@ -180,6 +180,8 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
       { enabled: true, url: 'https://ollama.exemple.test', model: 'x' },
       { enabled: false, skip_tls_verify: true },
       { enabled: true, url: 'https://ollama.exemple.test', skip_tls_verify: 'yes' },
+      { enabled: true, url: 'http://192.0.2.10:11434', allow_insecure: true, skip_tls_verify: true },
+      { enabled: true, url: 'https://ollama.exemple.test', skip_tls_verify: true, ca_pem: `-----BEGIN CERTIFICATE-----\n${'Q'.repeat(80)}\n` },
     ],
   },
   'backup-module': {

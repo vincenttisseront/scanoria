@@ -128,7 +128,33 @@
             }
           ]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "skip_tls_verify"
+            ],
+            "properties": {
+              "skip_tls_verify": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "url": {
+                "pattern": "^https://"
+              }
+            },
+            "not": {
+              "required": [
+                "ca_pem"
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

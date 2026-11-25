@@ -193,10 +193,10 @@ p=$(jq -cn '{enabled: true, url: "https://ollama.exemple.test:11434", ca_pem: ("
 hx "$p"
 expect "AC illisible" "$(code)" E_AI_CA
 hx '{"enabled": true, "url": "http://ollama.exemple.test:11434", "allow_insecure": true, "skip_tls_verify": true}'
-expect "vérification désactivée refusée en http" "$(code)" E_AI_URL
+expect "vérification désactivée refusée en http (schéma)" "$(code)" E_SCHEMA
 p=$(jq -cn --rawfile ca "$TMP/ca.pem" '{enabled: true, url: "https://ollama.exemple.test:11434", ca_pem: $ca, skip_tls_verify: true}')
 hx "$p"
-expect "vérification désactivée refusée avec une AC" "$(code)" E_AI_URL
+expect "vérification désactivée refusée avec une AC (schéma)" "$(code)" E_SCHEMA
 hx '{"enabled": false, "skip_tls_verify": true}'
 expect "skip_tls_verify sans connecteur : refusé par le schéma" "$(code)" E_SCHEMA
 
