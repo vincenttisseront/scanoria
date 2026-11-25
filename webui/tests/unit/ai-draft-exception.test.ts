@@ -61,6 +61,6 @@ describe('I10 : rédaction des exceptions', () => {
     expect(short.expires_in_days).toBe(DRAFT_MIN_DAYS)
     const out = draftException.finalize!({ reason: '<img src=x onerror=alert(1)> voir @equipe', expires_in_days: 90, duration_rationale: '<b>x</b>', to_check: ['<script>y</script>'] }, input)
     expect(out.expires_in_days).toBe(90)
-    expect(JSON.stringify(out)).not.toMatch(/<img|<script|<b>/)
+    expect(JSON.stringify(out)).not.toMatch(/<img|<script|<b>/i)
   })
 })
