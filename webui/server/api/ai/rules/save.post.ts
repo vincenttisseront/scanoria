@@ -3,9 +3,10 @@
 //
 // POST /api/ai/rules/save (admin, personne humaine) : enregistre, sur
 // confirmation dans une modale, la règle proposée par IA (I12) comme nouvelle
-// version d'un jeu de règles G4, avec origin = 'ai'. Le test positif/négatif
-// est rejoué avant l'écriture ; une règle qui ne passe pas n'est pas
-// enregistrée. C'est ce clic, tracé dans l'audit, qui enregistre.
+// version d'un jeu de règles G4, avec origin = 'ai'. Il faut une demande de
+// test terminée et réussie (test_request_id) qui porte exactement cette règle
+// et ces exemples ; sinon rien n'est enregistré. C'est ce clic, tracé dans
+// l'audit, qui enregistre.
 
 import { defineEventHandler } from 'h3'
 import { getPool } from '../../../utils/db'

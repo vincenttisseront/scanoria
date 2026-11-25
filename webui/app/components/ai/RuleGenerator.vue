@@ -4,9 +4,9 @@ Copyright (C) 2026 Vincent Tisseront
 
 Générateur de règles (I12, 0.7) : depuis un résultat, un exemple de code ou
 une phrase, l'IA propose une règle Opengrep/Semgrep, un motif gitleaks ou une
-politique Checkov, avec un exemple positif et un négatif. La règle est
-aussitôt testée dans le conteneur confiné du moteur ; seul un administrateur
-peut l'enregistrer dans un jeu de règles géré (G4), après une modale de
+politique Checkov, avec un exemple positif et un négatif. Un administrateur
+la teste dans le conteneur confiné du moteur (demande validate-ruleset, suivie
+avec indicateur d'attente), puis lui seul peut l'enregistrer dans un jeu de règles géré (G4), après une modale de
 confirmation, et seulement si le test passe. Rien n'est enregistré
 automatiquement. Texte brut uniquement, affiché par interpolation. Rien sans
 connecteur.
@@ -53,8 +53,10 @@ const subjectId = ref<string | null>(null)
 const state = ref<RuleState | null>(null)
 const requesting = ref(false)
 const failure = ref('')
-const testing = ref(false)
+const tester = useHelperRequest()
+const testing = computed(() => tester.running.value)
 const verdict = ref<Verdict | null>(null)
+const testRequestId = ref<string | null>(null)
 let timer: ReturnType<typeof setTimeout> | null = null
 let disposed = false
 
@@ -96,7 +98,7 @@ async function poll() {
     timer = setTimeout(poll, 2000)
     return
   }
-  if (output.value && available.value && !verdict.value) await runTest()
+  if (output.value && available.value && session.can('admin') && !verdict.value) await runTest()
 }
 
 async function generate() {
@@ -104,6 +106,7 @@ async function generate() {
   stop()
   failure.value = ''
   verdict.value = null
+  testRequestId.value = null
   state.value = null
   requesting.value = true
   const body: Record<string, unknown> = { engine: form.engine, source: form.source, locale: locale.value }
@@ -126,16 +129,22 @@ async function generate() {
 }
 
 async function runTest() {
-  if (!subjectId.value) return
-  testing.value = true
+  const subject = subjectId.value
+  if (!subject) return
+  verdict.value = null
+  testRequestId.value = null
   try {
-    verdict.value = await api<Verdict>('/api/ai/rules/test', { method: 'POST', body: { subject_id: subjectId.value } })
+    await tester.run('/api/ai/rules/test', { subject_id: subject }, { timeoutMs: 10 * 60_000 })
+    const done = tester.result.value
+    if (!done || disposed || subject !== subjectId.value) return
+    const v = await api<Verdict & { done: boolean }>('/api/ai/rules/test', { query: { subject_id: subject, request_id: done.id } })
+    if (v.done) {
+      verdict.value = { passed: v.passed, positive_matches: v.positive_matches, negative_matches: v.negative_matches, errors: v.errors }
+      testRequestId.value = done.id
+    }
   }
   catch (err) {
     failure.value = errorMessage(err)
-  }
-  finally {
-    testing.value = false
   }
 }
 
@@ -166,14 +175,14 @@ async function openSave() {
 }
 
 async function confirmSave() {
-  if (!subjectId.value) return
+  if (!subjectId.value || !testRequestId.value) return
   if (!canSave.value) {
     toast.add({ title: t('ai.rulegen.slugInvalid'), color: 'error' })
     return
   }
   saving.value = true
   try {
-    const body: Record<string, unknown> = { subject_id: subjectId.value, confirmed: true }
+    const body: Record<string, unknown> = { subject_id: subjectId.value, test_request_id: testRequestId.value, confirmed: true }
     if (save.target === NEW) body.new_ruleset = { slug: save.slug, name: save.name.trim() }
     else body.ruleset_id = save.target
     const r = await api<{ version: number }>('/api/ai/rules/save', { method: 'POST', body })
@@ -345,6 +354,12 @@ onBeforeUnmount(() => {
       >
         {{ t('ai.rulegen.noRulesets') }}
       </p>
+      <p
+        v-else-if="!session.can('admin')"
+        class="text-muted"
+      >
+        {{ t('ai.rulegen.adminTest') }}
+      </p>
       <div
         v-else-if="testing"
         class="flex items-center gap-2 text-muted"
@@ -353,7 +368,7 @@ onBeforeUnmount(() => {
           name="i-lucide-loader-circle"
           class="animate-spin"
         />
-        {{ t('ai.rulegen.testing') }}
+        {{ t('ai.rulegen.testing') }} {{ tester.label.value }}
       </div>
       <div
         v-else-if="verdict"
@@ -383,7 +398,7 @@ onBeforeUnmount(() => {
 
       <div class="flex flex-wrap items-center gap-2">
         <UButton
-          v-if="available && verdict"
+          v-if="available && session.can('admin') && verdict"
           size="sm"
           variant="outline"
           icon="i-lucide-rotate-cw"

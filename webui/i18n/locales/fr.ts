@@ -1139,6 +1139,7 @@ export default {
       notSent: 'Rien n’a été envoyé : connecteur inactif, projet exclu de l’IA ou résultat introuvable.',
       positive: 'Exemple positif ({file})',
       negative: 'Exemple négatif ({file})',
+      adminTest: 'Le test de la règle dans le conteneur du moteur et son enregistrement sont réservés à un administrateur.',
       noRulesets: 'Les jeux de règles gérés ne sont pas disponibles : la règle ne peut être ni testée ni enregistrée.',
       testing: 'Test de la règle dans un conteneur confiné…',
       testPassed: 'Test réussi',

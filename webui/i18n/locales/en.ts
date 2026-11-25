@@ -1139,6 +1139,7 @@ export default {
       notSent: 'Nothing was sent: connector inactive, project excluded from AI, or finding not found.',
       positive: 'Positive example ({file})',
       negative: 'Negative example ({file})',
+      adminTest: 'Testing the rule in the engine container and saving it are reserved to an administrator.',
       noRulesets: 'Managed rulesets are not available: the rule can be neither tested nor saved.',
       testing: 'Testing the rule in a confined container…',
       testPassed: 'Test passed',

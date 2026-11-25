@@ -106,8 +106,11 @@ const OPS: Record<string, Record<string, Op>> = {
     post: { summary: 'Generate an Opengrep rule, gitleaks pattern or Checkov policy from a finding, a code sample or a sentence (I12); 200 without connector', role: 'operator', status: 202 },
   },
   '/api/ai/rules/rulesets': { get: { summary: 'Managed rulesets (G4) a generated rule can be saved into, for its engine', role: 'admin' } },
-  '/api/ai/rules/test': { post: { summary: 'Test a generated rule in a confined container on its positive and negative samples (I12)', role: 'operator' } },
-  '/api/ai/rules/save': { post: { summary: 'Save a tested generated rule as a new ruleset version with origin ai, after explicit admin confirmation (I12); audited', role: 'admin' } },
+  '/api/ai/rules/test': {
+    get: { summary: 'Verdict of a generated rule test (I12) from its validate-ruleset request, which must carry exactly this rule and its samples; done false while running', role: 'operator' },
+    post: { summary: 'Request validate-ruleset for a generated rule (I12): its engine runs it in a confined container on its positive and negative samples; follow with GET /api/requests/:id', role: 'admin', status: 202 },
+  },
+  '/api/ai/rules/save': { post: { summary: 'Save a generated rule whose test request passed (test_request_id) as a new ruleset version with origin ai, after explicit admin confirmation (I12); audited', role: 'admin' } },
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
   '/api/gates': {

@@ -13,13 +13,22 @@
 //   et chaque enregistrement est tracé dans l'audit.
 //
 // Les jeux de règles (stockage, contrôles statiques, test confiné par la
-// demande helper validate-ruleset) appartiennent au chantier A : ils sont
-// appelés par leur contrat (webui/server/rulesets/store.ts et engine.ts),
-// branché par setRulesetBackend. Sans lui, le générateur reste disponible,
-// mais le test et l'enregistrement répondent « indisponible ».
+// demande helper validate-ruleset) appartiennent au chantier A
+// (webui/server/rulesets/store.ts et engine.ts) : ils sont appelés par leur
+// contrat, branché par défaut et remplaçable par setRulesetBackend (tests).
+// Le test est asynchrone : la demande validate-ruleset est déposée au helper
+// root (administrateur), la page la suit, puis le verdict est calculé ici à
+// partir du résultat de cette demande, après avoir vérifié qu'elle porte
+// exactement la règle et les exemples de la proposition. L'enregistrement
+// exige une telle demande terminée et réussie.
 
+import { createHash } from 'node:crypto'
+import type { H3Event } from 'h3'
 import { z } from 'zod'
 import type { Queryable } from '../utils/db'
+import { getHelperRequest } from '../utils/requests'
+import { addRulesetVersion, createRuleset, listRulesets, type RulesetEngine } from '../rulesets/store'
+import { submitRulesetTest } from '../rulesets/engine'
 import { AI_PRIORITY, connectorEnabled, enqueueAiTask } from './enqueue'
 import { findingInput, UUID_RE } from './task-kit'
 import {
@@ -44,16 +53,35 @@ export interface RulesetTestResult {
   samples: { name: string, matches: number }[]
 }
 
+export interface RulesetTestRequest {
+  type: string
+  status: 'pending' | 'running' | 'ok' | 'error' | 'rejected' | 'lost'
+  code: string | null
+  params: Record<string, unknown>
+  output: Record<string, unknown> | null
+}
+
 export interface RulesetBackend {
   createRuleset: (db: Queryable, a: { slug: string, engine: string, name: string, description?: string, userId: number }) => Promise<{ id: string }>
   addRulesetVersion: (db: Queryable, a: { rulesetId: string, content: string, comment?: string, origin: 'manual' | 'import' | 'ai', userId: number }) => Promise<{ version: number, sha256: string }>
   listRulesets: (db: Queryable, a: { engine?: string, includeArchived?: boolean }) => Promise<RulesetSummary[]>
-  testRuleset: (db: Queryable, a: { engine: string, content: string, samples: { name: string, filename: string, content: string }[], userId: number }) => Promise<RulesetTestResult>
+  /** Dépose la demande validate-ruleset (202) ; la page la suit par /api/requests/:id. */
+  submitTest: (event: H3Event, a: { engine: string, content: string, samples: { name: string, content: string }[] }) => Promise<{ request_id: string }>
+  readTest: (db: Queryable, requestId: string) => Promise<RulesetTestRequest | null>
 }
 
-let backend: RulesetBackend | null = null
+/** Jeux de règles du chantier A (G4). */
+export const rulesetStore: RulesetBackend = {
+  createRuleset: (db, a) => createRuleset(db, { ...a, engine: a.engine as RulesetEngine }),
+  addRulesetVersion: (db, a) => addRulesetVersion(db, a),
+  listRulesets: (db, a) => listRulesets(db, { ...a, engine: a.engine as RulesetEngine | undefined }),
+  submitTest: (event, a) => submitRulesetTest(event, { engine: a.engine as RulesetEngine, content: a.content, samples: a.samples }),
+  readTest: (db, id) => getHelperRequest(db, id),
+}
 
-/** Branche les jeux de règles du chantier A (ou un double en test) ; null les retire. */
+let backend: RulesetBackend | null = rulesetStore
+
+/** Remplace les jeux de règles du chantier A (double en test) ; null les retire. */
 export function setRulesetBackend(b: RulesetBackend | null): void {
   backend = b
 }
@@ -194,37 +222,75 @@ export interface RuleVerdict {
 }
 
 /** La règle trouve l'exemple positif (au moins une fois) et pas le négatif. */
-export function judgeTest(r: RulesetTestResult): RuleVerdict {
+export function judgeTest(r: RulesetTestResult, names = { positive: 'positive', negative: 'negative' }): RuleVerdict {
   const count = (name: string) => r.samples.find(s => s.name === name)?.matches ?? -1
-  const pos = count('positive')
-  const neg = count('negative')
+  const pos = count(names.positive)
+  const neg = count(names.negative)
   return { passed: r.ok && pos >= 1 && neg === 0, positive_matches: pos, negative_matches: neg, errors: r.errors.slice(0, 10).map(e => String(e).slice(0, 500)) }
 }
 
-/** Test de la règle sur ses deux exemples, dans le conteneur confiné du moteur (chantier A). */
-async function runTest(b: RulesetBackend, db: Queryable, engine: RuleEngine, rule: GenerateRuleOutput, userId: number): Promise<RuleVerdict> {
-  return judgeTest(await b.testRuleset(db, {
-    engine,
-    content: rule.rule,
-    samples: [
-      { name: 'positive', filename: rule.positive.filename, content: rule.positive.content },
-      { name: 'negative', filename: rule.negative.filename, content: rule.negative.content },
-    ],
-    userId,
-  }))
+const EXT_RE = /\.[A-Za-z0-9]{1,10}$/
+/** Exemples déposés au moteur : le nom porte l'extension du fichier proposé (le moteur choisit le langage par elle). */
+export function testSamples(rule: GenerateRuleOutput) {
+  const ext = (f: string) => EXT_RE.exec(f.split('/').pop() ?? '')?.[0] ?? '.txt'
+  const positive = `positive${ext(rule.positive.filename)}`
+  const negative = `negative${ext(rule.negative.filename)}`
+  return {
+    names: { positive, negative },
+    samples: [{ name: positive, content: rule.positive.content }, { name: negative, content: rule.negative.content }],
+  }
 }
 
-export async function testRule(db: Queryable, subjectId: string, userId: number): Promise<RuleVerdict & { engine: RuleEngine }> {
+const sha256Hex = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex')
+/** Exemples comparés par nom et empreinte du contenu, indépendamment de l'ordre des clés (jsonb). */
+const sampleKey = (l: unknown) => (Array.isArray(l) ? l : [])
+  .map(x => `${String((x as { name?: unknown })?.name)}:${sha256Hex(String((x as { content?: unknown })?.content))}`).join('|')
+
+/** Dépose le test confiné de la règle proposée (administrateur) ; rend l'identifiant de demande. */
+export async function testRule(event: H3Event, db: Queryable, subjectId: string) {
   const b = requireBackend()
   const { engine, rule } = await readyRule(db, subjectId)
-  return { ...(await runTest(b, db, engine, rule, userId)), engine }
+  return b.submitTest(event, { engine, content: rule.rule, samples: testSamples(rule).samples })
+}
+
+/**
+ * Verdict d'une demande de test : elle doit être une validate-ruleset qui
+ * porte exactement la règle et les exemples de la proposition (jamais une
+ * autre règle validée ailleurs). En cours : null.
+ */
+async function verdictOf(b: RulesetBackend, db: Queryable, engine: RuleEngine, rule: GenerateRuleOutput, requestId: string): Promise<RuleVerdict | null> {
+  const r = UUID_RE.test(requestId) ? await b.readTest(db, requestId) : null
+  const { names, samples } = testSamples(rule)
+  const p = r?.params ?? {}
+  const same = r?.type === 'validate-ruleset' && p.engine === engine && p.sha256 === sha256Hex(rule.rule)
+    && sampleKey(p.samples) === sampleKey(samples)
+  if (!r || !same) throw new RulegenError('not-found')
+  if (r.status === 'pending' || r.status === 'running') return null
+  if (r.status !== 'ok' || !r.output) return { passed: false, positive_matches: -1, negative_matches: -1, errors: [String(r.code ?? r.status).slice(0, 100)] }
+  const out = r.output as Partial<RulesetTestResult>
+  return judgeTest({
+    ok: out.ok === true,
+    errors: Array.isArray(out.errors) ? out.errors.map(String) : [],
+    samples: Array.isArray(out.samples) ? out.samples.filter(x => x && typeof x.name === 'string' && typeof x.matches === 'number') : [],
+  }, names)
+}
+
+export async function ruleVerdict(db: Queryable, subjectId: string, requestId: string): Promise<(RuleVerdict & { engine: RuleEngine, done: true }) | { engine: RuleEngine, done: false }> {
+  const b = requireBackend()
+  const { engine, rule } = await readyRule(db, subjectId)
+  const v = await verdictOf(b, db, engine, rule, requestId)
+  return v ? { ...v, engine, done: true } : { engine, done: false }
 }
 
 // ---- Enregistrement confirmé par un administrateur ------------------------------
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/
+export const VerdictQuery = z.strictObject({ subject_id: z.string().regex(RULEGEN_SUBJECT_RE), request_id: z.string().regex(UUID_RE) })
+
 export const SaveBody = z.strictObject({
   subject_id: z.string().regex(RULEGEN_SUBJECT_RE),
+  /** Demande validate-ruleset terminée de cette règle et de ces exemples. */
+  test_request_id: z.string().regex(UUID_RE),
   ruleset_id: z.uuid().optional(),
   new_ruleset: z.strictObject({ slug: z.string().regex(SLUG_RE), name: z.string().trim().min(1).max(200) }).optional(),
   /** Modale lue et confirmée (principe 8 : l'enregistrement est confirmé). */
@@ -238,8 +304,8 @@ export async function listRulesetsFor(db: Queryable, engine: RuleEngine): Promis
 
 /**
  * Enregistre la règle testée comme nouvelle version (origin = 'ai') d'un jeu
- * de règles existant ou nouveau. Le test est rejoué ici : une règle qui ne
- * passe plus n'est pas enregistrée.
+ * de règles existant ou nouveau, seulement si la demande de test indiquée
+ * porte exactement cette règle et ces exemples, et qu'elle a réussi.
  */
 export async function saveRule(db: Queryable, body: SaveBody, userId: number) {
   const b = requireBackend()
@@ -252,7 +318,8 @@ export async function saveRule(db: Queryable, body: SaveBody, userId: number) {
     if (!target) throw new RulegenError('engine-mismatch')
     if (target.archived_at) throw new RulegenError('archived')
   }
-  const verdict = await runTest(b, db, engine, rule, userId)
+  const verdict = await verdictOf(b, db, engine, rule, body.test_request_id)
+  if (!verdict) throw new RulegenError('not-ready')
   if (!verdict.passed) throw new RulegenError('test-failed')
   const rulesetId = target?.id ?? (await b.createRuleset(db, {
     slug: body.new_ruleset!.slug, engine, name: body.new_ruleset!.name,
