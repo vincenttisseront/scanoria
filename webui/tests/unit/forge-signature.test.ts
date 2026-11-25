@@ -41,7 +41,8 @@ describe('webhooks : signature à temps constant', () => {
   it('identifiant de livraison : présent et bien formé', () => {
     expect(deliveryId('github', { 'x-github-delivery': '72d3162e-cc78-11e3-81ab-4c9367dc0958' })).toBe('72d3162e-cc78-11e3-81ab-4c9367dc0958')
     expect(deliveryId('forgejo', { 'x-gitea-delivery': 'f6266f16-1bf3-46a5-9ea4-602e06ead473' })).not.toBeNull()
-    expect(deliveryId('gitlab', { 'idempotency-key': 'a1b2c3d4e5f6' })).toBe('a1b2c3d4e5f6')
+    const key = randomBytes(6).toString('hex')
+    expect(deliveryId('gitlab', { 'idempotency-key': key })).toBe(key)
     expect(deliveryId('forgejo', {})).toBeNull()
     expect(deliveryId('github', { 'x-github-delivery': 'court' })).toBeNull()
     expect(deliveryId('github', { 'x-github-delivery': '../../etc/passwd-0001' })).toBeNull()

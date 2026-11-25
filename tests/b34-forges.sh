@@ -42,7 +42,7 @@ report() {
 		esac
 	done
 }
-js() { node --experimental-strip-types --no-warnings --input-type=module - "$FORGES" "$@" || echo "ko bloc JavaScript interrompu (code $?)"; }
+js() { node --experimental-strip-types --no-warnings --input-type=module - "$FORGES" || echo "ko bloc JavaScript interrompu (code $?)"; }
 py() { python3 -I -B - "$PYLIB" "$@" || echo "ko bloc Python interrompu (code $?)"; }
 
 # --- 1. Texte publié dans une forge ---------------------------------------------------------
