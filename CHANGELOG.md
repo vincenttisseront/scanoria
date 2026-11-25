@@ -29,10 +29,20 @@ mise à jour d'une appliance échouait, puis son retour arrière aussi.
   pas son nom, et l'installation de `dtrack-upload` échouait à son banc
   d'essai. `scanoria-selftest` signale leur absence (`podman.dns`, en
   avertissement).
+- **Pare-feu** : il accepte la résolution de noms (port 53) depuis les ponts
+  des réseaux Podman. Sans cette règle, `aardvark-dns` restait injoignable et
+  `dtrack-upload` échouait à son banc d'essai, même avec le paquet installé.
+  La règle est chargée par la mise à jour.
+- **Modules d'analyse par IA** : quand l'installation échoue faute de modèle
+  de conversation retenu, le message le dit clairement, au lieu de demander
+  d'activer le connecteur.
 - **Versions figées par projet** (G6) : la console écrit de nouveau
   `pins.json`.
 - Base : la migration 018 (préparation de la 0.8) est appliquée. Elle ne
   change rien au fonctionnement de la 0.7.
+- Préparation de la 0.8 : le simulateur de quality gate (F9), les seuils
+  suggérés par IA (I19) et le VEX (H7) sont déjà présents dans cette
+  version. Ils seront présentés avec la 0.8.
 
 ### Intervention manuelle avant la mise à jour
 C'est la version installée qui conduit la mise à jour. Sur une appliance en
