@@ -15,8 +15,8 @@ import { DATABASE_URL, createTestDatabase, type TestDatabase } from '../helpers/
 import { loadConfig, setConfig } from '../../server/utils/config'
 import { createUser } from '../../server/utils/users'
 import { finalizeScanFindings, ingestModuleOutputs, readOutput } from '../../server/findings/ingest'
-import { findingsSummary, getFinding, listFindings, setFindingStatus, setSecretState, TriageError } from '../../server/findings/triage'
-import { createException, ExceptionError, isoDay, listExceptions, revokeException } from '../../server/findings/exceptions'
+import { applyApprovedAcceptance, findingsSummary, getFinding, listFindings, setFindingStatus, setSecretState, TriageError } from '../../server/findings/triage'
+import { decideException, ExceptionError, isoDay, listExceptions, requestException, revokeException } from '../../server/findings/exceptions'
 import { listSeverityMaps, updateSeverityMap } from '../../server/findings/severity'
 import { readModuleHints } from '../../server/findings/manifest'
 import { gapsFromDetection, mergeCoverageGaps } from '../../server/findings/coverage'
@@ -28,7 +28,14 @@ describe.skipIf(!DATABASE_URL)('résultats unifiés (PostgreSQL réel)', () => {
   let root: string
   let projectId: string
   let userId: number
+  let adminId: number
   let scanNo = 0
+
+  /** 0.7 : une exception est demandée (ops), puis approuvée par un autre administrateur. */
+  async function createException(db0: TestDatabase['pool'], e: { project_id: string, kind: string, target: Record<string, unknown>, reason: string, expires_on: string }, requester: number) {
+    const req = await requestException(db0, { ...e, requested_via: 'console', requester_label: 'ops', requester_is_human: true, requester_user_id: requester, commit_authors: [] })
+    return decideException(db0, req.id, { decision: 'approved', reason: 'approuvée pour le test', deciderUserId: adminId, ip: null })
+  }
   const jobs = new Map<string, string>()
 
   async function newScan(opts: { ref?: string, modules?: string[], commit?: string } = {}): Promise<string> {
@@ -83,6 +90,7 @@ describe.skipIf(!DATABASE_URL)('résultats unifiés (PostgreSQL réel)', () => {
     await writeFile(join(root, 'catalog-index.json'), JSON.stringify(index))
     setConfig(loadConfig({ NUXT_DATABASE_URL: db.url, NUXT_CATALOG_INDEX_FILE: join(root, 'catalog-index.json') }))
     userId = Number((await createUser(db.pool, { username: 'ops', role: 'operator', password: 'ops-long-password' })).id)
+    adminId = Number((await createUser(db.pool, { username: 'chef', role: 'admin', password: 'chef-long-password' })).id)
     const p = await db.pool.query<{ id: string }>(
       `INSERT INTO projects (slug, name, source_kind, repo_url, profile_id, gate_id, detection)
        VALUES ('demo', 'Démo', 'git', 'https://forge.exemple.test/demo.git', (SELECT id FROM profiles WHERE slug = 'rapide'),
@@ -291,7 +299,9 @@ describe.skipIf(!DATABASE_URL)('résultats unifiés (PostgreSQL réel)', () => {
   it('H4 : un paquet malveillant ne peut être ni accepté ni exempté', async () => {
     const mal = (await listFindings(db.pool, { limit: 5, offset: 0, malicious: true })).items[0]!
     expect(mal.vuln_ids).toEqual(['MAL-2025-42'])
-    await expect(setFindingStatus(db.pool, mal.id, { status: 'accepted', reason: 'r', until: isoDay(10) }, userId)).rejects.toThrow(TriageError)
+    // « accepted » ne se pose plus par le tri direct (seulement par une exception approuvée) ; jamais pour H4.
+    await expect(setFindingStatus(db.pool, mal.id, { status: 'accepted' as never, reason: 'r' }, userId)).rejects.toThrow(TriageError)
+    expect(await applyApprovedAcceptance(db.pool, mal.id, { until: isoDay(10), reason: 'r', deciderId: userId })).toBeNull()
     await expect(setFindingStatus(db.pool, mal.id, { status: 'false-positive', reason: 'r' }, userId)).rejects.toThrow('E_MALICIOUS')
     await setFindingStatus(db.pool, mal.id, { status: 'confirmed' }, userId)
     await expect(createException(db.pool, { project_id: projectId, kind: 'rule', target: { rule_id: 'MAL-2025-42' }, reason: 'non', expires_on: isoDay(10) }, userId)).rejects.toThrow('E_MALICIOUS')
@@ -304,10 +314,10 @@ describe.skipIf(!DATABASE_URL)('résultats unifiés (PostgreSQL réel)', () => {
     expect(summary[0]).toMatchObject({ project_slug: 'demo', malicious: 1, secrets_to_revoke: 3 })
   })
 
-  it('tri : acceptation datée, échue → nouveau ; secrets révoqués ou faux positifs avec auteur', async () => {
+  it('tri : acceptation datée (posée par l\'approbation), échue → nouveau ; secrets révoqués ou faux positifs avec auteur', async () => {
     const vuln = (await listFindings(db.pool, { limit: 1, offset: 0, tool: 'osv-scanner' })).items[0]!
-    await expect(setFindingStatus(db.pool, vuln.id, { status: 'accepted', reason: 'x' }, userId)).rejects.toThrow('E_VALIDATION')
-    await setFindingStatus(db.pool, vuln.id, { status: 'accepted', reason: 'correctif en cours', until: isoDay(30) }, userId)
+    await expect(setFindingStatus(db.pool, vuln.id, { status: 'accepted' as never, reason: 'x' }, userId)).rejects.toThrow('E_VALIDATION')
+    await applyApprovedAcceptance(db.pool, vuln.id, { reason: 'correctif en cours', until: isoDay(30), deciderId: userId })
     let d = (await getFinding(db.pool, vuln.id))!
     expect(d).toMatchObject({ status: 'accepted', status_reason: 'correctif en cours', status_until: isoDay(30), status_by: 'ops', accepted_expired: false })
     await db.pool.query(`UPDATE findings SET status_until = current_date - 1 WHERE id = $1`, [vuln.id])

@@ -17,6 +17,7 @@ import { syncIntel } from '../intel/import'
 import { backfillCorrelationKeys } from '../findings/correlation'
 import { packageDatesTick } from '../sbom/dates'
 import { vigilanceTick } from '../vigilance/tick'
+import { triageTick } from '../findings/tick'
 import { UUID_V4_RE } from '#shared/schemas'
 
 let readyResolve: () => void
@@ -68,6 +69,8 @@ export async function ingestNow(): Promise<void> {
     if (ticks % 12 === 1) await syncIntelNow(pool, cfg.modulesStateFile)
     // 0.6 (B) : versions figées, essais F13, canaris G14, vulnérabilités de l'appliance F19.
     if (ticks % 12 === 1) await vigilanceTick(pool, cfg)
+    // 0.7 (B) : échéance des exceptions (F5), règles de tri échues (F4), verdicts recalculés.
+    if (ticks % 720 === 1) await triageTick(pool).catch((e: unknown) => console.error('[triage] tick error:', (e as Error).message))
     if (ticks % 720 === 1) {
       await purgeSessions(pool)
       await purgeOldUploads(cfg.uploadsDir, await referencedUploads(pool))

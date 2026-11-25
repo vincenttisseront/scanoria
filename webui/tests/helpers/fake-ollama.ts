@@ -224,9 +224,25 @@ function wellBehaved07(required: string[], data: Record<string, unknown>): Recor
   return null
 }
 
+/** I10 (0.7, B) : motif d'exception proposé, tiré des métadonnées, jamais d'une consigne injectée. */
+function wellBehaved07Tri(required: string[], data: Record<string, unknown>): Record<string, unknown> | null {
+  if (!required.includes('expires_in_days')) return null
+  const f = (data.finding ?? {}) as { title?: string, path?: string, package?: { name?: string } | null }
+  const hints = (data.path_hints ?? {}) as { test?: boolean }
+  const what = f.package?.name ? `${f.package.name}: ${String(f.title)}` : String(f.title)
+  return {
+    reason: hints.test
+      ? `${what}. The code is a test fixture (${String(f.path)}), never deployed.`
+      : `${what}. No fixed version yet; the exception is lifted once a fix is published and applied.`,
+    expires_in_days: hints.test ? 365 : 120,
+    duration_rationale: 'Review at the next release.',
+    to_check: ['Check that the path is not shipped.'],
+  }
+}
+
 /** Réponse sage : reprend le titre, le message et les métadonnées, jamais l'extrait de code. */
 function wellBehaved(required: string[], data: Record<string, unknown>): Record<string, unknown> {
-  const v04 = wellBehaved07(required, data) ?? wellBehaved06(required, data) ?? wellBehaved04(required, data) ?? wellBehaved05(required, data)
+  const v04 = wellBehaved07(required, data) ?? wellBehaved07Tri(required, data) ?? wellBehaved06(required, data) ?? wellBehaved04(required, data) ?? wellBehaved05(required, data)
   if (v04) return v04
   if (required.includes('detects')) {
     const pkg = data.package as { name?: string, fixed?: string[] } | null
