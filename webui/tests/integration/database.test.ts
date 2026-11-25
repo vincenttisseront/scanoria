@@ -6,6 +6,7 @@
 // verrouillage, premier administrateur.
 
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -114,6 +115,22 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
       await q.query(`UPDATE profiles SET archived_at = now() WHERE id = $1`, [proj])
       await q.query(`DELETE FROM profiles WHERE slug IN ('proj14', 'proj14b')`)
       await q.query(`DELETE FROM profiles WHERE slug IN ('team14', 'ent14')`)
+    })
+
+    it('G9 : profils par déclencheur par défaut posés sur les projets existants', async () => {
+      const q = db.pool
+      const p = (await q.query<{ id: string }>(`SELECT id FROM profiles WHERE slug = 'complet'`)).rows[0]!.id
+      const g = (await q.query<{ id: string }>(`SELECT id FROM gates WHERE slug = 'defaut'`)).rows[0]!.id
+      const project = (await q.query<{ id: string }>(
+        `INSERT INTO projects (slug, name, source_kind, profile_id, gate_id, profile_release_id) VALUES ('socle14', 'socle14', 'archive', $1, $2, $1) RETURNING id`, [p, g])).rows[0]!.id
+      const sql = readFileSync(new URL('../../server/db/migrations/014_profiles.sql', import.meta.url), 'utf8')
+      await q.query(sql.slice(sql.indexOf('UPDATE projects p')))
+      const r = (await q.query<{ pr: string, nightly: string, release: string }>(
+        `SELECT pr.slug AS pr, n.slug AS nightly, r.slug AS release FROM projects x
+           JOIN profiles pr ON pr.id = x.profile_pr_id JOIN profiles n ON n.id = x.profile_nightly_id JOIN profiles r ON r.id = x.profile_release_id
+          WHERE x.id = $1`, [project])).rows[0]!
+      expect(r).toEqual({ pr: 'rapide', nightly: 'complet', release: 'complet' })
+      await q.query('DELETE FROM projects WHERE id = $1', [project])
     })
 
     it('jetons de forge et suspension des projets', async () => {
