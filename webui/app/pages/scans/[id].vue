@@ -377,6 +377,10 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
         >
           {{ t('scans.coverage.source', { files: source.files, skipped: source.skipped.length }) }}
         </p>
+        <ProfilesScanConfigNote
+          :repo-config="(scan.coverage as { repo_config?: never } | null)?.repo_config ?? null"
+          :profile="(scan.plan?.profile as never) ?? null"
+        />
         <p
           v-if="execNotes.length"
           class="mb-2 text-sm text-muted"

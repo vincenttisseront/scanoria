@@ -85,7 +85,7 @@ watch(() => route.path, (to, from) => {
 const sections = computed<NavigationMenuItem[][]>(() => {
   // Entrée active selon le chemin, sous-pages comprises (/scans/42 → Analyses).
   const under = (p: string) => route.path === p || route.path.startsWith(`${p}/`)
-  const systemPages = ['/system/tls', '/system/users', '/system/ai', '/system/audit', '/system/about', '/system/licenses', '/system/offline']
+  const systemPages = ['/system/tls', '/system/users', '/system/ai', '/system/audit', '/system/about', '/system/licenses', '/system/offline', '/system/config']
   const section = (label: string, items: (NavigationMenuItem | false)[]): NavigationMenuItem[] =>
     [{ label, type: 'label' }, ...items.filter((i): i is NavigationMenuItem => !!i)]
 
@@ -97,6 +97,7 @@ const sections = computed<NavigationMenuItem[][]>(() => {
       { label: t('nav.findings'), icon: 'i-lucide-list-checks', to: '/findings', active: under('/findings') },
       { label: t('components.nav'), icon: 'i-lucide-boxes', to: '/components', active: under('/components') },
       { label: t('gates.nav'), icon: 'i-lucide-gauge', to: '/gates', active: under('/gates') },
+      { label: t('profiles.nav'), icon: 'i-lucide-layers', to: '/profiles', active: under('/profiles') },
       { label: t('licenses.nav'), icon: 'i-lucide-scale', to: '/system/licenses', active: under('/system/licenses') },
       { label: t('nav.short.health'), icon: 'i-lucide-activity', to: '/scans/health', active: under('/scans/health') },
     ]),
@@ -111,6 +112,7 @@ const sections = computed<NavigationMenuItem[][]>(() => {
       session.can('operator') && { label: t('nav.short.ai'), icon: 'i-lucide-sparkles', to: '/system/ai', active: under('/system/ai') },
       session.can('operator') && { label: t('nav.offline'), icon: 'i-lucide-package-open', to: '/system/offline', active: under('/system/offline') },
       session.can('operator') && { label: t('nav.audit'), icon: 'i-lucide-scroll-text', to: '/system/audit', active: under('/system/audit') },
+      session.can('admin') && { label: t('appconfig.nav'), icon: 'i-lucide-file-cog', to: '/system/config', active: under('/system/config') },
       { label: t('nav.updates'), icon: 'i-lucide-refresh-cw', to: '/updates', active: under('/updates') },
       { label: t('nav.short.about'), icon: 'i-lucide-info', to: '/system/about', active: under('/system/about') },
     ]),
