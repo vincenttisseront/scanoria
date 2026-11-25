@@ -153,9 +153,80 @@ function wellBehaved06(required: string[], data: Record<string, unknown>): Recor
   }
 }
 
+/**
+ * 0.7 (I8, I12) : traduction d'une phrase en filtres, règle et ses deux
+ * exemples. Une phrase « INVENT » demande des valeurs hors vocabulaire (qui
+ * doivent être écartées) ; « BROKEN » donne une règle qui ne passe pas le
+ * test (le positif n'est pas trouvé).
+ */
+function wellBehaved07(required: string[], data: Record<string, unknown>): Record<string, unknown> | null {
+  if (required.includes('target') && required.includes('unsupported')) {
+    const phrase = String(data.phrase ?? '')
+    const vocab = (data.vocabulary ?? {}) as { projects?: string[], tools?: string[] }
+    const lower = phrase.toLowerCase()
+    const vuln = /\b(CVE-\d{4}-\d{4,}|GHSA-[a-z0-9-]+)\b/i.exec(phrase)?.[1]
+    const comp = /\b(?:utilise|uses)\s+([a-z0-9._-]+)/i.exec(phrase)?.[1]
+    const target = data.target !== 'auto' ? String(data.target) : vuln || comp ? 'components' : 'findings'
+    const project = /INVENT/.test(phrase) ? 'projet-inexistant' : (vocab.projects ?? []).find(p => lower.includes(p))
+    if (target === 'components') {
+      const version = /\b(\d+\.\d+(?:\.\d+)?)\b/.exec(phrase)?.[1]
+      return {
+        target,
+        components: { ...(comp ? { name: comp } : {}), ...(vuln ? { vuln } : {}), ...(version ? { version } : {}), ...(project ? { project } : {}) },
+        explanation: `Components ${comp ?? vuln ?? ''}.`.trim(),
+        unsupported: /depuis|since/.test(lower) ? ['period'] : [],
+      }
+    }
+    const severity = ['critical', 'high', 'medium', 'low'].filter(s => lower.includes(s) || lower.includes({ critical: 'critique', high: 'élevé', medium: 'moyen', low: 'faible' }[s]!))
+    return {
+      target,
+      findings: {
+        ...(project ? { project } : {}),
+        ...(/INVENT/.test(phrase) ? { tool: 'outil-inconnu' } : {}),
+        ...(severity.length ? { severity } : {}),
+        ...(/secret/.test(lower) ? { secret: true } : {}),
+        ...(/exploit/.test(lower) ? { kev: true } : {}),
+        ...(/ouvert|open/.test(lower) ? { status: ['new', 'confirmed'] } : {}),
+      },
+      explanation: `Findings matching ${Object.keys(data).length} given fields.`,
+      unsupported: /depuis|since/.test(lower) ? ['depuis un mois'] : [],
+    }
+  }
+  if (required.includes('rule') && required.includes('positive')) {
+    const broken = /BROKEN/.test(String(data.description ?? ''))
+    const engine = String(data.engine)
+    if (engine === 'gitleaks') {
+      return {
+        rule_id: 'jeton-interne',
+        rule: '[[rules]]\nid = "jeton-interne"\ndescription = "Jeton interne"\nregex = \'\'\'EXT_[0-9a-f]{32}\'\'\'\nkeywords = ["ext_"]\n',
+        positive: { filename: 'config.env', content: `TOKEN=EXT_${'0123456789abcdef'.repeat(2)}\n` },
+        negative: { filename: 'config.sample.env', content: 'TOKEN=\n' },
+        explanation: 'Detects internal EXT_ tokens.',
+      }
+    }
+    if (engine === 'checkov') {
+      return {
+        rule_id: 'bucket-public',
+        rule: 'metadata:\n  id: CKV2_SCANORIA_1\n  name: Bucket public\n  category: GENERAL_SECURITY\ndefinition:\n  cond_type: attribute\n  resource_types: [aws_s3_bucket]\n  attribute: acl\n  operator: not_equals\n  value: public-read\n',
+        positive: { filename: 'main.tf', content: 'resource "aws_s3_bucket" "b" {\n  acl = "public-read"\n}\n' },
+        negative: { filename: 'private.tf', content: 'resource "aws_s3_bucket" "b" {\n  acl = "private"\n}\n' },
+        explanation: 'Refuses public-read buckets.',
+      }
+    }
+    return {
+      rule_id: 'no-eval',
+      rule: `rules:\n  - id: no-eval\n    message: eval on data\n    severity: ERROR\n    languages: [python]\n    pattern: ${broken ? 'never_called(...)' : 'eval(...)'}\n`,
+      positive: { filename: 'bad.py', content: 'eval(input())\n' },
+      negative: { filename: 'good.py', content: 'print(input())\n' },
+      explanation: 'Detects eval() calls on data.',
+    }
+  }
+  return null
+}
+
 /** Réponse sage : reprend le titre, le message et les métadonnées, jamais l'extrait de code. */
 function wellBehaved(required: string[], data: Record<string, unknown>): Record<string, unknown> {
-  const v04 = wellBehaved06(required, data) ?? wellBehaved04(required, data) ?? wellBehaved05(required, data)
+  const v04 = wellBehaved07(required, data) ?? wellBehaved06(required, data) ?? wellBehaved04(required, data) ?? wellBehaved05(required, data)
   if (v04) return v04
   if (required.includes('detects')) {
     const pkg = data.package as { name?: string, fixed?: string[] } | null

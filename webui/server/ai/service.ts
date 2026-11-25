@@ -307,7 +307,9 @@ export class AiService {
     const valid = def.output.safeParse(parsed)
     await this.callLog(task, def.kind, model.model, result.bytesSent, result.durationMs, valid.success ? 'ok' : 'invalid-output')
     if (!valid.success) throw new InvalidOutput('invalid output')
-    return def.finalize(valid.data, input)
+    const out = def.finalize(valid.data, input)
+    if (def.accept && !def.accept(out, input)) throw new InvalidOutput('rejected output')
+    return out
   }
 
   private async runTask(task: AiTaskRow, def: TaskDefinition, client: OllamaLike): Promise<TickResult> {

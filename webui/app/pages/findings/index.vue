@@ -205,6 +205,29 @@ function resetFilters() {
   Object.assign(filters, { project_id: 'all', scan_id: '', tool: '', severity: 'all', category: 'all', status: 'open', q: '', is_new: false, secret: false, malicious: false, epss_min: 'all', kev: false, grouped: true, origin: 'all' })
 }
 
+/**
+ * Filtres proposés par la recherche en langage naturel (I8), déjà revalidés
+ * par le serveur et relus par la personne : ils remplacent les filtres de la
+ * page, qui restent modifiables, puis la liste se recharge comme d'habitude.
+ */
+function applyNl(nl: Record<string, string>) {
+  resetFilters()
+  const pick = <T extends string>(v: string | undefined, allowed: readonly T[]) => (v && v.split(',').every(x => (allowed as readonly string[]).includes(x)) ? v : undefined)
+  if (nl.project_id) filters.project_id = nl.project_id
+  if (nl.tool) filters.tool = nl.tool
+  filters.severity = pick(nl.severity, SEVERITIES) ?? 'all'
+  if (pick(nl.category, CATEGORIES)) filters.category = nl.category!
+  const status = pick(nl.status, FINDING_STATUSES)
+  filters.status = status === 'new,confirmed' || status === 'confirmed,new' ? 'open' : status ?? 'open'
+  if (nl.q) filters.q = nl.q
+  filters.is_new = nl.is_new === 'true'
+  filters.secret = nl.secret === 'true'
+  filters.malicious = nl.malicious === 'true'
+  filters.kev = nl.kev === 'true'
+  if (nl.epss_min && ['0.01', '0.1', '0.5'].includes(nl.epss_min)) filters.epss_min = nl.epss_min
+  if (nl.origin && ['module', 'external'].includes(nl.origin)) filters.origin = nl.origin
+}
+
 const totals = computed(() => summary.value.reduce((acc, p) => ({
   malicious: acc.malicious + p.malicious,
   secrets: acc.secrets + p.secrets_to_revoke,
@@ -214,9 +237,12 @@ const projectItems = computed(() => [
   { label: t('findings.filters.allProjects'), value: 'all' },
   ...summary.value.map(p => ({ label: p.project_name, value: p.project_id })),
 ])
+// Liste de valeurs posée par la recherche en langage naturel (I8) : proposée telle quelle.
+const listItem = (v: string, prefix: string) => (v.includes(',') ? [{ label: v.split(',').map(x => t(`${prefix}.${x}`)).join(' + '), value: v }] : [])
 const severityItems = computed(() => [
   { label: t('findings.filters.all'), value: 'all' },
   ...SEVERITIES.map(s => ({ label: t(`findings.severity.${s}`), value: s })),
+  ...listItem(filters.severity, 'findings.severity'),
 ])
 const categoryItems = computed(() => [
   { label: t('findings.filters.all'), value: 'all' },
@@ -226,6 +252,7 @@ const statusItems = computed(() => [
   { label: `${t('findings.status.new')} + ${t('findings.status.confirmed')}`, value: 'open' },
   { label: t('findings.filters.all'), value: 'all' },
   ...FINDING_STATUSES.map(s => ({ label: t(`findings.status.${s}`), value: s })),
+  ...(filters.status === 'open' ? [] : listItem(filters.status, 'findings.status')),
 ])
 
 const originItems = computed(() => [
@@ -442,6 +469,11 @@ const setSecret = (state: 'to-revoke' | 'false-positive') => post('secret', { st
         </li>
       </ul>
     </UCard>
+
+    <AiNlSearch
+      target="findings"
+      @apply="applyNl"
+    />
 
     <div class="flex flex-wrap items-end gap-3">
       <UFormField :label="t('findings.filters.project')">

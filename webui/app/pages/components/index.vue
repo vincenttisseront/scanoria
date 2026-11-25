@@ -45,6 +45,10 @@ const form = reactive({
   vuln: typeof route.query.vuln === 'string' ? route.query.vuln : '',
 })
 const ecosystemItems = computed(() => [{ label: t('components.anyEcosystem'), value: ANY }, ...ECOSYSTEMS.map(e => ({ label: e, value: e }))])
+/** Projet posé par la recherche en langage naturel (I8), retirable ; slug affiché. */
+const nlProject = ref<{ id: string, slug: string } | null>(
+  typeof route.query.project_id === 'string' && /^[0-9a-f-]{36}$/.test(route.query.project_id) ? { id: route.query.project_id, slug: route.query.project_id.slice(0, 8) } : null,
+)
 
 const loading = ref(false)
 const loadingMore = ref(false)
@@ -61,6 +65,7 @@ const params = computed(() => {
   if (form.version_from.trim()) p.version_from = form.version_from.trim()
   if (form.version_to.trim()) p.version_to = form.version_to.trim()
   if (form.vuln.trim()) p.vuln = form.vuln.trim().toUpperCase()
+  if (nlProject.value) p.project_id = nlProject.value.id
   return p
 })
 const canSearch = computed(() => !!(params.value.purl || params.value.name || params.value.vuln))
@@ -76,7 +81,7 @@ async function search() {
     const query = { ...params.value }
     result.value = await api<SearchResult>('/api/components', { query })
     searched.value = query
-    void router.replace({ query: { q: form.query || undefined, ecosystem: form.ecosystem !== ANY ? form.ecosystem : undefined, from: form.version_from || undefined, to: form.version_to || undefined, vuln: form.vuln || undefined } })
+    void router.replace({ query: { q: form.query || undefined, ecosystem: form.ecosystem !== ANY ? form.ecosystem : undefined, from: form.version_from || undefined, to: form.version_to || undefined, vuln: form.vuln || undefined, project_id: nlProject.value?.id } })
   }
   catch (err) {
     error.value = errorMessage(err)
@@ -102,6 +107,17 @@ async function more() {
   }
 }
 
+/** Filtres de la recherche en langage naturel (I8), relus par la personne : ils remplissent le formulaire. */
+function applyNl(nl: Record<string, string>, labels: Record<string, string> = {}) {
+  form.query = nl.name ?? ''
+  form.ecosystem = nl.ecosystem && ECOSYSTEMS.includes(nl.ecosystem) ? nl.ecosystem : ANY
+  form.version_from = nl.version ?? ''
+  form.version_to = nl.version ?? ''
+  form.vuln = nl.vuln ?? ''
+  nlProject.value = nl.project_id ? { id: nl.project_id, slug: labels.project_id ?? nl.project_id.slice(0, 8) } : null
+  if (canSearch.value) void search()
+}
+
 onMounted(() => {
   if (canSearch.value) void search()
 })
@@ -113,7 +129,29 @@ onMounted(() => {
       {{ t('components.help') }}
     </p>
 
+    <AiNlSearch
+      target="components"
+      @apply="applyNl"
+    />
+
     <UCard>
+      <UBadge
+        v-if="nlProject"
+        color="primary"
+        variant="subtle"
+        class="mb-2 gap-1"
+        data-testid="components-nl-project"
+      >
+        {{ t('components.projectFilter', { project: nlProject.slug }) }}
+        <UButton
+          size="xs"
+          variant="link"
+          color="neutral"
+          icon="i-lucide-x"
+          :aria-label="t('components.clearProject')"
+          @click="nlProject = null"
+        />
+      </UBadge>
       <form
         class="grid gap-3 md:grid-cols-6"
         data-testid="components-form"
