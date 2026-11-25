@@ -571,7 +571,34 @@ servira de métadonnées à la cartographie de la surface d'attaque (I22).
 Leurs juges LLM facultatifs (K5, K6) et Vulnhuntr (K3) passent par le relais
 de `scanoria-ai` (`scan.network: ai-relay`) : ce sont des modules distincts,
 dont les résultats sont marqués « IA » et restent hors verdict tant qu'une
-personne ne les a pas confirmés (CLAUDE.md § 3.5).
+personne ne les a pas confirmés (CLAUDE.md § 3.5). Sans connecteur IA, ou
+pour un projet « aucun envoi à l'IA », ils sont `skipped` et les modules hors
+ligne restent seuls.
+
+| Module | Version | Lancé si le dépôt contient | Ce qu'il fait |
+|---|---|---|---|
+| `vulnhuntr` (K3) | 0.1.0+ead88c5 | `*.py` | suit, avec le modèle, l'entrée utilisateur jusqu'aux points dangereux (LFI, RCE, SSRF, AFO, SQLI, XSS, IDOR) ; seuil de confiance réglable (`min_confidence`, 7 par défaut) |
+| `mcp-scanner-llm` (K5) | 4.8.7 | comme `mcp-scanner` | une définition par outil, invite ou serveur MCP, jugée par l'analyseur LLM de l'amont |
+| `skill-scanner-llm` (K6) | 2.3.2 | `SKILL.md` | juge LLM de l'amont sur chaque skill ; seuls ses constats sont gardés |
+
+- **Vulnhuntr** n'a ni image ni paquet PyPI amont (le paquet PyPI du même nom
+  est d'un autre auteur) : son paquet Python est livré non modifié dans
+  `scan-tools/vulnhuntr/vendor/` (empreintes dans `SHA256SUMS`), ses
+  dépendances dans l'image (Python 3.10, imposé par jedi 0.18 et parso 0.8).
+  Le dépôt n'est jamais lu directement : seuls ses fichiers Python réguliers
+  et son README sont copiés dans `/tmp`. Vulnhuntr n'a pas de sortie
+  structurée : son journal JSON (structlog) est converti en SARIF.
+- **Pannes** : un modèle ou un relais injoignable, une réponse invalide ou un
+  skill non jugé (`LLM_ANALYSIS_FAILED`) donnent le code 3, une panne
+  d'infrastructure (G12), jamais « aucun constat ». L'analyseur LLM de MCP
+  Scanner signale ses pannes par un constat `ANALYZER INFRASTRUCTURE`, traité
+  de même.
+- **Environnement** : seules les variables du relais (`OPENAI_BASE_URL`,
+  `OPENAI_API_KEY`, `SCANORIA_AI_MODEL`) sont passées aux outils, traduites
+  dans leurs noms propres (`SKILL_SCANNER_LLM_*`, `OPENAI_MODEL`) ; les
+  variables d'Anthropic, d'Azure, d'AWS, de VirusTotal et des services Cisco
+  sont retirées. `LITELLM_LOCAL_MODEL_COST_MAP` évite tout téléchargement par
+  litellm.
 
 Tests : `tests/b36-ia.sh` (convertisseurs sur sorties enregistrées, entrées
 hostiles, sans conteneur) et `tests/b36-live.sh` (image construite, banc

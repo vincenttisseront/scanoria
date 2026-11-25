@@ -53,7 +53,7 @@ args = sys.argv[2:]
 '"$code" "$tool" "$@")
 }
 
-MODS=(agentic-radar mcp-scanner skill-scanner)
+MODS=(agentic-radar mcp-scanner skill-scanner vulnhuntr mcp-scanner-llm skill-scanner-llm)
 RADAR="$TOOLS/agentic-radar/radar_sarif.py"
 MCP="$TOOLS/mcp-scanner/mcp_sarif.py"
 SKILL="$TOOLS/skill-scanner/skill_sarif.py"
@@ -66,22 +66,33 @@ for m in "${MODS[@]}"; do
 	if python3 "$MODCHECK" containerfile "$dir/image/Containerfile" "$m" > "$TMP/cf.log" 2>&1; then ok "$m : Containerfile conforme"
 	else ko "$m : Containerfile refusé"; sed 's/^/     /' "$TMP/cf.log"; fi
 	yq "$dir/module.yaml" > "$TMP/$m.json"
-	expect "$m : aucun réseau" "$(jq -r .scan.network "$TMP/$m.json")" none
-	expect "$m : outil de l'appliance" "$(jq -r .scan.tool "$TMP/$m.json")" "$m"
+	tool=${m%-llm}
+	if [[ "$m" == "$tool" && "$m" != vulnhuntr ]]; then
+		expect "$m : aucun réseau" "$(jq -r .scan.network "$TMP/$m.json")" none
+	else
+		# Modules par le relais IA : conteneur toujours en --network=none, pont vers le seul relais.
+		expect "$m : relais IA seulement" "$(jq -r .scan.network "$TMP/$m.json")" ai-relay
+	fi
+	expect "$m : outil de l'appliance" "$(jq -r .scan.tool "$TMP/$m.json")" "$tool"
 	expect "$m : lancé selon le contenu (applies_to)" "$(jq -r '.scan.applies_to.paths | length > 0' "$TMP/$m.json")" true
 	img=$(jq -r '.image // ""' "$TMP/$m.json")
 	if [[ "$(jq -r '.image_pending // false' "$TMP/$m.json")" == true && -z "$img" ]] || [[ "$img" == *@sha256:* ]]; then
 		ok "$m : image en attente ou épinglée par empreinte"
 	else ko "$m : image non épinglée ($img)"; fi
-	expect "$m : licence Apache-2.0 vérifiée" "$(jq -r .license.spdx "$TMP/$m.json")" Apache-2.0
+	if [[ "$m" == vulnhuntr ]]; then lic=AGPL-3.0-only; else lic=Apache-2.0; fi
+	expect "$m : licence $lic vérifiée" "$(jq -r .license.spdx "$TMP/$m.json")" "$lic"
 	n=$(grep -c ' --hash=sha256:' "$dir/image/requirements.lock" || true)
 	if [[ "$n" -gt 10 ]]; then ok "$m : dépendances à empreintes ($n)"; else ko "$m : requirements.lock sans empreintes"; fi
 	# Aucun service tiers en ligne : ni clé, ni option qui l'appellerait.
-	if grep -nE 'VIRUSTOTAL_API_KEY=|MCP_SCANNER_API_KEY=|"--use-(osv|virustotal|aidefense|llm)"|api\.openai\.com' \
-		"$dir/module.yaml" "$TOOLS/$m/"*.py > "$TMP/net.log"; then
+	if grep -nE 'VIRUSTOTAL_API_KEY=|MCP_SCANNER_API_KEY=|"--use-(osv|virustotal|aidefense)"|api\.openai\.com' \
+		"$dir/module.yaml" "$TOOLS/$tool/"*.py > "$TMP/net.log"; then
 		ko "$m : appel d'un service en ligne prévu"; sed 's/^/     /' "$TMP/net.log"
 	else ok "$m : aucun service en ligne prévu"; fi
 done
+
+# Mode hors ligne de skill-scanner : ni juge LLM ni OSV.dev (le juge est le module skill-scanner-llm).
+expect "skill-scanner : mode hors ligne sans juge LLM" \
+	"$(grep -E '^OFFLINE_FLAGS' "$TOOLS/skill-scanner/skill_sarif.py" | grep -cE 'use-(llm|osv)')" 0
 
 # --- 2. agentic-radar (K7) ---------------------------------------------------------------------
 RAD="$ROOT/modules/agentic-radar"
@@ -216,7 +227,7 @@ printf 'def f(:\n' > "$TMP/mh/casse.py"
 expect "mcp : entrées hostiles ignorées" "$(pycall "$MCP" 'print(len(m.discover(args[0])))' "$TMP/mh")" 0
 rc=0; python3 -I "$MCP" > /dev/null 2>&1 || rc=$?
 expect "mcp : arguments manquants refusés" "$rc" 2
-for t in "$RADAR" "$MCP" "$SKILL"; do
+for t in "$RADAR" "$MCP" "$SKILL" "$TOOLS/vulnhuntr/vulnhuntr_sarif.py"; do
 	rc=0; python3 -I "$t" "$TMP" /out/x.sarif > /dev/null 2>&1 || rc=$?
 	expect "$(basename "$t") : sources hors de /src refusées" "$rc" 2
 	for o in /tmp/x.sarif /out/../x.sarif "/out/a b.sarif" /out/x.txt; do
@@ -224,6 +235,111 @@ for t in "$RADAR" "$MCP" "$SKILL"; do
 		expect "$(basename "$t") : sortie « $o » refusée" "$rc" 2
 	done
 done
+
+# --- 5. Vulnhuntr (K3, relais IA) -------------------------------------------------------------
+VH="$TOOLS/vulnhuntr/vulnhuntr_sarif.py"
+VHM="$ROOT/modules/vulnhuntr"
+# Sources amont livrées non modifiées : chaque fichier listé et aucun ajouté.
+if (cd "$TOOLS/vulnhuntr/vendor" && sha256sum --check --strict --quiet SHA256SUMS) > "$TMP/sums.log" 2>&1; then ok "vulnhuntr : sources amont intactes"
+else ko "vulnhuntr : sources amont modifiées"; sed 's/^/     /' "$TMP/sums.log"; fi
+expect "vulnhuntr : aucun fichier amont ajouté" \
+	"$(cd "$TOOLS/vulnhuntr/vendor" && find vulnhuntr licenses -type f | sort | tr '\n' ' ')" \
+	"$(awk '{print $2}' "$TOOLS/vulnhuntr/vendor/SHA256SUMS" | sort | tr '\n' ' ')"
+sed "s#@REPO@#$VHM/testbed#g" "$VHM/tests/recorded.log" > "$TMP/vh.log"
+(cd "$VHM/testbed" && python3 -I "$VH" --convert < "$TMP/vh.log" > "$TMP/vh.sarif")
+expect "vulnhuntr : journal enregistré → SARIF identique" \
+	"$(jq -S . "$TMP/vh.sarif" | sha256sum | cut -c1-64)" "$(jq -S . "$VHM/tests/recorded.sarif" | sha256sum | cut -c1-64)"
+if python3 "$MODCHECK" expect "$VHM/module.yaml" "$TMP/vh.sarif" > "$TMP/exp.log"; then ok "vulnhuntr : attentes du banc d'essai"
+else ko "vulnhuntr : attentes du banc d'essai"; sed 's/^/     /' "$TMP/exp.log"; fi
+(cd "$VHM/testbed" && python3 -I "$VH" --convert 10 < "$TMP/vh.log" > "$TMP/vh10.sarif")
+expect "vulnhuntr : seuil de confiance appliqué" "$(jq '.runs[0].results | length' "$TMP/vh10.sarif")" 0
+# Ligne retrouvée par la citation de code du rapport ; chemins hors du dépôt et lignes invalides écartés.
+python3 - "$TMP/vh.log" "$TMP/vh-h.log" <<'PY'
+import json, sys
+out = []
+for line in open(sys.argv[1]):
+    ev = json.loads(line)
+    rep = ev.get("secondary_analysis_report")
+    if rep and "RCE" in json.dumps(rep):
+        rep["context_code"] = [{"name": "ping", "reason": "r", "code_line": 'subprocess.check_output("ping -c 1 " + host, shell=True)'}]
+    out.append(json.dumps(ev))
+rep = {"scratchpad": "", "analysis": "x", "poc": "", "confidence_score": 10, "vulnerability_types": ["LFI"], "context_code": []}
+out += ["{pas du json", json.dumps({"event": "Performing initial analysis", "file": "../../etc/passwd"}),
+        json.dumps({"event": "Initial analysis complete", "report": rep}),
+        json.dumps({"event": "Performing initial analysis", "file": "/etc/shadow"}),
+        json.dumps({"event": "Initial analysis complete", "report": rep})]
+open(sys.argv[2], "w").write("\n".join(out) + "\n")
+PY
+(cd "$VHM/testbed" && python3 -I "$VH" --convert < "$TMP/vh-h.log" > "$TMP/vh-h.sarif")
+expect "vulnhuntr : ligne retrouvée par la citation du rapport" \
+	"$(jq -r '.runs[0].results[] | select(.ruleId == "vulnhuntr/rce") | .locations[0].physicalLocation.region.startLine' "$TMP/vh-h.sarif")" \
+	"$(grep -n 'shell=True' "$VHM/testbed/app.py" | cut -d: -f1)"
+expect "vulnhuntr : chemins hors du dépôt écartés" "$(jq -r '[.runs[0].results[].ruleId] | sort | join(" ")' "$TMP/vh-h.sarif")" "vulnhuntr/rce vulnhuntr/ssrf"
+# Copie de travail : fichiers Python réguliers seulement, liens et dépendances ignorés.
+mkdir -p "$TMP/vsrc/pkg" "$TMP/vsrc/node_modules/x" "$TMP/vwork"
+printf 'x = 1\n' > "$TMP/vsrc/pkg/a.py"
+printf 'y = 2\n' > "$TMP/vsrc/node_modules/x/b.py"
+ln -s "$TMP/outside.py" "$TMP/vsrc/pkg/lien.py"
+python3 -c 'import sys; open(sys.argv[1], "w").write("#" * 600_000)' "$TMP/vsrc/gros.py"
+printf '# R\n' > "$TMP/vsrc/README.md"
+ln -s "$TMP/outside.py" "$TMP/vsrc/README.rst"
+expect "vulnhuntr : copie de travail bornée" \
+	"$(pycall "$VH" 'print(m.copy_tree(args[0], args[1])); import os; print(" ".join(sorted(os.path.relpath(os.path.join(r, f), args[1]) for r, _, fs in os.walk(args[1]) for f in fs)))' "$TMP/vsrc" "$TMP/vwork" | tr '\n' '|')" \
+	"1|README.md pkg/a.py|"
+rc=0; env -u OPENAI_BASE_URL -u OPENAI_API_KEY python3 -I "$VH" /src /out/vx.sarif > /dev/null 2>&1 || rc=$?
+expect "vulnhuntr : sans relais, panne d'infrastructure" "$rc" 3
+rc=0; python3 -I "$VH" /src /out/vx.sarif 11 > /dev/null 2>&1 || rc=$?
+expect "vulnhuntr : seuil invalide refusé" "$rc" 2
+if grep -nE 'ANTHROPIC_API_KEY=|api\.anthropic\.com' "$VHM/module.yaml" "$VH" > /dev/null; then ko "vulnhuntr : autre fournisseur prévu"; else ok "vulnhuntr : relais seulement"; fi
+
+# --- 6. Juges LLM (K5, K6, relais IA) ---------------------------------------------------------
+SKL="$ROOT/modules/skill-scanner-llm"
+jq -n --slurpfile r "$SKL/tests/upstream-rapport.sarif" '{"skills/rapport": $r[0]}' | python3 -I "$SKILL" --llm --merge > "$TMP/skl.sarif"
+expect "skill-llm : fusion identique à l'enregistrement" \
+	"$(jq -S . "$TMP/skl.sarif" | sha256sum | cut -c1-64)" "$(jq -S . "$SKL/tests/recorded.sarif" | sha256sum | cut -c1-64)"
+expect "skill-llm : constats du juge seulement" \
+	"$(jq -r '[.runs[0].results[].ruleId | select(startswith("skill-scanner-llm/llm_") | not)] | length' "$TMP/skl.sarif")" 0
+if python3 "$MODCHECK" expect "$SKL/module.yaml" "$TMP/skl.sarif" > "$TMP/exp.log"; then ok "skill-llm : attentes du banc d'essai"
+else ko "skill-llm : attentes du banc d'essai"; sed 's/^/     /' "$TMP/exp.log"; fi
+jq '.runs[0].results += [{"ruleId": "LLM_ANALYSIS_FAILED", "level": "note", "message": {"text": "x"}}]' "$SKL/tests/upstream-rapport.sarif" > "$TMP/skl-f.sarif"
+jq -n --slurpfile r "$TMP/skl-f.sarif" '{"skills/rapport": $r[0]}' | python3 -I "$SKILL" --llm --merge > "$TMP/skl-f.out"
+expect "skill-llm : juge en échec compté en échec" "$(jq -c '.runs[0].properties["scanoria/skills"]' "$TMP/skl-f.out")" '{"analysed":0,"failed":["skills/rapport"]}'
+rc=0; env -u OPENAI_BASE_URL -u OPENAI_API_KEY python3 -I "$SKILL" --llm /src /out/sx.sarif > /dev/null 2>&1 || rc=$?
+expect "skill-llm : sans relais, panne d'infrastructure" "$rc" 3
+expect "skill-llm : environnement du juge limité au relais" \
+	"$(OPENAI_BASE_URL=https://ai-relay.exemple.test:8443/v1 OPENAI_API_KEY=k VIRUSTOTAL_API_KEY=v ANTHROPIC_API_KEY=a SKILL_SCANNER_LLM_PROVIDER=x \
+		pycall "$SKILL" 'e = m.llm_env(); print(e["SKILL_SCANNER_LLM_BASE_URL"], e["SKILL_SCANNER_LLM_MODEL"], sorted(k for k in e if k.startswith(("VIRUSTOTAL", "ANTHROPIC", "OPENAI_", "SKILL_SCANNER_LLM_PROVIDER"))))')" \
+	"https://ai-relay.exemple.test:8443/v1 scanoria []"
+pycall "$MCP" '
+class F:
+    def __init__(s, cat, details, sev="HIGH"):
+        s.details, s.severity, s.threat_category = details, sev, cat
+class A:
+    def __init__(s, fail=False):
+        s.fail, s.seen = fail, []
+    async def analyze(s, content, ctx):
+        s.seen.append(json.loads(content))
+        if s.fail:
+            return [F("ANALYZER INFRASTRUCTURE", {"error_type": "InternalServerError"}, "INFO")]
+        if "collect" in content.lower() or "ssh" in content.lower():
+            return [F("PROMPT INJECTION", {"threat_type": "PROMPT INJECTION", "evidence": "prompt injection detected", "raw_response": {"threat_analysis": {}}})]
+        return []
+items = m.discover(args[0])
+a = A()
+json.dump(m.sarif(m.scan(items, a, True), "0.0.0", True), open(args[1], "w"))
+json.dump(a.seen, open(args[2], "w"))
+try:
+    m.scan(items, A(True), True)
+    print("no-raise")
+except RuntimeError:
+    print("raised")' "$MCM/testbed" "$TMP/mcl.sarif" "$TMP/mcl.seen" > "$TMP/mcl.out"
+expect "mcp-llm : panne signalée par l'amont = erreur, jamais un constat" "$(cat "$TMP/mcl.out")" raised
+expect "mcp-llm : identifiants de règles" "$(jq -r '[.runs[0].results[].ruleId] | unique | join(" ")' "$TMP/mcl.sarif")" "mcp-scanner-llm/prompt-injection"
+expect "mcp-llm : une définition par élément, paramètres en objets" \
+	"$(jq -r '[length, (map(.parameters | to_entries | map(.value | type == "object") | all) | all)] | join(" ")' "$TMP/mcl.seen")" "5 true"
+expect "mcp-llm : noms des variables d'environnement seulement" "$(jq -r '[.[] | select(.name == "notes") | .parameters | keys[]] | join(",")' "$TMP/mcl.seen")" NOTES_TOKEN
+rc=0; env -u OPENAI_BASE_URL -u OPENAI_API_KEY python3 -I "$MCP" --llm /src /out/mx.sarif > /dev/null 2>&1 || rc=$?
+expect "mcp-llm : sans relais, panne d'infrastructure" "$rc" 3
 
 echo
 echo "b36-ia : $PASS réussis, $FAIL échoués"

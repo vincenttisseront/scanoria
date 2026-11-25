@@ -610,12 +610,13 @@ jobs:
         run: sudo env "PATH=$PATH" bash tests/b34-live.sh
 
   ia-modules-live:
-    # Modules d'analyse du code IA de la 0.7 (chantier F, K5–K7) : image
+    # Modules d'analyse du code IA de la 0.7 (chantier F, K3, K5–K7) : image
     # construite depuis modules/<id>/image (pas d'image amont), puis banc
-    # d'essai confiné comme sur l'appliance avec le vrai podman (tests/b36-live.sh).
-    name: ia-modules-live (agentic-radar, mcp-scanner, skill-scanner, b36-live)
+    # d'essai confiné comme sur l'appliance avec le vrai podman, et, pour les
+    # modules par le relais IA, le vrai runner et le vrai relais (tests/b36-live.sh).
+    name: ia-modules-live (agentic-radar, mcp-scanner, skill-scanner, vulnhuntr, juges LLM, b36-live)
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -623,13 +624,20 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Dépendances (podman, jq, python3-yaml, python3-jsonschema)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+      - name: Dépendances (podman, jq, openssl, python3-yaml, python3-jsonschema, console)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends jq python3-yaml python3-jsonschema curl
-          podman --version
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark python3-yaml python3-jsonschema curl openssl
+          sudo podman --version
+          cd webui && npm ci --ignore-scripts
+      # Machine jetable : runner en root avec le vrai podman (§ 6.4).
       - name: tests/b36-live.sh
-        run: bash tests/b36-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b36-live.sh
 
   ci-ok:
     name: ci-ok

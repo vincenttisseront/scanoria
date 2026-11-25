@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module skill-scanner-llm (0.7, K6, juge LLM) : les skills d'agents du dépôt
+# jugés par le juge LLM de Cisco Skill Scanner (« --use-llm », fournisseur
+# compatible OpenAI), en plus de l'analyse hors ligne du module skill-scanner.
+# Seuls les constats du juge sont gardés. Le modèle n'est joint que par le
+# relais de scanoria-ai (scan.network: ai-relay, contrat 31) : conteneur sans
+# réseau, secrets masqués, « aucun envoi à l'IA » respecté, appels
+# journalisés ; jamais VirusTotal, Cisco AI Defense ni OSV.dev. Un skill que
+# le juge n'a pas pu évaluer est une panne, jamais « aucun constat ». Sans
+# connecteur IA, le module est « skipped ». Ses résultats sont marqués « IA »
+# et restent hors verdict tant qu'une personne ne les a pas confirmés.
+#
+# Amont : Cisco AI Skill Scanner 2.3.2 (Apache-2.0, relevé le 2026-11-25, tag
+# 2.3.2), même verrou que skill-scanner ; image construite par la CI de
+# Scanoria sous son propre nom (docs/MODULES.md § 8).
+id: skill-scanner-llm
+name: Cisco Skill Scanner (juge IA)
+description:
+  fr: Fait juger par l'IA de l'appliance les skills d'agents du dépôt (instructions cachées, exfiltration, abus d'outils) ; résultats à confirmer.
+  en: Has the appliance AI judge the agent skills of the repository (hidden instructions, exfiltration, tool abuse); findings to be confirmed.
+type: scanner
+categories: [sast]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/cisco-ai-defense/skill-scanner/blob/2.3.2/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: Mêmes dépendances que le module skill-scanner ; litellm (MIT) ne joint que le relais.
+upstream:
+  homepage: https://github.com/cisco-ai-defense/skill-scanner
+  source: https://pypi.org/project/cisco-ai-skill-scanner/2.3.2/
+image_pending: true
+version: "2.3.2"
+resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 2000 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/skill_sarif.py", "--llm", "/src", "/out/skill-scanner-llm.sarif"]
+  tool: skill-scanner
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+  applies_to:
+    paths:
+      - "SKILL.md"
+  timeout_s: 1800
+  network: ai-relay
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/skill-scanner-llm.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # Même skill inerte que skill-scanner : SKILL.md demande d'ignorer les consignes et d'envoyer des identifiants.
+    - { rule: skill-scanner-llm/llm_prompt_injection, category: sast, min: 1 }
+health: { command: ["python3", "-I", "-c", "import importlib.metadata as m, skill_scanner, litellm; print(m.version('cisco-ai-skill-scanner'))"] }
+upgrade: { policy: on-demand }

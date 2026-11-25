@@ -5,6 +5,8 @@
 Usage :
   python3 -I skill_sarif.py /src /out/<nom>.sarif
   python3 -I skill_sarif.py --merge < { "<dossier-skill>": <sarif> … } > sortie.sarif
+  python3 -I skill_sarif.py --llm /src /out/<nom>.sarif             (module skill-scanner-llm)
+  python3 -I skill_sarif.py --llm --merge < … > sortie.sarif
 
 Trouve chaque skill du dépôt (dossier qui contient SKILL.md) et le fait
 analyser par Cisco Skill Scanner, hors ligne : analyseurs statiques (règles
@@ -18,6 +20,14 @@ ligne par les modules SCA (OSV-Scanner, Trivy, Grype) et leurs bases locales.
 Les SARIF de chaque skill sont fusionnés : chemins ramenés à la racine du
 dépôt (l'amont les donne relatifs au skill, ou absolus), règles préfixées
 skill-scanner/, textes nettoyés et bornés.
+
+Mode --llm (module skill-scanner-llm, K6, contrat 31) : seul le juge LLM de
+l'amont (« --use-llm », fournisseur compatible OpenAI) est retenu, et il ne
+parle qu'au relais de scanoria-ai (OPENAI_BASE_URL, OPENAI_API_KEY,
+SCANORIA_AI_MODEL, conteneur sans réseau). Les constats statiques, déjà
+rendus par le module skill-scanner, sont écartés ; règles préfixées
+skill-scanner-llm/. Un échec du juge (LLM_ANALYSIS_FAILED, budget de contexte
+dépassé) compte le skill en échec, jamais comme « aucun constat ».
 """
 
 import hashlib
@@ -40,6 +50,8 @@ CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2066-\
 RULE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 SCANNER = ["skill-scanner"]
 OFFLINE_FLAGS = ["--use-behavioral", "--format", "sarif"]
+LLM_FLAGS = ["--use-llm", "--llm-provider", "openai-compatible", "--format", "sarif"]
+LLM_FAILURES = {"LLM_ANALYSIS_FAILED", "LLM_CONTEXT_BUDGET_EXCEEDED"}
 
 
 def clean(value, limit=1000):
@@ -62,14 +74,27 @@ def skills(src):
     return out
 
 
-def run_skill(src, rel, tmp):
+def llm_env():
+    """Environnement du juge LLM : le relais seulement, jamais un autre fournisseur."""
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("OPENAI_", "ANTHROPIC_", "AZURE_", "VIRUSTOTAL_", "AI_DEFENSE_", "SKILL_SCANNER_", "AWS_", "GEMINI_", "OLLAMA_"))}
+    env.update({
+        "SKILL_SCANNER_LLM_BASE_URL": os.environ.get("OPENAI_BASE_URL", ""),
+        "SKILL_SCANNER_LLM_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
+        "SKILL_SCANNER_LLM_MODEL": os.environ.get("SCANORIA_AI_MODEL") or "scanoria",
+        "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+    })
+    return env
+
+
+def run_skill(src, rel, tmp, llm=False):
     """SARIF de l'amont pour un skill, ou None si l'analyse échoue (comptée)."""
     out = os.path.join(tmp, hashlib.sha256(rel.encode()).hexdigest()[:16] + ".sarif")
     target = os.path.normpath(os.path.join(src, rel))
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith(("OPENAI_", "ANTHROPIC_", "AZURE_", "VIRUSTOTAL_", "AI_DEFENSE_", "SKILL_SCANNER_LLM"))}
+    env = llm_env() if llm else {k: v for k, v in os.environ.items()
+                                 if not k.startswith(("OPENAI_", "ANTHROPIC_", "AZURE_", "VIRUSTOTAL_", "AI_DEFENSE_", "SKILL_SCANNER_LLM"))}
     try:
-        subprocess.run(SCANNER + ["scan", target] + OFFLINE_FLAGS + ["--output-sarif", out],
+        subprocess.run(SCANNER + ["scan", target] + (LLM_FLAGS if llm else OFFLINE_FLAGS) + ["--output-sarif", out],
                        env=env, cwd=src, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                        timeout=SKILL_TIMEOUT, check=False)
         if os.path.getsize(out) > MAX_SARIF:
@@ -100,11 +125,20 @@ def repo_path(uri, base_id, skill_rel, src_abs):
     return rel
 
 
-def merge(src, per_skill, tool_version=None):
+def _llm_failed(doc):
+    for run in doc.get("runs") or []:
+        for res in (run.get("results") or []) if isinstance(run, dict) else []:
+            if isinstance(res, dict) and res.get("ruleId") in LLM_FAILURES:
+                return True
+    return False
+
+
+def merge(src, per_skill, tool_version=None, llm=False):
     src_abs = os.path.normpath(os.path.abspath(src))
+    prefix = "skill-scanner-llm/" if llm else "skill-scanner/"
     rules, results, failed = {}, [], []
     for skill_rel, doc in per_skill:
-        if not isinstance(doc, dict) or not isinstance(doc.get("runs"), list):
+        if not isinstance(doc, dict) or not isinstance(doc.get("runs"), list) or (llm and _llm_failed(doc)):
             failed.append(skill_rel)
             continue
         for run in doc["runs"][:4]:
@@ -112,8 +146,8 @@ def merge(src, per_skill, tool_version=None):
                 continue
             driver = ((run.get("tool") or {}).get("driver") or {})
             for r in driver.get("rules") or []:
-                if isinstance(r, dict) and isinstance(r.get("id"), str):
-                    rid = "skill-scanner/" + RULE_RE.sub("-", r["id"]).lower()[:100]
+                if isinstance(r, dict) and isinstance(r.get("id"), str) and (not llm or r["id"].startswith("LLM_")):
+                    rid = prefix + RULE_RE.sub("-", r["id"]).lower()[:100]
                     if rid not in rules:
                         props = r.get("properties") if isinstance(r.get("properties"), dict) else {}
                         rules[rid] = {
@@ -127,7 +161,9 @@ def merge(src, per_skill, tool_version=None):
             for res in run.get("results") or []:
                 if len(results) >= MAX_RESULTS or not isinstance(res, dict) or not isinstance(res.get("ruleId"), str):
                     continue
-                rid = "skill-scanner/" + RULE_RE.sub("-", res["ruleId"]).lower()[:100]
+                if llm and not res["ruleId"].startswith("LLM_"):
+                    continue
+                rid = prefix + RULE_RE.sub("-", res["ruleId"]).lower()[:100]
                 props = res.get("properties") if isinstance(res.get("properties"), dict) else {}
                 locs = []
                 for loc in (res.get("locations") or [])[:1]:
@@ -169,7 +205,7 @@ def merge(src, per_skill, tool_version=None):
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
-            "tool": {"driver": {"name": "skill-scanner", "version": tool_version or VERSION,
+            "tool": {"driver": {"name": "skill-scanner-llm" if llm else "skill-scanner", "version": tool_version or VERSION,
                                 "informationUri": "https://github.com/cisco-ai-defense/skill-scanner", "rules": list(rules.values())}},
             "originalUriBaseIds": {"SRCROOT": {"uri": "file:///src/"}},
             "results": results,
@@ -209,24 +245,32 @@ def write_json(path, doc):
 
 
 def main(argv):
+    llm = argv[1:2] == ["--llm"]
+    if llm:
+        argv = argv[:1] + argv[2:]
+    name = "skill-scanner-llm" if llm else "skill-scanner"
     if argv[1:] == ["--merge"]:
         # Fusion seule (diagnostic, tests) : { "<dossier-skill>": <SARIF amont> } sur l'entrée standard.
         per = [(str(rel), doc if isinstance(doc, dict) else None) for rel, doc in json.load(sys.stdin).items()]
-        json.dump(merge(SRC_DIR, per, None), sys.stdout)
+        json.dump(merge(SRC_DIR, per, None, llm), sys.stdout)
         return 0
     out = out_path(argv[2], ".sarif") if len(argv) == 3 else None
     if out is None or argv[1] != SRC_DIR:
         print(__doc__, file=sys.stderr)
         return 2
+    if llm and (not os.environ.get("OPENAI_BASE_URL") or not os.environ.get("OPENAI_API_KEY")):
+        print("skill-scanner: relais IA absent (OPENAI_BASE_URL)", file=sys.stderr)
+        return 3
     with tempfile.TemporaryDirectory(prefix="skills-") as tmp:
-        per = [(rel, run_skill(SRC_DIR, rel, tmp)) for rel in skills(SRC_DIR)]
-    doc = merge(SRC_DIR, per, _version())
+        per = [(rel, run_skill(SRC_DIR, rel, tmp, llm)) for rel in skills(SRC_DIR)]
+    doc = merge(SRC_DIR, per, _version(), llm)
     failed = doc["runs"][0]["properties"]["scanoria/skills"]["failed"]
-    if per and len(failed) == len(per):
-        print("skill-scanner: every skill analysis failed", file=sys.stderr)
+    # Juge LLM : un skill non jugé est une panne (relais, modèle), jamais « aucun constat ».
+    if per and (len(failed) == len(per) or (llm and failed)):
+        print("%s: skill analysis failed (%d of %d)" % (name, len(failed), len(per)), file=sys.stderr)
         return 3
     write_json(out, doc)
-    print("skill-scanner: %d result(s)" % len(doc["runs"][0]["results"]))
+    print("%s: %d result(s)" % (name, len(doc["runs"][0]["results"])))
     return 0
 
 

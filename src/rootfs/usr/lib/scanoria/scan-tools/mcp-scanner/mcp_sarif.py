@@ -3,6 +3,7 @@
 """Définitions et configurations MCP du dépôt (module mcp-scanner, K5, 0.7).
 
 Usage : python3 -I mcp_sarif.py /src /out/<nom>.sarif
+        python3 -I mcp_sarif.py --llm /src /out/<nom>.sarif   (module mcp-scanner-llm)
 
 Relève, SANS RIEN EXÉCUTER ni joindre aucun serveur, ce que le dépôt déclare
 sur des serveurs MCP :
@@ -22,6 +23,13 @@ utilisées ici (l'analyse LLM est le module mcp-scanner-llm, par le relais).
 
 Sortie : SARIF 2.1.0, un résultat par règle déclenchée et par élément
 (ruleId mcp-scanner/<règle>, catégorie sast), avec le fichier et la ligne.
+
+Mode --llm (module mcp-scanner-llm, K5, contrat 31) : les mêmes éléments
+passent par l'analyseur LLM de l'amont (litellm, fournisseur compatible
+OpenAI) au lieu des règles YARA, et ne parlent qu'au relais de scanoria-ai
+(OPENAI_BASE_URL, OPENAI_API_KEY, SCANORIA_AI_MODEL, conteneur sans réseau) ;
+ruleId mcp-scanner-llm/<menace>. Une erreur du modèle interrompt l'analyse
+(code 3, panne d'infrastructure), jamais « aucun constat ».
 """
 
 import ast
@@ -192,30 +200,59 @@ def discover(src):
     return out
 
 
-def scan(items, analyzer):
-    """(élément, constat) pour chaque règle YARA déclenchée sur la description ou les paramètres."""
+def _llm_definition(it):
+    """Définition d'outil JSON attendue par l'analyseur LLM de l'amont (description et paramètres en objet)."""
+    try:
+        params = json.loads(it["parameters"]) if it["parameters"] else {}
+    except ValueError:
+        params = {}
+    if isinstance(params, dict) and isinstance(params.get("properties"), dict):
+        params = params["properties"]
+    elif isinstance(params, dict) and isinstance(params.get("parameters"), list):
+        params = {clean(n, 80): {} for n in params["parameters"] if isinstance(n, str)}
+    elif isinstance(params, dict) and isinstance(params.get("env"), list):
+        # Configuration de serveur : noms des variables d'environnement seulement.
+        params = {clean(n, 80): {"type": "environment variable"} for n in params["env"] if isinstance(n, str)}
+    if not isinstance(params, dict):
+        params = {}
+    params = {clean(k, 80): (v if isinstance(v, dict) else {"type": "unknown"}) for k, v in list(params.items())[:100]}
+    return json.dumps({"name": it["name"], "description": it["description"] or "", "parameters": params})
+
+
+def scan(items, analyzer, llm=False):
+    """(élément, constat) pour chaque règle déclenchée sur la description ou les paramètres (YARA),
+    ou sur la définition complète de l'élément (juge LLM, un appel par élément)."""
     found = []
     for it in items:
         seen = set()
-        for content_type, content in (("description", it["description"]), ("parameters", it["parameters"])):
+        contents = (("definition", _llm_definition(it)),) if llm else (("description", it["description"]), ("parameters", it["parameters"]))
+        for content_type, content in contents:
             if not content:
                 continue
             for f in asyncio.run(analyzer.analyze(content[:MAX_CONTENT], {"tool_name": it["name"], "content_type": content_type})):
-                raw = (f.details or {}).get("raw_response") or {}
-                rule = raw.get("rule") or "unknown"
+                details = f.details or {}
+                if f.threat_category == "ANALYZER INFRASTRUCTURE":
+                    # Panne du modèle ou du relais signalée par l'amont : jamais un constat.
+                    raise RuntimeError("analyzer infrastructure error: %s" % clean(details.get("error_type") or "", 60))
+                raw = details.get("raw_response") or {}
+                # YARA : raw_response.rule ; LLM : details.threat_type (taxonomie de l'amont).
+                rule = (raw.get("rule") if isinstance(raw.get("rule"), str) else None) or details.get("threat_type") or "unknown"
                 if rule in seen:
                     continue
                 seen.add(rule)
                 found.append((it, {"rule": rule, "severity": str(f.severity or "UNKNOWN").upper(),
-                                   "category": f.threat_category, "description": raw.get("description") or "",
-                                   "threat_type": raw.get("threat_type") or "", "content_type": content_type}))
+                                   "category": f.threat_category,
+                                   "description": (raw.get("description") if isinstance(raw.get("description"), str) else "") or details.get("evidence") or "",
+                                   "threat_type": (raw.get("threat_type") if isinstance(raw.get("threat_type"), str) else "") or details.get("threat_type") or "",
+                                   "content_type": content_type}))
     return found
 
 
-def sarif(found, tool_version=None):
+def sarif(found, tool_version=None, llm=False):
     rules, results = {}, []
+    name = "mcp-scanner-llm" if llm else "mcp-scanner"
     for it, f in found:
-        rid = "mcp-scanner/" + slug(f["rule"])
+        rid = name + "/" + slug(f["rule"])
         if rid not in rules:
             rules[rid] = {
                 "id": rid, "name": clean(f["rule"], 120),
@@ -229,7 +266,7 @@ def sarif(found, tool_version=None):
             "ruleId": rid,
             "level": LEVELS.get(f["severity"], "warning"),
             "message": {"text": clean(msg, 600)},
-            "partialFingerprints": {"mcpScanner/v1": hashlib.sha256(("%s|%s|%s|%s" % (it["path"], it["kind"], it["name"], rid)).encode()).hexdigest()},
+            "partialFingerprints": {("mcpScannerLlm/v1" if llm else "mcpScanner/v1"): hashlib.sha256(("%s|%s|%s|%s" % (it["path"], it["kind"], it["name"], rid)).encode()).hexdigest()},
             "locations": [{"physicalLocation": {
                 "artifactLocation": {"uri": quote(it["path"]), "uriBaseId": "SRCROOT"},
                 "region": {"startLine": max(1, int(it["line"]))},
@@ -241,13 +278,27 @@ def sarif(found, tool_version=None):
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
-            "tool": {"driver": {"name": "mcp-scanner", "version": tool_version or VERSION,
+            "tool": {"driver": {"name": name, "version": tool_version or VERSION,
                                 "informationUri": "https://github.com/cisco-ai-defense/mcp-scanner", "rules": list(rules.values())}},
             "originalUriBaseIds": {"SRCROOT": {"uri": "file:///src/"}},
             "results": results,
         }],
     }
 
+
+def llm_analyzer():
+    """Analyseur LLM de l'amont relié au seul relais ; None sans relais."""
+    base, key = os.environ.get("OPENAI_BASE_URL"), os.environ.get("OPENAI_API_KEY")
+    model = os.environ.get("SCANORIA_AI_MODEL") or "scanoria"
+    for k in list(os.environ):
+        if k.startswith(("MCP_SCANNER_", "VIRUSTOTAL_", "AZURE_", "ANTHROPIC_", "AWS_", "GEMINI_", "OLLAMA_")):
+            del os.environ[k]
+    if not base or not key:
+        return None
+    os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
+    from mcpscanner.config.config import Config
+    from mcpscanner.core.analyzers.llm_analyzer import LLMAnalyzer
+    return LLMAnalyzer(Config(llm_provider_api_key=key, llm_model="openai/" + model, llm_base_url=base))
 
 
 SRC_DIR = "/src"
@@ -272,23 +323,37 @@ def write_json(path, doc):
 
 
 def main(argv):
+    llm = argv[1:2] == ["--llm"]
+    if llm:
+        argv = argv[:1] + argv[2:]
     out = out_path(argv[2], ".sarif") if len(argv) == 3 else None
     if out is None or argv[1] != SRC_DIR:
         print(__doc__, file=sys.stderr)
         return 2
-    for k in list(os.environ):
-        if k.startswith(("MCP_SCANNER_", "VIRUSTOTAL_", "OPENAI_", "AZURE_OPENAI_")):
-            del os.environ[k]
-    from mcpscanner.core.analyzers.yara_analyzer import YaraAnalyzer
+    if llm:
+        analyzer = llm_analyzer()
+        if analyzer is None:
+            print("mcp-scanner-llm: relais IA absent (OPENAI_BASE_URL)", file=sys.stderr)
+            return 3
+    else:
+        for k in list(os.environ):
+            if k.startswith(("MCP_SCANNER_", "VIRUSTOTAL_", "OPENAI_", "AZURE_OPENAI_")):
+                del os.environ[k]
+        from mcpscanner.core.analyzers.yara_analyzer import YaraAnalyzer
+        analyzer = YaraAnalyzer()
     try:
         from importlib.metadata import version
         tv = version("cisco-ai-mcp-scanner")
     except Exception:
         tv = None
     items = discover(SRC_DIR)
-    doc = sarif(scan(items, YaraAnalyzer()), tv)
+    try:
+        doc = sarif(scan(items, analyzer, llm), tv, llm)
+    except Exception as e:  # modèle ou relais injoignable : panne d'infrastructure (G12)
+        print("%s: analysis interrupted (%s)" % ("mcp-scanner-llm" if llm else "mcp-scanner", type(e).__name__), file=sys.stderr)
+        return 3
     write_json(out, doc)
-    print("mcp-scanner: %d element(s), %d result(s)" % (len(items), len(doc["runs"][0]["results"])))
+    print("%s: %d element(s), %d result(s)" % ("mcp-scanner-llm" if llm else "mcp-scanner", len(items), len(doc["runs"][0]["results"])))
     return 0
 
 

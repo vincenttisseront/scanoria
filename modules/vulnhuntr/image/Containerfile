@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Image du module vulnhuntr (K3, 0.7) : seulement les dépendances de Vulnhuntr
+# (jedi 0.18.0 et parso 0.8.0 imposés par l'amont, qui ne lisent pas une
+# syntaxe plus récente que Python 3.10 : d'où l'image python 3.10-slim),
+# installées par pip --require-hashes depuis le verrou complet
+# requirements.lock (uv pip compile --generate-hashes, Python 3.10, linux
+# x86_64). Les sources de Vulnhuntr (Protect AI, AGPL-3.0, commit ead88c5)
+# sont livrées non modifiées avec l'outil de l'appliance
+# (scan-tools/vulnhuntr/vendor, monté sur /scanoria) : l'amont ne publie ni
+# image ni paquet PyPI (docs/MODULES.md § 8).
+ARG SOURCE_DATE_EPOCH=0
+FROM docker.io/library/python@sha256:6ff506466f8b1e981719b468cc0023b8ef000b983cdec0eafe119d01f379e31d
+ENV PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+COPY requirements.lock /tmp/requirements.lock
+RUN pip install --require-hashes --no-deps --only-binary=:all: -r /tmp/requirements.lock \
+ && rm -f /tmp/requirements.lock
+LABEL org.opencontainers.image.source="https://github.com/protectai/vulnhuntr" \
+      org.opencontainers.image.revision="ead88c5adba4279dae5c56d65124c530a9a1c5ae" \
+      org.opencontainers.image.version="0.1.0+ead88c5" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.description="Dépendances de Vulnhuntr pour Scanoria (modèle joint par le relais de l'appliance seulement)" \
+      io.scanoria.module="vulnhuntr"
+USER 65534:65534
