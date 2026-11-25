@@ -10,9 +10,12 @@ Sous-commandes :
   expect MANIFESTE SORTIE    vérifie testbed.expect sur une sortie SARIF, ou
                              CycloneDX (nom des composants, contrat 14 de la 0.5)
   sarif SCHEMA SARIF         valide une sortie contre le schéma SARIF 2.1.0 officiel
-  podman MANIFESTE SRC OUT FEEDS
+  podman MANIFESTE SRC OUT FEEDS [IMAGE]
                              écrit (séparés par NUL) les arguments de « podman
-                             run » confinés (CLAUDE.md § 6.4) du scanner
+                             run » confinés (CLAUDE.md § 6.4) du scanner ;
+                             IMAGE : image construite localement (0.7)
+  containerfile FICHIER ID   contrôle un Containerfile d'image d'outil
+                             (FROM épinglés, USER 65534, étiquettes OCI)
 
 Le schéma est validé deux fois : par le validateur de l'appliance
 (scanoria/schema.py, sous-ensemble utilisé aussi par catalog/build.py et le
@@ -36,6 +39,11 @@ OPTION_NAME = re.compile(r"^[a-z][a-z0-9_]{0,40}\Z")
 # Même règle que catalogverify.ENV_KEY_RE : ni LD_*, ni PATH, ni HOME.
 ENV_NAME = re.compile(r"^(?!LD_|PATH\Z|HOME\Z)[A-Z][A-Z0-9_]{0,63}\Z")
 TESTBED_NAME = re.compile(r"^[A-Za-z0-9._+@-]+\Z")
+# Images d'outils construites par la CI de Scanoria (0.7, modules/<id>/image/).
+FROM_PINNED = re.compile(r"^FROM\s+(?:--platform=\S+\s+)?[a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]{1,5})?(/[a-z0-9]+([._-]{1,2}[a-z0-9]+)*)+@sha256:[0-9a-f]{64}(\s+AS\s+[A-Za-z0-9_-]+)?\s*$", re.IGNORECASE)
+TOOL_IMAGE_REPO = "ghcr.io/vincenttisseront/scanoria-"
+OCI_LABELS = ("org.opencontainers.image.source", "org.opencontainers.image.revision",
+              "org.opencontainers.image.version", "org.opencontainers.image.licenses")
 
 
 def load_schema():
@@ -149,6 +157,66 @@ def testbed_errors(module_dir, manifest):
     return errs
 
 
+def containerfile_errors(path, mid):
+    """Règles d'un Containerfile d'image d'outil (docs/MODULES.md § 7)."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    # Lignes logiques : continuations « \\ » réunies, commentaires écartés.
+    logical, cur = [], ""
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not cur and (not line or line.startswith("#")):
+            continue
+        if line.endswith("\\"):
+            cur += line[:-1] + " "
+            continue
+        logical.append((cur + line).strip())
+        cur = ""
+    errs = []
+    froms = [ln for ln in logical if ln.split(None, 1)[0].upper() == "FROM"]
+    if not froms:
+        errs.append("image/Containerfile : aucun FROM")
+    for ln in froms:
+        if not FROM_PINNED.match(ln):
+            errs.append(f"image/Containerfile : FROM non épinglé par empreinte : {ln[:120]}")
+    users = [ln.split(None, 1)[1].strip() if len(ln.split(None, 1)) > 1 else "" for ln in logical if ln.split(None, 1)[0].upper() == "USER"]
+    if not users or users[-1] != "65534:65534":
+        errs.append("image/Containerfile : la dernière instruction USER doit être 65534:65534")
+    labels = " ".join(ln for ln in logical if ln.split(None, 1)[0].upper() == "LABEL")
+    for key in OCI_LABELS:
+        if key + "=" not in labels:
+            errs.append(f"image/Containerfile : étiquette {key} absente")
+    if f"io.scanoria.module={mid}" not in labels and f'io.scanoria.module="{mid}"' not in labels:
+        errs.append(f"image/Containerfile : étiquette io.scanoria.module={mid} absente")
+    for ln in logical:
+        word = ln.split(None, 1)[0].upper()
+        if word == "ADD" and re.search(r"https?://", ln):
+            errs.append("image/Containerfile : ADD d'une URL interdit (téléchargement vérifié dans un RUN)")
+        if word == "RUN" and re.search(r"\bpip3?\s+install\b", ln) and "--require-hashes" not in ln:
+            errs.append("image/Containerfile : pip install sans --require-hashes")
+        if word == "RUN" and re.search(r"\b(curl|wget)\b", ln) and "sha256sum" not in ln:
+            errs.append("image/Containerfile : téléchargement sans vérification sha256sum dans le même RUN")
+    return errs
+
+
+def image_errors(module_dir, manifest):
+    """Image en attente (image_pending) ou construite par la CI : Containerfile présent et conforme."""
+    mid = manifest.get("id")
+    cf = os.path.join(module_dir, "image", "Containerfile")
+    image = manifest.get("image") or ""
+    built_here = image.startswith(TOOL_IMAGE_REPO)
+    if os.path.islink(os.path.join(module_dir, "image")) or os.path.islink(cf):
+        return ["image/ : lien symbolique interdit"]
+    if not os.path.isfile(cf):
+        if manifest.get("image_pending") or built_here:
+            return ["image/Containerfile absent (image construite par la CI de Scanoria)"]
+        return []
+    errs = []
+    if image and not image.startswith(f"{TOOL_IMAGE_REPO}{mid}@sha256:"):
+        errs.append(f"image : une image construite ici est publiée sous {TOOL_IMAGE_REPO}{mid}@sha256:…")
+    return errs + containerfile_errors(cf, mid)
+
+
 def repo_errors(root):
     validators = load_schema()
     modules_dir = os.path.join(root, "modules")
@@ -174,6 +242,7 @@ def repo_errors(root):
             errs.append(f"{mid}: id du manifeste ({m.get('id')!r}) ≠ nom du dossier")
         if isinstance(m, dict):
             errs += [f"{mid}: {e}" for e in testbed_errors(mdir, m)]
+            errs += [f"{mid}: {e}" for e in image_errors(mdir, m)]
             manifests[mid] = m
     for mid, m in manifests.items():
         req = m.get("requires", {})
@@ -183,6 +252,8 @@ def repo_errors(root):
         for dep in req.get("modules", []):
             if dep not in manifests or manifests[dep].get("type") == "feed":
                 errs.append(f"{mid}: requires.modules cite {dep!r} (absent ou feed)")
+            elif manifests[dep].get("image_pending") and not m.get("image_pending"):
+                errs.append(f"{mid}: requires.modules cite {dep!r}, en attente d'image (absent de l'index)")
         if mid in m.get("conflicts", []):
             errs.append(f"{mid}: conflit avec lui-même")
         if m.get("type") == "feed":
@@ -229,8 +300,10 @@ def expect_report(manifest, sarif):
     return report
 
 
-def podman_args(manifest, src, out, feeds, tool=True):
-    """Arguments de « podman run » d'un scanner confiné (CLAUDE.md § 6.4)."""
+def podman_args(manifest, src, out, feeds, tool=True, image=None):
+    """Arguments de « podman run » d'un scanner confiné (CLAUDE.md § 6.4).
+
+    image : image construite localement (module en attente d'image, 0.7)."""
     scan = manifest["scan"]
     res = manifest["resources"]
     args = [
@@ -254,7 +327,7 @@ def podman_args(manifest, src, out, feeds, tool=True):
     for k, v in sorted((scan.get("env") or {}).items()):
         args.append(f"--env={k}={v}")
     cmd = render_defaults(manifest, scan["command"])
-    args += [f"--entrypoint={cmd[0]}", manifest["image"]] + cmd[1:]
+    args += [f"--entrypoint={cmd[0]}", image or manifest["image"]] + cmd[1:]
     return args
 
 
@@ -310,8 +383,15 @@ def main(argv):
         return 1 if errs else 0
     if cmd == "podman":
         m = load_yaml(rest[0])
-        sys.stdout.write("\0".join(podman_args(m, *rest[1:4])) + "\0")
+        # 5e argument facultatif : image construite localement (module en attente d'image).
+        image = rest[4] if len(rest) > 4 and rest[4] else None
+        sys.stdout.write("\0".join(podman_args(m, *rest[1:4], image=image)) + "\0")
         return 0
+    if cmd == "containerfile":
+        errs = containerfile_errors(rest[0], rest[1])
+        for e in errs:
+            print(e)
+        return 1 if errs else 0
     print(f"sous-commande inconnue : {cmd}", file=sys.stderr)
     return 2
 

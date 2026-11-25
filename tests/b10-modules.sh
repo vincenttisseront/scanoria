@@ -12,7 +12,10 @@
 #     sans défaut, id avec « .. »…) par les deux validateurs ;
 #   - sorties natives enregistrées (modules/<id>/tests/recorded.sarif) :
 #     structure SARIF 2.1.0 et attentes testbed.expect satisfaites ;
-#   - .gitleaks.toml : seule exception, modules/<id>/testbed/.
+#   - .gitleaks.toml : seule exception, modules/<id>/testbed/ ;
+#   - images d'outils construites par la CI (0.7) : Containerfile (FROM
+#     épinglés, USER 65534, étiquettes OCI, pip --require-hashes, sha256sum),
+#     image_pending exclusif avec image.
 # Le passage réel des scanners en conteneur confiné est dans b10-live.sh
 # (job CI modules-testbed-live).
 # Dépendances : bash, python3, python3-yaml, python3-jsonschema, jq.
@@ -235,6 +238,75 @@ for p, expected in [("modules/gitleaks/testbed/.env", True), ("modules/gitleaks/
 check "SonarQube Cloud : bancs d'essai exclus" grep -q '^sonar.exclusions=.*modules/\*/testbed/\*\*' "$ROOT/sonar-project.properties"
 check "ci.yml : osv-scanner exclut les bancs d'essai seulement" \
 	grep -qF -- "--x-exclude 'r:/modules/[^/]+/testbed\$'" "$ROOT/.github/workflows/ci.yml"
+
+# --- 6. Images d'outils construites par la CI de Scanoria (0.7, image/Containerfile) -----
+D64=$(printf '0%.0s' {1..64})
+cf_good() {
+	cat <<CF
+# SPDX-License-Identifier: AGPL-3.0-or-later
+ARG SOURCE_DATE_EPOCH=0
+FROM docker.io/library/python@sha256:$D64 AS build
+COPY requirements.lock /tmp/requirements.lock
+RUN pip install --no-cache-dir --require-hashes --no-deps \\
+      -r /tmp/requirements.lock
+FROM docker.io/library/python@sha256:$D64
+RUN curl -fsSLo /tmp/t.tgz https://exemple.test/t.tgz \\
+ && echo "$D64  /tmp/t.tgz" | sha256sum -c -
+LABEL org.opencontainers.image.source="https://exemple.test/outil" \\
+      org.opencontainers.image.revision="v1.0.0" \\
+      org.opencontainers.image.version="1.0.0" \\
+      org.opencontainers.image.licenses="Apache-2.0" \\
+      io.scanoria.module="essai"
+USER 65534:65534
+CF
+}
+cf_case() { # libellé attendu(ok|ko) motif sed
+	cf_good | sed -e "$4" > "$TMP/Containerfile"
+	if python3 "$MC" containerfile "$TMP/Containerfile" essai > "$TMP/last.log" 2>&1; then
+		[[ $2 == ok ]] && ok "Containerfile : $1" || ko "Containerfile : $1 (accepté à tort)"
+	elif [[ $2 == ko ]] && grep -qF -- "$3" "$TMP/last.log"; then
+		ok "Containerfile : $1"
+	else
+		ko "Containerfile : $1"
+		sed 's/^/     /' "$TMP/last.log" | head -n 10
+	fi
+}
+cf_case "gabarit conforme accepté" ok "" 's/^$//'
+cf_case "FROM par étiquette refusé" ko "non épinglé" "s|python@sha256:$D64 AS build|python:3.13-slim AS build|"
+cf_case "FROM sans registre explicite refusé" ko "non épinglé" "s|FROM docker.io/library/python@sha256:$D64\$|FROM python@sha256:$D64|"
+cf_case "utilisateur root refusé" ko "USER doit être 65534:65534" 's/^USER 65534:65534$/USER root/'
+cf_case "USER absent refusé" ko "USER doit être 65534:65534" '/^USER /d'
+cf_case "pip install sans --require-hashes refusé" ko "require-hashes" 's/--require-hashes //'
+cf_case "téléchargement sans sha256sum refusé" ko "sha256sum" 's/sha256sum -c -/true/'
+cf_case "ADD d'une URL refusé" ko "ADD d'une URL" 's|^COPY requirements.lock|ADD https://exemple.test/r.lock|'
+cf_case "étiquette de licence absente refusée" ko "org.opencontainers.image.licenses" '/image.licenses=/d'
+cf_case "étiquette du module absente refusée" ko "io.scanoria.module=essai" 's/io.scanoria.module="essai"/io.scanoria.module="autre"/'
+mkdir -p "$TMP/pend/m"
+check "image en attente sans Containerfile refusée" python3 -c '
+import sys; sys.path.insert(0, sys.argv[1]); import modcheck
+errs = modcheck.image_errors(sys.argv[2], {"id": "m", "image_pending": True})
+sys.exit(0 if any("Containerfile absent" in e for e in errs) else 1)' "$ROOT/tests/lib" "$TMP/pend/m"
+mkdir -p "$TMP/pend/m/image" && cf_good | sed 's/io.scanoria.module="essai"/io.scanoria.module="m"/' > "$TMP/pend/m/image/Containerfile"
+check "image construite ici publiée sous ghcr.io/vincenttisseront/scanoria-<id> seulement" python3 -c '
+import sys; sys.path.insert(0, sys.argv[1]); import modcheck
+d = "0" * 64
+assert not modcheck.image_errors(sys.argv[2], {"id": "m", "image_pending": True})
+assert not modcheck.image_errors(sys.argv[2], {"id": "m", "image": "ghcr.io/vincenttisseront/scanoria-m@sha256:" + d})
+errs = modcheck.image_errors(sys.argv[2], {"id": "m", "image": "ghcr.io/vincenttisseront/scanoria-autre@sha256:" + d})
+sys.exit(0 if any("publiée sous" in e for e in errs) else 1)' "$ROOT/tests/lib" "$TMP/pend/m"
+check "manifeste en attente d’image accepté par le schéma (sans image)" python3 -c '
+import sys, yaml; sys.path.insert(0, sys.argv[1]); import modcheck
+m = yaml.safe_load(open(sys.argv[2])); del m["image"]; m["image_pending"] = True
+sys.exit(1 if modcheck.manifest_errors(m, modcheck.load_schema()) else 0)' "$ROOT/tests/lib" "$ROOT/modules/gitleaks/module.yaml"
+check "scanner sans image ni image_pending refusé" python3 -c '
+import sys, yaml; sys.path.insert(0, sys.argv[1]); import modcheck
+m = yaml.safe_load(open(sys.argv[2])); del m["image"]
+sys.exit(0 if modcheck.manifest_errors(m, modcheck.load_schema()) else 1)' "$ROOT/tests/lib" "$ROOT/modules/gitleaks/module.yaml"
+for cf in "$ROOT"/modules/*/image/Containerfile; do
+	[[ -f "$cf" ]] || continue
+	id=$(basename "$(dirname "$(dirname "$cf")")")
+	check "Containerfile du module $id conforme" python3 "$MC" containerfile "$cf" "$id"
+done
 
 hors=$(cd "$ROOT" && git ls-files -z -- '*package-lock.json' | python3 -c '
 import json, sys
