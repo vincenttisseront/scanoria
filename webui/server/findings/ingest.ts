@@ -275,7 +275,7 @@ export async function finalizeScanFindings(db: Db, scanId: string, opts: { compl
     // sinon un téléversement rendrait « nouveaux » tous les résultats suivants.
     const prev = await q.query<{ id: string }>(
       `SELECT s.id FROM scans s, (SELECT queued_at, trigger FROM scans WHERE id = $3) cur
-        WHERE s.project_id = $1 AND s.ref = $2 AND s.id <> $3 AND s.status = 'done'
+        WHERE s.project_id = $1 AND s.ref = $2 AND s.id <> $3 AND s.status = 'done' AND s.trigger <> 'trial'
           AND s.queued_at <= cur.queued_at
           AND (s.trigger = 'external') = (cur.trigger = 'external')
           -- Même outil externe : comparé par module (ext-<nom normalisé>), jamais par le nom brut.

@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# G14 : canaris nocturnes. Le banc d'essai F12 de chaque scanner installé et
+# actif est rejoué (le helper attend un runner libre avant chaque module) ;
+# un module qui ne détecte plus un cas connu est signalé dans la console,
+# jamais désactivé. Basse priorité CPU et entrées-sorties.
+[Unit]
+Description=Scanoria nightly canaries (module testbeds)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/scanoria-helper exec --origin timer --type run-canaries --params {}
+Nice=15
+IOSchedulingClass=idle
+UMask=0022
+PrivateTmp=yes
+ProtectHome=read-only

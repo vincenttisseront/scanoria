@@ -31,6 +31,10 @@
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
       "description": "Projet Scanoria (facultatif, 0.4) : clé de projet des scanners reliés à un service (contrat 12)."
     },
+    "trial": {
+      "type": "boolean",
+      "description": "0.6 (contrat 25) : analyse d'essai F13 ; ni cache de résultats V4, ni effet de bord."
+    },
     "created_at": {
       "type": "string",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
@@ -214,6 +218,11 @@
           },
           "options": {
             "type": "object"
+          },
+          "image_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "description": "0.6 (contrats 24 et 25) : empreinte voulue, version figée par le projet ou candidate d'un essai ; le runner ne lance qu'une image installée ou retenue par le helper."
           },
           "after": {
             "type": "array",

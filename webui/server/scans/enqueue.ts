@@ -84,9 +84,11 @@ export async function enqueueScan(db: Db, input: EnqueueScanInput): Promise<Enqu
 
     if (input.trigger === 'replay') {
       const o = await client.query<{ commit_sha: string | null, ref: string, profile_id: string, gate_id: string, plan: unknown, upload_id: string | null }>(
-        'SELECT commit_sha, ref, profile_id, gate_id, plan, upload_id FROM scans WHERE id = $1 AND project_id = $2',
+        `SELECT commit_sha, ref, profile_id, gate_id, plan, upload_id FROM scans
+          WHERE id = $1 AND project_id = $2 AND trigger <> 'trial'`,
         [input.replayOf, project.id])
       const orig = o.rows[0]
+      // Une analyse d'essai (F13) ne se rejoue jamais : sa candidate n'est pas une version de production.
       if (!orig || !orig.plan) throw new EnqueueScanError('E_SCAN_REPLAY')
       ref = orig.ref
       commit = orig.commit_sha
@@ -114,7 +116,7 @@ export async function enqueueScan(db: Db, input: EnqueueScanInput): Promise<Enqu
     if (input.trigger !== 'replay') {
       const dup = await client.query<{ id: string, number: number }>(
         `SELECT id, number FROM scans
-          WHERE project_id = $1 AND status = 'queued' AND profile_id = $2 AND gate_id = $6 AND trigger <> 'replay'
+          WHERE project_id = $1 AND status = 'queued' AND profile_id = $2 AND gate_id = $6 AND trigger NOT IN ('replay', 'trial')
             AND ($3::text IS NULL AND commit_sha IS NULL AND ref = $4 OR commit_sha = $3)
             AND upload_id IS NOT DISTINCT FROM $5
           ORDER BY queued_at LIMIT 1`,

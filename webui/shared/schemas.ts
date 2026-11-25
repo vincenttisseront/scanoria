@@ -54,6 +54,9 @@ export const REQUEST_TYPES = [
   'import-bundle',
   'set-mirror',
   'trust-key',
+  'self-sbom',
+  'run-canaries',
+  'start-trial',
   'prefetch-images',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
@@ -78,6 +81,7 @@ export const RESULT_CODES = [
   'E_MIRROR_URL', 'E_MIRROR_UNRESOLVED', 'E_MIRROR_FORBIDDEN_ADDRESS', 'E_MIRROR_CA',
   'E_MIRROR_UNTRUSTED', 'E_MIRROR_UNREACHABLE',
   'E_KEY_INVALID',
+  'E_CANARY_FAILED', 'E_TRIAL_INVALID', 'E_TRIAL_IMAGE', 'E_SELFSBOM_IMAGE', 'E_SELFSBOM_OUTPUT',
   'E_PREFETCH_FAILED', 'E_PREFETCH_UNKNOWN_IMAGE',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
@@ -220,6 +224,17 @@ export const requestParamSchemas = {
     }),
     z.strictObject({ action: z.literal('remove'), fingerprint: z.string().regex(KEY_FINGERPRINT_RE) }),
   ]),
+  // 0.6 (B) : F19, G14, F13.
+  'self-sbom': z.strictObject({}),
+  'run-canaries': z.strictObject({
+    ids: z.array(z.string().regex(MODULE_ID_RE)).min(1).max(64).refine(unique, { message: 'duplicate' }).optional(),
+  }),
+  'start-trial': z.strictObject({
+    module: z.string().regex(MODULE_ID_RE),
+    version: z.string().regex(MODULE_VERSION_RE),
+    trial_id: uuidSchema.optional(),
+    action: z.enum(['start', 'abandon']).optional(),
+  }),
 } satisfies Record<RequestType, z.ZodType>
 
 export type RequestParams<T extends RequestType> = z.infer<(typeof requestParamSchemas)[T]>

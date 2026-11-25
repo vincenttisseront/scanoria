@@ -69,6 +69,7 @@ REQUEST_TYPES = (
     "reset-service-admin",
     "package-dates",
     "export-bundle", "import-bundle", "set-mirror", "trust-key",
+    "self-sbom", "run-canaries", "start-trial",
     "prefetch-images",
 )
 REJECT_CODES = frozenset((
@@ -92,6 +93,7 @@ ERROR_CODES = frozenset((
     "E_MIRROR_URL", "E_MIRROR_UNRESOLVED", "E_MIRROR_FORBIDDEN_ADDRESS", "E_MIRROR_CA",
     "E_MIRROR_UNTRUSTED", "E_MIRROR_UNREACHABLE",
     "E_KEY_INVALID",
+    "E_CANARY_FAILED", "E_TRIAL_INVALID", "E_TRIAL_IMAGE", "E_SELFSBOM_IMAGE", "E_SELFSBOM_OUTPUT",
     "E_PREFETCH_FAILED", "E_PREFETCH_UNKNOWN_IMAGE",
 ))
 ALL_CODES = frozenset(("OK",)) | REJECT_CODES | ERROR_CODES

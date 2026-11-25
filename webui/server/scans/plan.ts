@@ -14,6 +14,7 @@ import { CATEGORIES, GateRules, type Category } from '#shared/analysis'
 import { MODULE_ID_RE } from '#shared/schemas'
 import { resolveOptions } from '#shared/module-options'
 import type { InstalledModule } from '../utils/catalog'
+import { applyPins, retainedAvailable, type ModulePin, type RetainedImage } from '../vigilance/pins'
 
 export const PLAN_VERSION = 1
 /** Catégorie des modules système (chantier B) : hors des profils. */
@@ -67,6 +68,8 @@ export interface PlannedModule {
   outputs: string[]
   /** Pourquoi le module est dans le plan (affiché dans la console) ; « companion » : module d'appoint. */
   reason: 'category' | 'included' | 'companion'
+  /** 0.6 (B, contrats 24 et 25) : version figée par le projet (G6) ou candidate d'un essai (F13). */
+  alternate?: 'pin' | 'trial'
   /** 0.6 (V3) : modules du plan à terminer avant celui-ci (order.ts). Absent d'un plan antérieur. */
   after?: string[]
   /** 0.6 (V5) : durée attendue (ms) qui a fixé la place du module dans le plan. */
@@ -163,6 +166,8 @@ export interface ResolveInput {
    * personne depuis un diagnostic I15) : ne font qu'allonger le délai du manifeste.
    */
   timeoutOverrides?: Record<string, number>
+  /** 0.6 (B, contrat 24) : versions figées du projet, par module. */
+  pins?: Map<string, ModulePin>
 }
 
 /**
@@ -253,7 +258,7 @@ export function resolveProfile(input: ResolveInput): { modules: PlannedModule[],
   for (const c of profile.categories) {
     if (!covered.has(c)) gaps.push({ kind: 'profile-category', category: c as Category, module: null, reason: 'no-module' })
   }
-  return { modules, gaps }
+  return { modules: input.pins ? applyPins(modules, input.pins) : modules, gaps }
 }
 
 export function planTimeout(modules: PlannedModule[]): number {
@@ -269,13 +274,15 @@ export function planHistory(modules: PlannedModule[]): 'shallow' | 'full' {
  * Rejeu (G11) : les modules du plan d'origine qui ne sont plus installés,
  * sains et actifs à la même version sont constatés manquants.
  */
-export function replayAvailability(plan: ScanPlan, installed: InstalledModule[]): { available: PlannedModule[], missing: PlannedModule[] } {
+export function replayAvailability(plan: ScanPlan, installed: InstalledModule[], retained?: RetainedImage[] | null): { available: PlannedModule[], missing: PlannedModule[] } {
   const byId = new Map(installed.map(m => [m.id, m]))
   const available: PlannedModule[] = []
   const missing: PlannedModule[] = []
   for (const m of plan.modules) {
     const cur = byId.get(m.id)
-    if (cur && cur.status === 'healthy' && cur.enabled && cur.version === m.version) available.push(m)
+    const usable = !!cur && cur.status === 'healthy' && cur.enabled
+    // 0.6 (B) : version figée ou candidate, présente si le helper la retient (contrats 24, 25).
+    if (usable && (cur.version === m.version || (m.alternate && retainedAvailable(m, retained)))) available.push(m)
     else missing.push(m)
   }
   return { available, missing }
@@ -293,6 +300,7 @@ const plannedModuleSchema = z.object({
   history: z.enum(['shallow', 'full']),
   outputs: z.array(z.string()),
   reason: z.enum(['category', 'included', 'companion']),
+  alternate: z.enum(['pin', 'trial']).optional(),
   after: z.array(z.string().regex(MODULE_ID_RE)).max(64).optional(),
   expected_ms: z.number().int().min(0).optional(),
 })

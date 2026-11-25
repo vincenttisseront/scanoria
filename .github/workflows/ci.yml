@@ -508,6 +508,28 @@ jobs:
       - name: tests/b25-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b25-live.sh
 
+  vigilance-live:
+    # Vigilance de la 0.6 (chantier B) avec le vrai podman : canari réussi puis
+    # en échec (G14), essai d'une version candidate de gitleaks sur 3 analyses
+    # par le vrai runner (F13), version figée gardée (G6), adoption (b26-live).
+    name: vigilance-live (canaris, essai et version figée réels, b26-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dépendances (podman, jq, zstd)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark nftables python3-yaml python3-jsonschema curl openssl zstd
+          sudo podman --version
+      # Machine jetable : helper et runner en root avec le vrai podman (§ 6.4).
+      - name: tests/b26-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b26-live.sh
+
   modelscan-live:
     # Module modelscan (chantier E de la 0.6, K8) : banc d'essai (F12) et
     # analyse d'un dépôt piégé par le vrai runner avec le vrai podman, dans
@@ -533,7 +555,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, bundle-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

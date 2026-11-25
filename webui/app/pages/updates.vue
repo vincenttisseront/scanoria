@@ -197,6 +197,7 @@ const anyRunning = computed(() =>
   checkReq.running.value || installReq.running.value || rollbackReq.running.value
   || policyReq.running.value || uploadReq.running.value || !!uploading.value,
 )
+const vigilanceBanner = ref<{ load: () => Promise<void> } | null>(null)
 const codeLabel = (code: string | null | undefined) => (code && te(`codes.${code}`) ? t(`codes.${code}`) : code ?? '')
 </script>
 
@@ -206,6 +207,7 @@ const codeLabel = (code: string | null | undefined) => (code && te(`codes.${code
       :data="data"
       :failed="failed"
     />
+    <VigilanceBanner ref="vigilanceBanner" />
     <AiApplianceDiagnosis
       v-if="diag.has('alert:update-rollback')"
       subject-id="alert:update-rollback"
@@ -499,6 +501,8 @@ const codeLabel = (code: string | null | undefined) => (code && te(`codes.${code
         />
       </div>
     </UCard>
+
+    <VigilanceAppliancePanel @changed="vigilanceBanner?.load()" />
 
     <ConfirmModal
       v-model:open="installModal"
