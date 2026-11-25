@@ -91,6 +91,11 @@ export async function subjectProject(db: Queryable, kind: string, subjectId: str
   const def = TASKS[kind]
   if (!def || !(def.subjectPattern ?? UUID_RE).test(subjectId)) return null
   if (def.projectScoped === false) return GLOBAL_SUBJECT
+  // I19 (0.8) : le sujet d'une suggestion de gate est le projet lui-même.
+  if (def.subjectType === 'gate') {
+    const p = await db.query<{ id: string }>('SELECT id FROM projects WHERE id = $1', [subjectId])
+    return p.rows[0]?.id ?? null
+  }
   // 0.8 (A, I6) : sujet « release » = rapport de release, identifié par son analyse.
   const SOURCES: Record<string, string> = { finding: 'findings WHERE id', scan: 'scans WHERE id', release: 'release_reports WHERE scan_id' }
   const source = SOURCES[def.subjectType] ?? null

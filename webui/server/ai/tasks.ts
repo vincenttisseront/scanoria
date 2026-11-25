@@ -7,7 +7,8 @@
 // - explain-verdict (I9) : pourquoi le quality gate bloque, à partir de
 //   verdict_details SEULEMENT, et ce qui le débloquerait.
 // Celles de la 0.4 (I3, I5, I14, I15, I17) et de la 0.5 (I7, I11, I18) sont
-// dans server/ai/tasks/, comme celles de la 0.7 (I8 nl-search, I12 generate-rule).
+// dans server/ai/tasks/, comme celles de la 0.7 (I8 nl-search, I12 generate-rule)
+// et de la 0.8 (I19 suggest-gate).
 // Briques communes et garde-fous : server/ai/task-kit.ts.
 
 import { z } from 'zod'
@@ -28,6 +29,7 @@ import { nlSearch } from './tasks/nl-search'
 import { generateRule } from './tasks/rulegen'
 import { draftException } from './tasks/exception'
 import { releaseNotes } from './tasks/release-notes'
+import { suggestGate } from './tasks/gate'
 
 export type { FindingInput, TaskContext, TaskDefinition } from './task-kit'
 
@@ -154,7 +156,7 @@ export const explainVerdict: TaskDefinition<VerdictInput, ExplainVerdictOutput> 
 
 export const TASKS: Record<string, TaskDefinition> = Object.fromEntries(
   [explainFinding, explainVerdict, triageFinding, summarizeScan, classifySecret, diagnoseScan, translateRule,
-    embedFinding, assessReachability, explainLicense, diagnoseAppliance, draftException, nlSearch, generateRule,
+    embedFinding, assessReachability, explainLicense, diagnoseAppliance, draftException, nlSearch, generateRule, suggestGate,
     releaseNotes]
     .map(d => [d.kind, d as unknown as TaskDefinition]),
 )

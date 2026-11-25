@@ -12,6 +12,7 @@ import { PROFILE_OPS, profileSchemas } from '../profiles/openapi'
 import { RULESET_OPS, rulesetSchemas } from '../rulesets/openapi'
 import { TRIAGE_OPS, triageSchemas } from '../findings/openapi-07'
 import { RELEASE_OPS, releaseSchemas } from '../release/openapi'
+import { GATE_VEX_OPS, gateVexSchemas } from '../gates/openapi-08'
 
 type Role = 'public' | 'viewer' | 'operator' | 'admin'
 
@@ -149,6 +150,7 @@ const OPS: Record<string, Record<string, Op>> = {
   ...RULESET_OPS,
   ...TRIAGE_OPS,
   ...RELEASE_OPS,
+  ...GATE_VEX_OPS,
   '/api/scans': {
     get: { summary: 'Scan queue (status=active, in worker order) or history (filters: project, status, verdict, trigger; paginated)', role: 'viewer' },
     post: { summary: 'Queue a manual scan {project_id, ref?, profile?}; 200 when merged into an identical queued scan', role: 'operator', body: 'ScanCreate', status: 202 },
@@ -382,6 +384,7 @@ export default defineEventHandler(async () => {
                 inconclusive_blocks: { const: true },
               },
             },
+            ai_task_id: { type: 'string', format: 'uuid', description: 'I19: the rules come from this AI suggestion; the audit records « proposed by AI »' },
           },
         },
         GateAssign: { type: 'object', additionalProperties: false, required: ['project_id'], properties: { project_id: { type: 'string', format: 'uuid' } } },
@@ -404,6 +407,7 @@ export default defineEventHandler(async () => {
         ...rulesetSchemas(),
         ...triageSchemas(),
         ...releaseSchemas(),
+        ...gateVexSchemas(),
         FindingStatus: {
           type: 'object', additionalProperties: false, required: ['status'],
           properties: {
