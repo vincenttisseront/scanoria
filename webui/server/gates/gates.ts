@@ -27,7 +27,11 @@ export const gateCreateSchema = z.strictObject({
   slug: z.string().regex(SLUG_RE),
   copy_from: z.string().uuid().optional(),
 })
-export const gateUpdateSchema = z.strictObject({ rules: GateRules })
+export const gateUpdateSchema = z.strictObject({
+  rules: GateRules,
+  /** I19 (0.8) : proposition de l'IA d'où viennent les règles ; gardée dans l'audit (« proposé par IA »). */
+  ai_task_id: z.string().uuid().optional(),
+})
 export const gateAssignSchema = z.strictObject({ project_id: z.string().uuid() })
 export const tokenCreateSchema = z.strictObject({
   name: z.string().trim().min(1).max(100).refine(v => !hasControl(v), { message: 'control characters' }),

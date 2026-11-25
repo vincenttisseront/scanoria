@@ -12,7 +12,7 @@ projet « aucun envoi à l'IA ».
 
 <script setup lang="ts">
 defineProps<{ findingId: string }>()
-const emit = defineEmits<{ use: [draft: { reason: string, days: number }] }>()
+const emit = defineEmits<{ use: [draft: { reason: string, days: number, vex_status: string | null, vex_justification: string | null }] }>()
 const { t } = useI18n()
 
 function list(v: unknown): string[] {
@@ -20,7 +20,8 @@ function list(v: unknown): string[] {
 }
 function use(output: Record<string, unknown>) {
   const days = typeof output.expires_in_days === 'number' ? output.expires_in_days : 90
-  emit('use', { reason: String(output.reason ?? ''), days })
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
+  emit('use', { reason: String(output.reason ?? ''), days, vex_status: str(output.vex_status), vex_justification: str(output.vex_justification) })
 }
 </script>
 
@@ -43,6 +44,16 @@ function use(output: Record<string, unknown>) {
         </p>
         <p class="text-xs text-muted">
           {{ t('triage.draft.duration', { days: Number(output.expires_in_days) }) }} · {{ output.duration_rationale }}
+        </p>
+        <p
+          v-if="output.vex_status"
+          class="text-xs"
+          data-testid="ai-exception-draft-vex"
+        >
+          {{ t('vex.proposed', { status: t(`vex.status.${String(output.vex_status)}`) }) }}
+          <template v-if="output.vex_justification">
+            · {{ t(`vex.justification.${String(output.vex_justification)}`) }}
+          </template>
         </p>
         <ul
           v-if="list(output.to_check).length"

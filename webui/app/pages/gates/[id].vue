@@ -4,10 +4,17 @@ Copyright (C) 2026 Vincent Tisseront
 
 Détail d'un quality gate : formulaire généré depuis GateRules (champs H4 et G13
 verrouillés, avec la raison), projets affectés, affectation et suppression.
+F9 : « Simuler » rejoue les règles du formulaire sur l'historique (90 jours par
+défaut) ; l'enregistrement n'est possible qu'après une simulation des règles
+exactes du formulaire, et passe par une modale qui en rappelle l'effet.
+I19 : ?ai_task=<tâche> préremplit les seuils proposés par l'IA, simulés
+d'emblée ; l'enregistrement reste un clic d'administrateur, audité
+« proposé par IA ».
 -->
 
 <script setup lang="ts">
 import { GateRules, SEVERITIES } from '#shared/analysis'
+import { rulesKey } from '~/composables/useGateSimulation'
 
 const { t, te } = useI18n()
 const route = useRoute()
@@ -47,6 +54,7 @@ async function load() {
     gate.value = await api<GateDetail>(`/api/gates/${id.value}`)
     rules.value = { ...GateRules.parse(gate.value.rules) }
     loadError.value = ''
+    await applySuggestion()
   }
   catch (err) {
     loadError.value = message(err)
@@ -95,13 +103,54 @@ const nullModels = Object.fromEntries(fields.flatMap(f => f.kind === 'number' &&
 
 const parsed = computed(() => GateRules.safeParse(rules.value))
 const dirty = computed(() => !!gate.value && JSON.stringify(GateRules.parse(gate.value.rules)) !== JSON.stringify(parsed.value.success ? parsed.value.data : null))
+// --- F9 : simulation avant enregistrement ---
+const sim = useGateSimulation()
+const sinceDays = ref(90)
+const canSimulate = computed(() => session.can('operator'))
+async function simulate() {
+  if (!parsed.value.success) return
+  await sim.run({ gate_id: id.value, rules: parsed.value.data, since_days: sinceDays.value })
+}
+/** La dernière simulation porte exactement sur les règles du formulaire. */
+const simulatedCurrent = computed(() => {
+  const s = sim.simulation.value
+  return !!s && s.status === 'done' && parsed.value.success && rulesKey(s.rules) === rulesKey(parsed.value.data)
+})
+
+// --- I19 : seuils proposés par l'IA ---
+interface SuggestionData { task_id: string, gate_id: string, rules: GateRules, rationale: string, model: string | null }
+const suggestion = ref<SuggestionData | null>(null)
+const suggestionError = ref('')
+async function applySuggestion() {
+  const task = typeof route.query.ai_task === 'string' ? route.query.ai_task : ''
+  if (!task || suggestion.value?.task_id === task) return
+  try {
+    const s = await api<SuggestionData>(`/api/gates/suggestions/${encodeURIComponent(task)}`)
+    if (s.gate_id !== id.value) {
+      suggestionError.value = t('gateSuggest.otherGate')
+      return
+    }
+    suggestion.value = s
+    rules.value = { ...GateRules.parse(s.rules) }
+    if (canSimulate.value) await simulate()
+  }
+  catch {
+    suggestionError.value = t('gateSuggest.unavailable')
+  }
+}
+/** Mention IA tant que le formulaire porte encore la proposition (modifiée ou non). */
+const aiTaskId = computed(() => suggestion.value?.task_id ?? null)
+
+const saveOpen = ref(false)
 const saving = ref(false)
 async function save() {
-  if (!parsed.value.success) return
+  if (!parsed.value.success || !simulatedCurrent.value) return
   saving.value = true
   try {
-    await api(`/api/gates/${id.value}`, { method: 'PATCH', body: { rules: parsed.value.data } })
+    await api(`/api/gates/${id.value}`, { method: 'PATCH', body: { rules: parsed.value.data, ...(aiTaskId.value ? { ai_task_id: aiTaskId.value } : {}) } })
     toast.add({ title: t('gates.saved'), color: 'success' })
+    saveOpen.value = false
+    suggestion.value = null
     await load()
   }
   catch (err) {
@@ -225,6 +274,24 @@ async function remove() {
         >
           {{ t('gates.readOnly') }}
         </p>
+        <UAlert
+          v-if="suggestion"
+          class="mb-4"
+          color="primary"
+          variant="subtle"
+          icon="i-lucide-sparkles"
+          :title="t('gateSuggest.prefilled', { model: suggestion.model ?? '?' })"
+          :description="suggestion.rationale"
+          data-testid="gate-ai-prefill"
+        />
+        <UAlert
+          v-else-if="suggestionError"
+          class="mb-4"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-triangle-alert"
+          :title="suggestionError"
+        />
 
         <div class="grid gap-5 md:grid-cols-2">
           <UFormField
@@ -288,15 +355,84 @@ async function remove() {
           v-if="canEdit"
           #footer
         >
-          <div class="flex justify-end">
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <span
+              v-if="dirty && !simulatedCurrent"
+              class="text-xs text-muted"
+            >{{ t('gateSim.simulateFirst') }}</span>
             <UButton
-              :loading="saving"
-              :disabled="!dirty || !parsed.success"
+              :disabled="!dirty || !parsed.success || !simulatedCurrent"
               :label="t('common.save')"
               data-testid="gate-save"
-              @click="save"
+              @click="saveOpen = true"
             />
           </div>
+        </template>
+      </UCard>
+
+      <UCard
+        v-if="canSimulate"
+        data-testid="gate-simulation"
+      >
+        <template #header>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="font-semibold">
+              {{ t('gateSim.title') }}
+            </h2>
+            <div class="flex flex-wrap items-center gap-2">
+              <UFormField :label="t('gateSim.days')">
+                <UInputNumber
+                  v-model="sinceDays"
+                  :min="1"
+                  :max="730"
+                  class="w-28"
+                />
+              </UFormField>
+              <UButton
+                icon="i-lucide-flask-conical"
+                :loading="sim.running.value"
+                :disabled="!parsed.success"
+                :label="t('gateSim.run')"
+                data-testid="gate-simulate"
+                @click="simulate"
+              />
+            </div>
+          </div>
+        </template>
+        <p class="mb-3 text-sm text-muted">
+          {{ t('gateSim.help') }}
+        </p>
+        <div
+          v-if="sim.running.value"
+          class="flex items-center gap-2 text-sm text-muted"
+          data-testid="simulation-running"
+        >
+          <UIcon
+            name="i-lucide-loader-circle"
+            class="animate-spin"
+          />
+          {{ t('gateSim.running') }}
+        </div>
+        <UAlert
+          v-else-if="sim.error.value"
+          color="error"
+          variant="subtle"
+          :title="sim.error.value"
+        />
+        <UAlert
+          v-else-if="sim.simulation.value?.status === 'error'"
+          color="error"
+          variant="subtle"
+          :title="t('gateSim.failed')"
+        />
+        <template v-else-if="sim.simulation.value?.result">
+          <p
+            v-if="!simulatedCurrent"
+            class="mb-2 text-xs text-warning"
+          >
+            {{ t('gateSim.stale') }}
+          </p>
+          <GatesSimulationResult :simulation="sim.simulation.value" />
         </template>
       </UCard>
 
@@ -385,6 +521,26 @@ async function remove() {
         </div>
       </template>
     </UModal>
+
+    <ConfirmModal
+      v-model:open="saveOpen"
+      :title="t('gateSim.saveTitle')"
+      :body="t('gateSim.saveBody', { slug: gate?.slug ?? '', n: gate?.project_list.length ?? 0 })"
+      :loading="saving"
+      :confirm-label="t('common.save')"
+      @confirm="save"
+    >
+      <p
+        v-if="suggestion"
+        class="text-sm"
+      >
+        {{ t('gateSuggest.auditNote') }}
+      </p>
+      <GatesSimulationResult
+        v-if="sim.simulation.value?.result"
+        :simulation="sim.simulation.value"
+      />
+    </ConfirmModal>
 
     <ConfirmModal
       v-model:open="deleteOpen"

@@ -27,6 +27,7 @@ import { redact } from './redact'
 import { moduleLocked, projectLocks, secretsLocked } from './locks'
 import { evaluateGate } from '../gates/evaluate'
 import { applyApprovedAcceptance, findingAuthors } from './triage'
+import { syncExceptionVex } from '../vex/sync'
 
 /** Durée maximale d'une exception : elle doit être revue au moins une fois par an. */
 export const MAX_EXCEPTION_DAYS = 366
@@ -48,6 +49,8 @@ const base = {
   expires_on: dateSchema,
   /** Analyse d'où vient la demande (lien « demander une exception ») : ses auteurs sont exclus de l'approbation. */
   scan_id: z.string().uuid().optional(),
+  /** H7 et I10 (0.8) : statut VEX proposé avec la demande ; appliqué seulement si elle est approuvée. */
+  vex_status: z.enum(['not_affected', 'affected', 'fixed', 'under_investigation']).nullable().optional(),
 }
 export const exceptionCreateSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('path'), target: ExceptionTargets.path }),
@@ -102,6 +105,8 @@ export interface ExceptionRow {
   decided_by: string | null
   decided_at: string | null
   decision_reason: string | null
+  /** H7 (0.8) : statut VEX proposé ; une exception approuvée qui en porte un donne une déclaration VEX. */
+  vex_status: string | null
   revoked_at: string | null
   revoked_by: string | null
   expiry_notified_at: string | null
@@ -118,7 +123,7 @@ const COLUMNS = `e.id, e.project_id, p.slug AS project_slug, p.name AS project_n
   to_char(e.expires_on, 'YYYY-MM-DD') AS expires_on, e.status, e.requested_via, e.requester_label,
   e.requester_is_human, e.commit_authors,
   uc.username AS created_by, ${TS('e.created_at')} AS created_at,
-  ud.username AS decided_by, ${TS('e.decided_at')} AS decided_at, e.decision_reason,
+  ud.username AS decided_by, ${TS('e.decided_at')} AS decided_at, e.decision_reason, e.vex_status,
   ${TS('e.revoked_at')} AS revoked_at, ur.username AS revoked_by, ${TS('e.expiry_notified_at')} AS expiry_notified_at,
   (e.status = 'approved' AND e.revoked_at IS NULL AND e.expires_on >= current_date) AS active,
   (e.revoked_at IS NULL AND e.expires_on < current_date) AS expired,
@@ -197,7 +202,11 @@ export interface ExceptionRequestInput {
   commit_authors: string[]
   /** Analyse d'origine : l'auteur de sa PR est ajouté aux auteurs exclus. */
   scan_id?: string
+  /** H7 et I10 (0.8) : statut VEX proposé (vulnérabilité seulement : exception « vuln » ou « finding »). */
+  vex_status?: string | null
 }
+
+const VEX_STATUSES = ['not_affected', 'affected', 'fixed', 'under_investigation']
 
 const MAX_AUTHORS = 20
 
@@ -243,6 +252,10 @@ export async function requestException(db: Queryable, input: ExceptionRequestInp
   if (!(REQUESTED_VIA as readonly string[]).includes(input.requested_via)) throw new ExceptionError('E_VALIDATION', 'requested_via')
   const label = typeof input.requester_label === 'string' ? input.requester_label.trim().slice(0, 255) : ''
   if (!label) throw new ExceptionError('E_VALIDATION', 'requester_label')
+  const vexStatus = input.vex_status ?? null
+  if (vexStatus !== null && (!VEX_STATUSES.includes(vexStatus) || (input.kind !== 'vuln' && input.kind !== 'finding'))) {
+    throw new ExceptionError('E_VALIDATION', 'vex_status')
+  }
   const project = await db.query('SELECT 1 FROM projects WHERE id = $1', [input.project_id])
   if (!project.rowCount) throw new ExceptionError('E_NOT_FOUND')
   await checkAllowed(db, input.project_id, input.kind, input.target)
@@ -263,10 +276,10 @@ export async function requestException(db: Queryable, input: ExceptionRequestInp
   }
   const r = await db.query<{ id: string }>(
     `INSERT INTO exceptions (project_id, kind, target, reason, expires_on, created_by, status, decided_at,
-                             requested_via, requester_label, requester_is_human, commit_authors)
-     VALUES ($1, $2, $3, $4, $5::date, $6, 'requested', NULL, $7, $8, $9, $10) RETURNING id`,
+                             requested_via, requester_label, requester_is_human, commit_authors, vex_status)
+     VALUES ($1, $2, $3, $4, $5::date, $6, 'requested', NULL, $7, $8, $9, $10, $11) RETURNING id`,
     [input.project_id, input.kind, JSON.stringify(input.target), redact(reason), input.expires_on, input.requester_user_id,
-      input.requested_via, label, human, normalizeAuthors(authors)],
+      input.requested_via, label, human, normalizeAuthors(authors), vexStatus],
   )
   const row = (await getException(db, r.rows[0]!.id))!
   await writeAudit(db, {
@@ -277,6 +290,7 @@ export async function requestException(db: Queryable, input: ExceptionRequestInp
     details: {
       project_id: row.project_id, kind: row.kind, target: row.target, reason: row.reason, expires_on: row.expires_on,
       requested_via: row.requested_via, requester_is_human: row.requester_is_human, commit_authors: row.commit_authors,
+      ...(row.vex_status ? { vex_status: row.vex_status } : {}),
     },
   })
   return row
@@ -401,6 +415,8 @@ export async function decideException(db: Queryable, id: string, input: Decision
       requested_by: row.created_by ?? row.requester_label, requested_via: row.requested_via, decision_reason: row.decision_reason,
     },
   })
+  // H7 (0.8) : une exception approuvée qui porte un statut VEX donne ses déclarations.
+  if (input.decision === 'approved' && row.vex_status) await syncExceptionVex(db, id)
   // Seul chemin qui pose « accepted » sur un résultat : l'approbation d'une demande.
   if (input.decision === 'approved' && ex.kind === 'finding') {
     const findingId = String(ex.target.finding_id)
@@ -437,6 +453,8 @@ export async function revokeException(db: Queryable, id: string, userId: number 
         WHERE id::text = $1 AND status = 'accepted' AND status_until = $2::date`,
       [String(ex.target.finding_id), ex.expires_on, userId])
   }
+  // H7 (0.8) : la révocation d'une exception révoque ses déclarations VEX.
+  if (ex) await syncExceptionVex(db, id)
   const row = await getException(db, id)
   if (!row) throw new ExceptionError('E_NOT_FOUND')
   return row
