@@ -1,0 +1,216 @@
+{
+  "$id": "https://scanoria.invalid/schemas/scanoria-config.schema.json",
+  "title": ".scanoria.yml",
+  "description": "Configuration en code d'un dépôt analysé par Scanoria (J8). Lue sans exécution, dans les limites des verrous de profil.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "profiles": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        },
+        "pr": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        },
+        "nightly": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        },
+        "release": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "exceptions": {
+      "maxItems": 200,
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "path"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "pattern": "^[^\\0\\n\\r]+$"
+              },
+              "tool": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[A-Za-z0-9._-]+$"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 2000
+              },
+              "until": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "path",
+              "reason",
+              "until"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "rule"
+              },
+              "rule": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "tool": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[A-Za-z0-9._-]+$"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 2000
+              },
+              "until": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "rule",
+              "reason",
+              "until"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "vuln"
+              },
+              "vuln": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9._:-]{1,120}$"
+              },
+              "package": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 2000
+              },
+              "until": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "vuln",
+              "reason",
+              "until"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "module"
+              },
+              "module": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 2000
+              },
+              "until": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "module",
+              "reason",
+              "until"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "ignore": {
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^[^\\0\\n\\r]+$"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "pattern": "^[^\\0\\n\\r]+$"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 2000
+              },
+              "until": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "additionalProperties": false
+}

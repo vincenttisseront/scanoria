@@ -77,6 +77,8 @@ partie des dépendances npm de production de `webui/package.json` :
 | Tailwind CSS | MIT |
 | zod | MIT |
 | node-postgres (`pg`) | MIT |
+| yaml (lecture sûre de `.scanoria.yml` et de la configuration exportée) | ISC |
+| smol-toml (reprise des fichiers TOML de gitleaks et OSV-Scanner) | BSD-3-Clause |
 | Icônes Lucide (`@iconify-json/lucide`) | ISC |
 
 Ce qui est réellement livré est la sortie Nitro : le code de la console,
