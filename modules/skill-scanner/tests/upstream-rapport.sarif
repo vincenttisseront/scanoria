@@ -516,7 +516,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/SKILL.md",
+                  "uri": "skills/rapport/SKILL.md",
                   "uriBaseId": "%SRCROOT%"
                 }
               }
@@ -541,7 +541,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/SKILL.md",
+                  "uri": "skills/rapport/SKILL.md",
                   "uriBaseId": "%SRCROOT%"
                 }
               }
@@ -592,7 +592,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/SKILL.md",
+                  "uri": "skills/rapport/SKILL.md",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {
@@ -648,7 +648,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/SKILL.md",
+                  "uri": "skills/rapport/SKILL.md",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {
@@ -704,7 +704,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/SKILL.md",
+                  "uri": "skills/rapport/SKILL.md",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {
@@ -761,7 +761,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/SKILL.md",
+                  "uri": "skills/rapport/SKILL.md",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {
@@ -817,7 +817,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/scripts/build.py",
+                  "uri": "skills/rapport/scripts/build.py",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {
@@ -887,7 +887,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/scripts/build.py",
+                  "uri": "skills/rapport/scripts/build.py",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {
@@ -943,7 +943,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/scripts/build.py",
+                  "uri": "skills/rapport/scripts/build.py",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {
@@ -999,7 +999,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/scripts/build.py",
+                  "uri": "skills/rapport/scripts/build.py",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {
@@ -1068,7 +1068,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/scripts/build.py",
+                  "uri": "skills/rapport/scripts/build.py",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {
@@ -1140,7 +1140,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "modules/skill-scanner/testbed/skills/rapport/scripts/build.py",
+                  "uri": "skills/rapport/scripts/build.py",
                   "uriBaseId": "%SRCROOT%"
                 },
                 "region": {

@@ -70,7 +70,7 @@ def run_skill(src, rel, tmp):
            if not k.startswith(("OPENAI_", "ANTHROPIC_", "AZURE_", "VIRUSTOTAL_", "AI_DEFENSE_", "SKILL_SCANNER_LLM"))}
     try:
         subprocess.run(SCANNER + ["scan", target] + OFFLINE_FLAGS + ["--output-sarif", out],
-                       env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                       env=env, cwd=src, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                        timeout=SKILL_TIMEOUT, check=False)
         if os.path.getsize(out) > MAX_SARIF:
             return None
@@ -90,7 +90,10 @@ def repo_path(uri, base_id, skill_rel, src_abs):
     elif os.path.isabs(uri):
         rel = os.path.relpath(os.path.normpath(uri), src_abs)
     else:
-        rel = os.path.normpath(os.path.join(skill_rel, unquote(uri)))
+        # L'amont écrit les chemins relatifs au répertoire courant (la racine du
+        # dépôt, cwd de run_skill) ; un chemin relatif au skill reste admis.
+        u = os.path.normpath(unquote(uri)).replace(os.sep, "/")
+        rel = u if skill_rel in (".", "") or u == skill_rel or u.startswith(skill_rel + "/") else os.path.normpath(os.path.join(skill_rel, u))
     rel = rel.replace(os.sep, "/")
     if rel == ".." or rel.startswith("../") or rel.startswith("/"):
         return None

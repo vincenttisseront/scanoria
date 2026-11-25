@@ -143,7 +143,10 @@ if python3 "$MODCHECK" expect "$SKM/module.yaml" "$TMP/skill.sarif" > "$TMP/exp.
 else ko "skill : attentes du banc d'essai"; sed 's/^/     /' "$TMP/exp.log"; fi
 expect "skill : chemins relatifs au dépôt" \
 	"$(jq -r '[.runs[0].results[].locations[]?.physicalLocation.artifactLocation.uri | select(startswith("/") or startswith("file:") or contains(".."))] | length' "$TMP/skill.sarif")" 0
-if grep -q '"/src/' "$TMP/skill.sarif"; then ko "skill : chemin absolu du conteneur"; else ok "skill : aucun chemin absolu du conteneur"; fi
+if expect "skill : emplacements des constats" \
+	"$(jq -r '[.runs[0].results[].locations[]?.physicalLocation.artifactLocation.uri] | unique | join(" ")' "$TMP/skill.sarif")" \
+	"skills/rapport/SKILL.md skills/rapport/scripts/build.py"
+grep -q '"/src/' "$TMP/skill.sarif"; then ko "skill : chemin absolu du conteneur"; else ok "skill : aucun chemin absolu du conteneur"; fi
 expect "skill : skills analysées" "$(jq -c '.runs[0].properties["scanoria/skills"]' "$TMP/skill.sarif")" '{"analysed":1,"failed":[]}'
 # SARIF amont hostile : chemins hors du dépôt écartés, document invalide compté en échec.
 jq '.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri = "../../../etc/passwd"
