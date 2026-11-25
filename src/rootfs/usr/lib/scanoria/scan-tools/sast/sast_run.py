@@ -568,6 +568,11 @@ def main(argv):
     if len(argv) < 2 or argv[1] not in ENGINES:
         sys.stderr.write("usage: sast_run.py {%s} [options]\n" % "|".join(sorted(ENGINES)))
         return RC_TOOL
+    # --out= : sortie déclarée dans le manifeste (contrat de sortie G2) ; une seule valeur admise.
+    outs = [a.split("=", 1)[1] for a in argv[2:] if a.startswith("--out=")]
+    if any(o != os.path.join(OUT, argv[1] + ".sarif") for o in outs):
+        log("--out must be %s" % os.path.join(OUT, argv[1] + ".sarif"))
+        return RC_TOOL
     try:
         ENGINES[argv[1]](argv[2:])
     except ToolError as e:

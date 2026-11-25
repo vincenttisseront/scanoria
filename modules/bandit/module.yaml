@@ -40,7 +40,7 @@ options:
   properties: {}
 scan:
   inputs: [repo, archive]
-  command: ["python3", "-I", "/scanoria/sast_run.py", "bandit"]
+  command: ["python3", "-I", "/scanoria/sast_run.py", "bandit", "--out=/out/bandit.sarif"]
   tool: sast
   env:
     PYTHONDONTWRITEBYTECODE: "1"

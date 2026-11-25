@@ -61,7 +61,7 @@ options_i18n:
     en: { title: Minimum score, description: Aggregate Scorecard score (local checks) below which a blocking finding is produced. }
 scan:
   inputs: [repo, archive]
-  command: ["python3", "-I", "/scanoria/sast_run.py", "scorecard", "--min-score={opt.min_score}"]
+  command: ["python3", "-I", "/scanoria/sast_run.py", "scorecard", "--out=/out/scorecard.sarif", "--min-score={opt.min_score}"]
   tool: sast
   env:
     PYTHONDONTWRITEBYTECODE: "1"

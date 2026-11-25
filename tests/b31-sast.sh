@@ -75,7 +75,7 @@ for cf in "$ROOT"/modules/{opengrep,zizmor,scorecard}/image/Containerfile; do
 done
 grep -q 'sha256sum -c' "$ROOT/modules/opengrep/image/Containerfile" && ok "opengrep : binaire vérifié par sha256sum" || ko "opengrep : binaire non vérifié"
 grep -q 'cosign verify-blob' "$ROOT/modules/opengrep/image/verify.sh" && ok "opengrep : signature cosign vérifiée avant construction" || ko "opengrep : verify.sh sans cosign"
-grep -qE '^zizmor==[0-9.]+ --hash=sha256:[0-9a-f]{64}$' "$ROOT/modules/zizmor/image/requirements.lock" && grep -q -- '--require-hashes' "$ROOT/modules/zizmor/image/Containerfile" \
+grep -qE '^ +--hash=sha256:[0-9a-f]{64}$' "$ROOT/modules/zizmor/image/requirements.lock" && grep -q -- '--require-hashes' "$ROOT/modules/zizmor/image/Containerfile" \
 	&& ok "zizmor : dépendance Python installée par empreinte" || ko "zizmor : requirements.lock sans empreinte"
 
 # --- 2. Règles maison Opengrep ----------------------------------------------------------------
@@ -121,7 +121,7 @@ cat > "$TMP/st.py" <<-'EOF'
 	        return e.code
 	exec(sys.argv[3])
 	EOF
-st() { rm -rf "$TMP/w"; mkdir -p "$TMP/w"; python3 -I "$TMP/st.py" "$SAST/sast_run.py" "$TMP/w" "$1"; }
+st() { rm -rf "$TMP/w"; mkdir -p "$TMP/w"; python3 -I "$TMP/st.py" "$SAST/sast_run.py" "$TMP/w" "$@"; }
 
 R=$(st '
 doc = {"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "x", "rules": [
@@ -131,10 +131,10 @@ doc = {"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "x", "rules": [
   "originalUriBaseIds": {"SRC": {"uri": "file:///src/"}},
   "results": [
   {"ruleId": "generic.secrets.api-key", "message": {"text": "found key AKIA-valeur-piege"},
-   "locations": [{"physicalLocation": {"artifactLocation": {"uri": "file:///src/app/conf.py", "uriBaseId": "SRC"}, "region": {"startLine": 3, "snippet": {"text": "KEY=valeur-piege"}}}}],
+   "locations": [{"physicalLocation": {"artifactLocation": {"uri": "file://" + s.SRC + "/app/conf.py", "uriBaseId": "SRC"}, "region": {"startLine": 3, "snippet": {"text": "KEY=valeur-piege"}}}}],
    "fixes": [{"description": {"text": "remove valeur-piege"}}]},
   {"ruleId": "python.eval", "message": {"text": "eval"},
-   "locations": [{"physicalLocation": {"artifactLocation": {"uri": "/src/./app/x.py"}, "region": {"startLine": 1, "snippet": {"text": "a" * 5000}}}}]},
+   "locations": [{"physicalLocation": {"artifactLocation": {"uri": s.SRC + "/./app/x.py"}, "region": {"startLine": 1, "snippet": {"text": "a" * 5000}}}}]},
   {"ruleId": "custom.cred", "message": {"text": "password valeur-piege"},
    "locations": [{"physicalLocation": {"artifactLocation": {"uri": "../../etc/passwd"}, "region": {"startLine": 1, "snippet": {"text": "valeur-piege"}}}}]}]}]}
 out = s.tidy_sarif(doc, "x")
@@ -168,7 +168,7 @@ cat > "$TMP/fakegrep" <<-'EOF'
 	out = a[a.index("--sarif-output") + 1]
 	json.dump({"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "fake", "rules": [{"id": "interne-eval"}]}},
 	           "results": [{"ruleId": "interne-eval", "message": {"text": "eval"}, "locations": [{"physicalLocation":
-	           {"artifactLocation": {"uri": "/src/app.py"}, "region": {"startLine": 1}}}]}]}]}, open(out, "w"))
+	           {"artifactLocation": {"uri": a[-1] + "/app.py"}, "region": {"startLine": 1}}}]}]}]}, open(out, "w"))
 	sys.exit(1)
 	EOF
 chmod 0755 "$TMP/fakegrep"
@@ -346,6 +346,8 @@ CALLS="$TMP/calls.log"
 mkdir -p "$T"/var/lib/scanoria/requests/{tmp,incoming,work,done,failed} "$T/var/lib/scanoria/modules" "$T/var/lib/scanoria/scans/jobs/rulesets" \
 	"$T/var/lib/scanoria/console" "$T/run/scanoria" "$T/etc/scanoria" "$T/opt/scanoria/current" "$STUBS"
 echo 0.7.0 > "$T/opt/scanoria/current/VERSION"
+mkdir -p "$T/usr/lib/scanoria/scan-tools"
+cp -r "$SAST" "$T/usr/lib/scanoria/scan-tools/sast"
 : > "$CALLS"
 export SCANORIA_TEST_ROOT="$T" SCANORIA_TEST_BIN="$STUBS"
 # podman : journalise ; « run » écrit dans /out un SARIF avec un résultat par fichier
@@ -354,7 +356,7 @@ cat > "$STUBS/podman" <<-'EOF'
 	#!/usr/bin/env python3
 	import json, os, sys
 	a = sys.argv[1:]
-	open(os.environ["CALLS"], "a").write(json.dumps(["podman"] + a) + "\n")
+	open("@CALLS@", "a").write(json.dumps(["podman"] + a) + "\n")
 	if not a or a[0] != "run":
 	    sys.exit(0)
 	vols = {}
@@ -363,18 +365,20 @@ cat > "$STUBS/podman" <<-'EOF'
 	        host, target, mode = a[i + 1].rsplit(":", 2)
 	        vols[target] = host
 	rules = "".join(open(os.path.join(r, f)).read() for r, _, fs in os.walk(vols["/rules"]) for f in fs)
+	if "SANSSORTIE" in rules:
+	    sys.exit(0)
 	if "INVALIDE" in rules:
 	    sys.stderr.write("invalid rule at line 2\n")
 	    sys.exit(3)
 	res = [{"ruleId": "candidate", "message": {"text": "x"}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "/src/" + f}}}]}
 	       for f in sorted(os.listdir(vols["/src"])) if "eval(" in open(os.path.join(vols["/src"], f)).read()]
 	json.dump({"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "fake"}}, "results": res}]},
-	          open(os.path.join(vols["/out"], os.environ.get("FAKE_OUT", "opengrep.sarif")), "w"))
+	          open(os.path.join(vols["/out"], "opengrep.sarif"), "w"))
 	EOF
+sed -i "s|@CALLS@|$CALLS|" "$STUBS/podman"
 chmod 0755 "$STUBS/podman"
 printf '#!/bin/sh\nexit 0\n' > "$STUBS/systemctl"
 chmod 0755 "$STUBS/systemctl"
-export CALLS
 hx() {
 	R=$("$HELPER" exec --origin cli --type validate-ruleset --params "$1" 2> "$TMP/helper.err") || true
 	[[ -n "$R" ]] || { R='{"code":"NO_OUTPUT"}'; sed 's/^/     /' "$TMP/helper.err"; }
@@ -425,7 +429,8 @@ expect "validate-ruleset : règles refusées par le moteur (code 3)" "$(jq -c '[
 NOKEY=$(put $'foo: 1\n')
 hx "{\"engine\": \"opengrep\", \"sha256\": \"$NOKEY\"}"
 expect "validate-ruleset : contrôle statique refait par le helper" "$(jq -c '[.code, .output.ok]' <<< "$R")" '["OK",false]'
-FAKE_OUT=autre.sarif hx "{\"engine\": \"opengrep\", \"sha256\": \"$GOOD\"}"
+NOOUT=$(put $'rules:\n  - id: SANSSORTIE\n')
+hx "{\"engine\": \"opengrep\", \"sha256\": \"$NOOUT\"}"
 expect "validate-ruleset : sortie absente → refus motivé (jamais un succès vide)" "$(jq -c '[.code, .output.ok]' <<< "$R")" '["OK",false]'
 LEFT=$(find "$T/var/lib/scanoria/modules/work" -mindepth 1 -maxdepth 1 2> /dev/null | wc -l)
 expect "validate-ruleset : répertoire de travail supprimé" "$LEFT" 0

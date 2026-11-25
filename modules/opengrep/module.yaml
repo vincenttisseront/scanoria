@@ -50,7 +50,7 @@ options_i18n:
     en: { title: Built-in rules, description: Run Scanoria's own rules in addition to the rulesets attached to the profile. }
 scan:
   inputs: [repo, archive]
-  command: ["python3", "-I", "/scanoria/sast_run.py", "opengrep", "--builtin={opt.builtin_rules}"]
+  command: ["python3", "-I", "/scanoria/sast_run.py", "opengrep", "--out=/out/opengrep.sarif", "--builtin={opt.builtin_rules}"]
   tool: sast
   env:
     PYTHONDONTWRITEBYTECODE: "1"

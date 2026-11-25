@@ -121,6 +121,11 @@ def check_content(engine, data):
         nxt = re.search(r"(?m)^\s*\[", sect)
         if GITLEAKS_INCLUDE_RE.search(sect[:nxt.start()] if nxt else sect):
             raise Fail(E_INVALID, "gitleaks [extend] may only use useDefault, never path or url")
+    if engine in ("opengrep", "semgrep") and not re.search(r"(?m)^rules\s*:", text):
+        raise Fail(E_INVALID, "%s ruleset needs a top-level rules: key" % engine)
+    if engine == "checkov" and not (re.search(r"(?m)^\s*-?\s*metadata\s*:", text)
+                                    and re.search(r"(?m)^\s*definition\s*:", text)):
+        raise Fail(E_INVALID, "checkov policy needs metadata: and definition:")
     if engine == "kics":
         kics_queries(data)
     return text
@@ -308,7 +313,10 @@ def act_validate_ruleset(c):
         timeout = max(30, min(VALIDATE_TIMEOUT, int(c.left()) - 30))
         mounts = [(src, "/src", "ro"), (out, "/out", "rw"), (staged, "/rules", "ro")]
         from . import svcnet
-        mounts += svcnet.tool_mount(m)
+        try:
+            mounts += svcnet.tool_mount(m)
+        except svcnet.Unavailable as u:
+            raise Fail(E_ENGINE_MISSING, u.message)
         rc, hint = testbed.run_confined(m, cmd, mounts, timeout=timeout, env=env, with_stderr=True)
         base = {"engine": engine, "module": mid, "version": m.get("version")}
         if rc == 3:

@@ -41,7 +41,7 @@ options:
   properties: {}
 scan:
   inputs: [repo, archive]
-  command: ["python3", "-I", "/scanoria/sast_run.py", "semgrep"]
+  command: ["python3", "-I", "/scanoria/sast_run.py", "semgrep", "--out=/out/semgrep.sarif"]
   tool: sast
   env:
     PYTHONDONTWRITEBYTECODE: "1"

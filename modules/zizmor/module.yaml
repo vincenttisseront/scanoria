@@ -39,7 +39,7 @@ options:
   properties: {}
 scan:
   inputs: [repo, archive]
-  command: ["python3", "-I", "/scanoria/sast_run.py", "zizmor"]
+  command: ["python3", "-I", "/scanoria/sast_run.py", "zizmor", "--out=/out/zizmor.sarif"]
   tool: sast
   env:
     PYTHONDONTWRITEBYTECODE: "1"
