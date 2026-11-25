@@ -291,6 +291,11 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
         v-if="failed"
         :scan-id="scan.id"
       />
+      <!-- K7 (0.7) : inventaire des workflows d'agents, s'il y en a un. -->
+      <ScansAgentInventory
+        v-if="scan.status === 'done'"
+        :scan-id="scan.id"
+      />
 
       <UCard>
         <template #header>

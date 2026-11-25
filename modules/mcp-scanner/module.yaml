@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module mcp-scanner (0.7, K5) : serveurs MCP déclarés dans le dépôt (listes
+# d'outils et d'invites enregistrées, configurations de clients MCP, outils
+# déclarés dans le code d'un serveur Python ou JavaScript/TypeScript), passés
+# par les règles YARA de Cisco MCP Scanner : empoisonnement d'outil,
+# injection d'invite, exécution de code, exfiltration, collecte d'identifiants.
+# Hors ligne : rien n'est exécuté, aucun serveur n'est joint, ni l'API Cisco
+# AI Defense, ni VirusTotal, ni un LLM ne sont appelés (le convertisseur
+# n'utilise que l'analyseur YARA). Le juge LLM facultatif est un module
+# distinct (mcp-scanner-llm), qui passe par le relais de scanoria-ai.
+#
+# Amont : Cisco AI MCP Scanner 4.8.7 (cisco-ai-mcp-scanner, Apache-2.0,
+# relevé sur PyPI et sur le dépôt cisco-ai-defense/mcp-scanner le 2026-11-25,
+# tag 4.8.7). L'amont ne publie aucune image : elle est construite par la CI de
+# Scanoria (image/Containerfile, docs/MODULES.md § 8), d'où image_pending.
+id: mcp-scanner
+name: Cisco MCP Scanner
+description:
+  fr: Repère dans les serveurs et configurations MCP du dépôt les outils empoisonnés, les injections d'invite et les exfiltrations, par des règles YARA hors ligne.
+  en: Finds poisoned tools, prompt injections and exfiltration in the MCP servers and configurations of the repository, with offline YARA rules.
+type: scanner
+categories: [sast]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/cisco-ai-defense/mcp-scanner/blob/4.8.7/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: Dépendances Python du verrou image/requirements.lock sous licences MIT, BSD, Apache-2.0, ISC, MPL-2.0 et PSF ; yara-python sous Apache-2.0.
+upstream:
+  homepage: https://github.com/cisco-ai-defense/mcp-scanner
+  source: https://pypi.org/project/cisco-ai-mcp-scanner/4.8.7/
+image_pending: true
+version: "4.8.7"
+resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 1200 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/mcp_sarif.py", "/src", "/out/mcp-scanner.sarif"]
+  tool: mcp-scanner
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+  # V6 : listes d'outils et configurations MCP (JSON), code de serveur Python ou JavaScript/TypeScript.
+  applies_to:
+    paths:
+      - "*.json"
+      - "*.py"
+      - "*.{js,mjs,cjs,ts,mts,cts}"
+  timeout_s: 600
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/mcp-scanner.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # Liste d'outils et serveur Python inertes dont les descriptions cachent une collecte et une exfiltration.
+    - { rule: mcp-scanner/tool-poisoning, category: sast, min: 2 }
+    - { rule: mcp-scanner/prompt-injection, category: sast, min: 1 }
+    - { rule: mcp-scanner/data-exfiltration, category: sast, min: 1 }
+health: { command: ["python3", "-I", "-c", "import importlib.metadata as m, mcpscanner; print(m.version('cisco-ai-mcp-scanner'))"] }
+upgrade: { policy: on-demand }

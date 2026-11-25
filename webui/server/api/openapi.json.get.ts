@@ -98,6 +98,20 @@ const OPS: Record<string, Record<string, Op>> = {
     post: { summary: 'Request the AI diagnosis of an appliance subject (I16): masked, neutralised context of at most 16 KB; proposes one console action, never runs it', role: 'admin', body: 'AiApplianceDiagnosis', status: 202 },
   },
   '/api/ai/license-key': { get: { summary: 'Key (licence|project licence) of the AI explanation of a component licence (I18); null for opted-out projects', role: 'viewer' } },
+  '/api/ai/search': {
+    get: { summary: 'Natural-language search (I8): connector state, or the structured filters proposed for a phrase (subject_id), revalidated and limited to the caller\'s rights; never SQL', role: 'viewer' },
+    post: { summary: 'Translate a phrase into structured filters of the Findings or Components pages (I8); 200 without connector', role: 'viewer', status: 202 },
+  },
+  '/api/ai/rules': {
+    get: { summary: 'Rule generator (I12): connector state, or the rule proposed for a subject with its test on generated positive and negative samples', role: 'operator' },
+    post: { summary: 'Generate an Opengrep rule, gitleaks pattern or Checkov policy from a finding, a code sample or a sentence (I12); 200 without connector', role: 'operator', status: 202 },
+  },
+  '/api/ai/rules/rulesets': { get: { summary: 'Managed rulesets (G4) a generated rule can be saved into, for its engine', role: 'admin' } },
+  '/api/ai/rules/test': {
+    get: { summary: 'Verdict of a generated rule test (I12) from its validate-ruleset request, which must carry exactly this rule and its samples; done false while running', role: 'operator' },
+    post: { summary: 'Request validate-ruleset for a generated rule (I12): its engine runs it in a confined container on its positive and negative samples; follow with GET /api/requests/:id', role: 'admin', status: 202 },
+  },
+  '/api/ai/rules/save': { post: { summary: 'Save a generated rule whose test request passed (test_request_id) as a new ruleset version with origin ai, after explicit admin confirmation (I12); audited', role: 'admin' } },
   '/api/dns': { get: { summary: 'Last DNS check and records to create (<name> and *.<name>)', role: 'viewer' } },
   '/api/dns/check': { post: { summary: 'Request check-dns', role: 'admin', body: 'check-dns', status: 202 } },
   '/api/gates': {
@@ -159,6 +173,7 @@ const OPS: Record<string, Record<string, Op>> = {
     get: { summary: 'Severity normalization per module, with origin value', role: 'viewer' },
     patch: { summary: 'Change a normalized severity, or reset it to its origin value (severity null)', role: 'admin', body: 'SeverityMapUpdate' },
   },
+  '/api/scans/{id}/agent-inventory': { get: { summary: 'Agent workflow inventory of a scan (K7, Agentic Radar): frameworks, agents, tools, MCP servers; null without one', role: 'viewer' } },
   '/api/scans/{id}/sbom': { get: { summary: 'SBOM components of a scan (contract 14): filters q, ecosystem, license, direct; sort name, ecosystem, version, license, direct; paginated (page, per_page ≤ 200); facets, coverage and Dependency-Track link', role: 'viewer' } },
   '/api/scans/{id}/sbom/export': { get: { summary: 'SBOM of a scan as a CycloneDX 1.6 JSON file, rebuilt from the stored components; audited', role: 'viewer' } },
   // 0.5 (B) : recherche transverse (F3), politique de licences (F8).

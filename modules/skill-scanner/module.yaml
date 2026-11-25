@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module skill-scanner (0.7, K6) : paquets de skills d'agents présents dans le
+# dépôt (dossiers avec SKILL.md : instructions et scripts), analysés par Cisco
+# Skill Scanner hors ligne : règles YAML et YARA-X, intégrité du bytecode,
+# chaînes de commandes et flux de données (analyse ast, sans exécution) ;
+# injection d'invite, exfiltration, code malveillant, outils non déclarés.
+# Jamais activés : le juge LLM (module distinct skill-scanner-llm, par le
+# relais de scanoria-ai), VirusTotal, Cisco AI Defense, et la recherche en
+# ligne sur OSV.dev : les dépendances des skills sont couvertes hors ligne par
+# les modules SCA et leurs bases locales (osv-db, trivy-db, grype-db).
+#
+# Amont : Cisco AI Skill Scanner 2.3.2 (cisco-ai-skill-scanner, Apache-2.0,
+# relevé sur PyPI et sur le dépôt cisco-ai-defense/skill-scanner le
+# 2026-11-25, tag 2.3.2). L'amont ne publie aucune image : elle est construite
+# par la CI de Scanoria (image/Containerfile, docs/MODULES.md § 8).
+id: skill-scanner
+name: Cisco Skill Scanner
+description:
+  fr: Analyse hors ligne les skills d'agents du dépôt (SKILL.md et scripts) à la recherche d'injections d'invite, d'exfiltration et de code malveillant.
+  en: Analyses the agent skills of the repository (SKILL.md and scripts) offline for prompt injection, exfiltration and malicious code.
+type: scanner
+categories: [sast]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/cisco-ai-defense/skill-scanner/blob/2.3.2/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: Dépendances Python du verrou image/requirements.lock sous licences MIT, BSD, Apache-2.0, ISC, MPL-2.0 et PSF ; yara-x sous BSD-3-Clause, magika sous Apache-2.0.
+upstream:
+  homepage: https://github.com/cisco-ai-defense/skill-scanner
+  source: https://pypi.org/project/cisco-ai-skill-scanner/2.3.2/
+image_pending: true
+version: "2.3.2"
+resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 2000 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/skill_sarif.py", "/src", "/out/skill-scanner.sarif"]
+  tool: skill-scanner
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+  # V6 : seulement les dépôts qui contiennent au moins un skill.
+  applies_to:
+    paths:
+      - "SKILL.md"
+  timeout_s: 900
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/skill-scanner.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # Skill inerte : instruction cachée d'exfiltration dans SKILL.md, script qui lit des identifiants et les envoie.
+    - { rule: skill-scanner/prompt_injection_ignore_instructions, category: sast, min: 1 }
+    - { rule: skill-scanner/data_exfil_http_post, category: sast, min: 1 }
+    - { rule: skill-scanner/command_injection_shell_true, category: sast, min: 1 }
+health: { command: ["python3", "-I", "-c", "import importlib.metadata as m, skill_scanner; print(m.version('cisco-ai-skill-scanner'))"] }
+upgrade: { policy: on-demand }

@@ -38,6 +38,12 @@ export interface TaskDefinition<I = unknown, O = unknown> {
   output: z.ZodType<O>
   /** Échappement et compléments fiables (références) après validation. */
   finalize: (output: O, input: I) => O
+  /**
+   * Contrôle propre à la tâche, après finalize (I12 : structure de la règle
+   * selon le moteur demandé) : false rejette la sortie comme invalide, elle
+   * n'est jamais affichée ni mise en cache.
+   */
+  accept?: (output: O, input: I) => boolean
   /** Délai d'un appel, en millisecondes. */
   timeoutMs: number
   /**

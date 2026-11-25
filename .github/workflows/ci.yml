@@ -632,10 +632,40 @@ jobs:
       - name: tests/b31-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b31-live.sh
 
+  ia-modules-live:
+    # Modules d'analyse du code IA de la 0.7 (chantier F, K3, K5–K7) : image
+    # construite depuis modules/<id>/image (pas d'image amont), puis banc
+    # d'essai confiné comme sur l'appliance avec le vrai podman, et, pour les
+    # modules par le relais IA, le vrai runner et le vrai relais (tests/b36-live.sh).
+    name: ia-modules-live (agentic-radar, mcp-scanner, skill-scanner, vulnhuntr, juges LLM, b36-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+      - name: Dépendances (podman, jq, openssl, python3-yaml, python3-jsonschema, console)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark python3-yaml python3-jsonschema curl openssl
+          sudo podman --version
+          cd webui && npm ci --ignore-scripts
+      # Machine jetable : runner en root avec le vrai podman (§ 6.4).
+      - name: tests/b36-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b36-live.sh
+
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live, forges-live, relay-live, sast-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live, forges-live, relay-live, sast-live, ia-modules-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
