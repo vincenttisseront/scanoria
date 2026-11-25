@@ -117,8 +117,10 @@ rules:
     patterns:
       - pattern-either:
           - pattern: $DB.query("..." + $X, ...)
+          - pattern: $DB.query("..." + $X + $Y, ...)
           - pattern: $DB.query(`...${$X}...`, ...)
           - pattern: $DB.execute("..." + $X, ...)
+          - pattern: $DB.execute("..." + $X + $Y, ...)
           - pattern: $DB.execute(`...${$X}...`, ...)
       - metavariable-regex:
           metavariable: $DB

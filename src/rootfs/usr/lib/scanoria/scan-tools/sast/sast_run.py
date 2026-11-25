@@ -314,7 +314,7 @@ def run_checkov(args):
     os.makedirs(odir, exist_ok=True)
     binary = os.environ.get("SCANORIA_CHECKOV_BIN") or "checkov"
     argv = [binary, "--directory", SRC, "--output", "sarif", "--output-file-path", odir,
-            "--soft-fail", "--skip-download", "--quiet", "--compact", "--no-guide",
+            "--soft-fail", "--skip-download", "--quiet", "--compact",
             "--skip-framework", "secrets", "sca_package", "sca_image", "--skip-results-upload"]
     for d in ext:
         argv += ["--external-checks-dir", d]

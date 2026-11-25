@@ -349,6 +349,13 @@ def podman_args(manifest, src, out, feeds, tool=True, image=None):
     ]
     for feed in manifest["requires"]["feeds"]:
         args.append(f"--volume={os.path.join(feeds, feed)}:/feeds/{feed}:ro")
+    # Jeux de règles (G4) : comme runner.ruleset_mount et testbed, /rules est
+    # toujours monté (vide au banc d'essai), car la commande peut le citer.
+    if scan.get("rulesets"):
+        rules = os.path.join(os.path.dirname(os.path.abspath(out)), "rules-" + os.path.basename(os.path.abspath(out)))
+        if not os.path.isdir(rules):
+            os.mkdir(rules, 0o755)
+        args.append(f"--volume={rules}:/rules:ro")
     # Outil de l'appliance (scan.tool) monté en lecture seule sur /scanoria, comme svcnet.tool_mount
     # (tool=False : l'appelant monte lui-même celui de sa racine de test, comme sonar_live).
     if tool and scan.get("tool"):
