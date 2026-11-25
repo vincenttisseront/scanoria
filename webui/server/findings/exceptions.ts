@@ -258,6 +258,13 @@ export async function requestException(db: Queryable, input: ExceptionRequestInp
   }
   const project = await db.query('SELECT 1 FROM projects WHERE id = $1', [input.project_id])
   if (!project.rowCount) throw new ExceptionError('E_NOT_FOUND')
+  // H7 : un statut VEX n'a de sens que pour un résultat qui porte une vulnérabilité.
+  if (vexStatus !== null && input.kind === 'finding') {
+    const f = await db.query(
+      `SELECT 1 FROM findings WHERE id::text = $1 AND project_id = $2 AND cardinality(vuln_ids) > 0`,
+      [String((input.target as Record<string, unknown>).finding_id ?? ''), input.project_id])
+    if (!f.rowCount) throw new ExceptionError('E_VALIDATION', 'vex_status')
+  }
   await checkAllowed(db, input.project_id, input.kind, input.target)
 
   // Une personne n'est humaine que si son compte l'est : un compte « agent » ou « bot » ne l'est jamais.
@@ -413,6 +420,7 @@ export async function decideException(db: Queryable, id: string, input: Decision
     details: {
       project_id: row.project_id, kind: row.kind, target: row.target, expires_on: row.expires_on,
       requested_by: row.created_by ?? row.requester_label, requested_via: row.requested_via, decision_reason: row.decision_reason,
+      ...(row.vex_status ? { vex_status: row.vex_status } : {}),
     },
   })
   // H7 (0.8) : une exception approuvée qui porte un statut VEX donne ses déclarations.

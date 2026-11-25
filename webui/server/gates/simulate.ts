@@ -110,8 +110,11 @@ export const simulationRequestSchema = z.strictObject({
   since_days: z.number().int().min(1).max(MAX_SINCE_DAYS).default(DEFAULT_SINCE_DAYS),
 }).refine(b => !!b.gate_id || !!b.project_id, { message: 'gate_id or project_id', path: ['gate_id'] })
 
+/** Simulations en tâche de fond simultanées, au plus (le pool PostgreSQL reste libre pour le reste). */
+export const MAX_BACKGROUND_SIMULATIONS = 2
+
 export class SimulationError extends Error {
-  constructor(public code: 'E_VALIDATION' | 'E_NOT_FOUND') {
+  constructor(public code: 'E_VALIDATION' | 'E_NOT_FOUND' | 'E_RATE_LIMITED') {
     super(code)
   }
 }
@@ -337,6 +340,7 @@ export async function startSimulation(pool: Pool | Queryable, input: Omit<Simula
     const { id } = await simulateGate(pool, { ...input, rules })
     return (await getSimulation(pool, id))!
   }
+  if (background.size >= MAX_BACKGROUND_SIMULATIONS) throw new SimulationError('E_RATE_LIMITED')
   const id = await insertPending(pool, { projectId, gateId, rules, since: input.since, origin: input.origin ?? 'manual', createdBy: input.createdBy ?? null })
   const job = simulateGate(pool, { ...input, rules, simulationId: id })
     .catch(err => console.error('[gates] simulation failed:', (err as Error).message))

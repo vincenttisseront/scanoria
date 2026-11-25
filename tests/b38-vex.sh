@@ -112,14 +112,14 @@ try:
         jsonschema.Draft202012Validator(load("openvex.json")).validate(doc)
     else:
         bom = load("bom-1.6.schema.json")
-        base = "http://cyclonedx.org/schema/"
-        extra = {base + n: load(n) for n in ("spdx.schema.json", "jsf-0.82.schema.json")}
+        # Clés de résolution : l'$id déclaré par chaque schéma (aucun appel réseau).
+        extra = {s["$id"]: s for s in (load(n) for n in ("spdx.schema.json", "jsf-0.82.schema.json"))}
         try:
             from referencing import Registry, Resource
             reg = Registry().with_resources([(k, Resource.from_contents(v)) for k, v in extra.items()])
             jsonschema.Draft7Validator(bom, registry=reg).validate(doc)
         except ImportError:  # python3-jsonschema 4.10 (Ubuntu 24.04)
-            resolver = jsonschema.RefResolver(base + "bom-1.6.schema.json", bom, store=extra)
+            resolver = jsonschema.RefResolver(bom.get("$id", ""), bom, store=extra)
             jsonschema.Draft7Validator(bom, resolver=resolver).validate(doc)
 except jsonschema.ValidationError as e:
     print("invalide :", e.message[:300], list(e.absolute_path)[:8])

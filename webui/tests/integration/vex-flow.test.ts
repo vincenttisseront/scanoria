@@ -166,6 +166,30 @@ describe.skipIf(!DATABASE_URL)('VEX (H7, PostgreSQL réel)', () => {
     expect(await syncExceptionVex(db.pool, r.id)).toBe(0)
   })
 
+  it('exception sur un résultat : version exacte seulement ; statut VEX refusé sans vulnérabilité ; aperçu aligné sur la validation', async () => {
+    await db.pool.query(
+      `INSERT INTO sbom_components (scan_id, project_id, purl, ecosystem, name, version)
+       VALUES ($1, $2, 'pkg:npm/example-parser@2.0.0', 'npm', 'example-parser', '2.0.0')`, [scanId, projectId])
+    const r = await requestException(db.pool, req({ kind: 'finding', target: { finding_id: findingId }, vex_status: 'not_affected' }))
+    await approve(r.id)
+    const products = (await db.pool.query<{ product: string }>('SELECT DISTINCT product FROM vex_statements WHERE exception_id = $1', [r.id])).rows.map(x => x.product)
+    expect(products).toEqual(['pkg:npm/example-parser@1.0.0'])
+    await revokeException(db.pool, r.id, users.chef.id)
+    await db.pool.query(`DELETE FROM sbom_components WHERE purl = 'pkg:npm/example-parser@2.0.0'`)
+
+    const plain = (await db.pool.query<{ id: string }>(
+      `INSERT INTO findings (project_id, fingerprint, tool, rule_id, category, severity, title, path)
+       VALUES ($1, $2, 'semgrep', 'R1', 'sast', 'high', 't', 'a.js') RETURNING id`, [projectId, randomBytes(32).toString('hex')])).rows[0]!.id
+    await expect(requestException(db.pool, req({ kind: 'finding', target: { finding_id: plain }, vex_status: 'not_affected' }))).rejects.toThrow('E_VALIDATION')
+
+    const doc = JSON.stringify({
+      '@context': 'https://openvex.dev/ns/v0.2.0', '@id': 'urn:example:vex:1', 'author': 'exemple.test', 'timestamp': '2026-11-20T10:00:00Z', 'version': 1,
+      'statements': [{ vulnerability: { name: 'RUSTSEC_2020_0001' }, products: [{ '@id': 'pkg:cargo/example@1.0.0' }], status: 'fixed' }],
+    })
+    const res = await importVex(db.pool, projectId, doc, { dryRun: true, actor: { userId: users.ops.id, username: 'ops' } })
+    expect(res.effects).toMatchObject([{ action: 'refused', reason: 'validation' }])
+  })
+
   it('exception approuvée avant la 0.8 (sans déclaration matérialisée) : déclaration dérivée à la lecture', async () => {
     const id = (await db.pool.query<{ id: string }>(
       `INSERT INTO exceptions (project_id, kind, target, reason, expires_on, status, decided_at, decided_by, vex_status)

@@ -4,7 +4,8 @@ Copyright (C) 2026 Vincent Tisseront
 
 I19 : seuils de quality gate proposés par l'IA pour un projet, à partir de
 métadonnées de son historique seulement. La proposition passe d'elle-même
-dans le simulateur F9 (origin « ai ») : son effet s'affiche ici. Les
+dans le simulateur F9 (origin « ai ») : son effet s'affiche ici
+pour un opérateur. Les
 exceptions candidates sont montrées, jamais créées. « Reprendre dans le
 gate » ouvre la page du gate préremplie : un administrateur relit, simule et
 enregistre lui-même (audité « proposé par IA »). Rien n'est affiché sans
@@ -17,6 +18,7 @@ import type { SimulationRow } from '~/composables/useGateSimulation'
 const props = defineProps<{ projectId: string }>()
 const { t, te } = useI18n()
 const { api } = useApi()
+const session = useSession()
 const sim = useGateSimulation()
 const gate = ref<{ id: string, slug: string } | null>(null)
 const failed = ref(false)
@@ -40,8 +42,9 @@ async function simulate(taskId: string) {
   }
 }
 
+// Lancer un rejeu demande le rôle operator (comme « Simuler » sur la page du gate).
 function onLoaded(task: { id: string, status: string } | null) {
-  if (task?.status === 'done') void simulate(task.id)
+  if (task?.status === 'done' && session.can('operator')) void simulate(task.id)
 }
 
 const ruleLabel = (r: string) => (te(`gates.fields.${r}`) ? t(`gates.fields.${r}`) : r)

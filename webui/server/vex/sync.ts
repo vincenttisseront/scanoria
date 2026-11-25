@@ -70,15 +70,19 @@ async function exceptionSubjects(db: Queryable, e: ExceptionVexRow): Promise<{ v
   vulnIds = [...new Set(vulnIds.filter(v => VULN_ID_RE.test(v)))].slice(0, 10)
   if (!vulnIds.length) return null
   // Le SBOM du projet donne le purl exact (avec qualificatifs) ; à défaut, le paquet du résultat.
+  // Exception sur un résultat : seulement la version exacte de son paquet (une
+  // autre version du même paquet n'est jamais déclarée non affectée). Exception
+  // sur une vulnérabilité : toutes les versions du paquet, comme dans le gate.
   const names = [...new Set([pkgName, ...findingPkgs.map(p => p.name)].filter((n): n is string => !!n))]
+  const version = e.kind === 'finding' ? (findingPkgs[0]?.version ?? null) : null
   const products = new Set<string>()
   if (names.length) {
     const s = await db.query<{ purl: string }>(
       `SELECT DISTINCT c.purl FROM sbom_components c
-        WHERE c.project_id = $1 AND c.name = ANY($2::text[])
+        WHERE c.project_id = $1 AND c.name = ANY($2::text[]) AND ($3::text IS NULL OR c.version = $3)
           AND c.scan_id = (SELECT c2.scan_id FROM sbom_components c2 JOIN scans s ON s.id = c2.scan_id
                             WHERE c2.project_id = $1 ORDER BY s.queued_at DESC, s.id LIMIT 1)
-        ORDER BY c.purl LIMIT ${MAX_PRODUCTS_PER_EXCEPTION}`, [e.project_id, names])
+        ORDER BY c.purl LIMIT ${MAX_PRODUCTS_PER_EXCEPTION}`, [e.project_id, names, version])
     for (const r of s.rows) if (validPurl(r.purl)) products.add(r.purl)
   }
   if (!products.size) {

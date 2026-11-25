@@ -2887,6 +2887,7 @@ export default {
       unblocked: 'débloquée',
       unchanged: 'inchangée',
     },
+    loosened: 'Ces règles assouplissent le gate :',
     saveTitle: 'Enregistrer les règles',
     saveBody: 'Les nouvelles règles du gate {slug} s’appliqueront aux prochaines analyses de ses {n} projet(s). Effet simulé sur l’historique :',
   },
@@ -2951,6 +2952,8 @@ export default {
     statusLabel: 'Statut VEX',
     statusHelp: 'Facultatif. Une exception approuvée avec un statut VEX devient une déclaration VEX du projet.',
     statusNone: 'Aucun',
+    approveNote: 'L’approbation publiera une déclaration VEX « {status} » dans les exports et le rapport de release.',
+    importScope: 'Une demande issue d’un import vise le paquet dans toutes ses versions du projet : vérifiez le produit avant d’approuver.',
     proposed: 'Statut VEX proposé : {status}',
     status: {
       not_affected: 'non concerné',

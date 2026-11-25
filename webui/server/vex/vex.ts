@@ -23,6 +23,7 @@
 //   (H4) ni contre un verrou (G8) : requestException les refuse.
 
 import { z } from 'zod'
+import { ExceptionTargets } from '#shared/analysis'
 import type { Queryable } from '../utils/db'
 import { writeAudit } from '../utils/audit'
 import { ExceptionError, isoDay, isValidDay, MAX_EXCEPTION_DAYS, requestException } from '../findings/exceptions'
@@ -195,6 +196,10 @@ async function previewEffect(db: Queryable, projectId: string, s: VexStatement):
   if (/^MAL-/i.test(s.vuln_id)) return { ...base, action: 'refused', reason: 'malicious' }
   if (REQUEST_STATUSES.includes(s.status)) {
     const pkg = parsePurl(s.product)?.name ?? null
+    // Même validation que la demande elle-même : l'aperçu ne promet rien qu'elle refuserait.
+    if (!ExceptionTargets.vuln.safeParse(pkg ? { vuln_id: s.vuln_id, package: pkg.slice(0, 255) } : { vuln_id: s.vuln_id }).success) {
+      return { ...base, action: 'refused', reason: 'validation' }
+    }
     const dup = await db.query(
       `SELECT 1 FROM exceptions
         WHERE project_id = $1 AND kind = 'vuln' AND upper(target->>'vuln_id') = upper($2)

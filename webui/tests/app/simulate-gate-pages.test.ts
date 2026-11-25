@@ -14,7 +14,8 @@ import GatePage from '~/pages/gates/[id].vue'
 import GatesSuggestion from '~/components/gates/Suggestion.vue'
 import GatesSimulationResult from '~/components/gates/SimulationResult.vue'
 import { GateRules } from '#shared/analysis'
-import { rulesKey } from '~/composables/useGateSimulation'
+import { rulesKey, type SimulationRow } from '~/composables/useGateSimulation'
+import { loosenedRules } from '~/utils/gates'
 
 const { toastAdd } = vi.hoisted(() => ({ toastAdd: vi.fn() }))
 mockNuxtImport('useToast', () => () => ({ add: toastAdd }))
@@ -133,7 +134,7 @@ describe('F9 : simulation sur la page du gate', () => {
   it('résultat sans effet', async () => {
     const r = row(RULES)
     r.result = { ...r.result, by_rule: [], items: [], truncated: false, limited: false }
-    await mountIn(GatesSimulationResult, { props: { simulation: r } })
+    await mountIn(GatesSimulationResult, { props: { simulation: r as unknown as SimulationRow } })
     await settle()
     expect(bodyText()).toContain('Ces règles ne changent aucun verdict sur la période.')
   })
@@ -156,6 +157,21 @@ describe('I19 : seuils suggérés', () => {
     expect(bodyText()).toContain('« proposé par IA »')
     await click(button('Enregistrer'))
     expect(callsTo('PATCH', `/api/gates/${GATE}`)[0]!.body).toEqual({ rules: suggested, ai_task_id: TASK })
+  })
+
+  it('assouplissement signalé avant l’enregistrement', async () => {
+    setUser('admin')
+    const loose = { ...RULES, sast_block_from: null, max_secrets: 3, kev_blocks: false }
+    route('GET', `/api/gates/${GATE}`, () => detail())
+    route('GET', `/api/gates/suggestions/${TASK}`, () => ({ task_id: TASK, project_id: PROJECT, gate_id: GATE, gate_slug: 'defaut', rules: loose, rationale: 'x', exceptions: [], model: 'm', model_digest: null }))
+    route('POST', '/api/gates/simulations', (_e, body) => row((body as { rules: Record<string, unknown> }).rules))
+    await mountIn(GatePage, { route: `/gates/${GATE}?ai_task=${TASK}` })
+    await settle()
+    await click(document.body.querySelector('[data-testid="gate-save"]')!)
+    const alert = document.body.querySelector('[data-testid="gate-loosened"]')!.textContent!
+    expect(alert).toContain('Résultats SAST bloquants à partir de')
+    expect(alert).toContain('Secrets tolérés')
+    expect(alert).toContain('Vulnérabilité exploitée activement (KEV) bloquante')
   })
 
   it('proposition d’un autre gate ou indisponible : signalée, rien prérempli', async () => {
@@ -182,7 +198,7 @@ describe('I19 : seuils suggérés', () => {
   const aiOutput = () => ({ enabled: true, opt_out: false, task: { id: TASK, status: 'done', locale: 'fr', error: null, model: 'qwen-test:14b', model_digest: 'a'.repeat(64), generated_at: '2026-11-25T09:00:00Z', output, feedback: null } })
 
   it('panneau du projet : proposition, simulation automatique une fois, lien vers le gate', async () => {
-    setUser('viewer')
+    setUser('operator')
     route('GET', '/api/ai/output', aiOutput)
     route('POST', `/api/gates/projects/${PROJECT}/suggestion/simulate`, () => ({ task_id: TASK, gate_id: GATE, gate_slug: 'defaut', rules: suggested, simulation: { ...row(suggested), origin: 'ai', project_id: PROJECT } }))
     await mountIn(GatesSuggestion, { props: { projectId: PROJECT } })
@@ -198,8 +214,17 @@ describe('I19 : seuils suggérés', () => {
     expect(document.body.querySelector('[data-testid="gate-suggestion-open"]')!.getAttribute('href')).toBe(`/gates/${GATE}?ai_task=${TASK}`)
   })
 
-  it('simulation indisponible signalée', async () => {
+  it('lecteur : proposition affichée, aucun rejeu lancé', async () => {
     setUser('viewer')
+    route('GET', '/api/ai/output', aiOutput)
+    await mountIn(GatesSuggestion, { props: { projectId: PROJECT } })
+    await settle()
+    expect(bodyText()).toContain('Le SAST bloque trop souvent.')
+    expect(callsTo('POST', `/api/gates/projects/${PROJECT}/suggestion/simulate`)).toHaveLength(0)
+  })
+
+  it('simulation indisponible signalée', async () => {
+    setUser('operator')
     route('GET', '/api/ai/output', aiOutput)
     route('POST', `/api/gates/projects/${PROJECT}/suggestion/simulate`, () => apiFail(404, 'E_NOT_FOUND'))
     await mountIn(GatesSuggestion, { props: { projectId: PROJECT } })
@@ -215,5 +240,19 @@ describe('I19 : seuils suggérés', () => {
     await settle()
     expect(document.body.querySelector('[data-testid="gate-suggestion"]')).toBeNull()
     expect(callsTo('POST', `/api/gates/projects/${PROJECT}/suggestion/simulate`)).toHaveLength(0)
+  })
+})
+
+describe('règles assouplies', () => {
+  it('détecte chaque assouplissement, jamais un durcissement', () => {
+    const cur = GateRules.parse({})
+    expect(loosenedRules(cur, { ...cur })).toEqual([])
+    expect(loosenedRules(cur, { ...cur, sast_block_from: 'medium', max_secrets: 0, quarantine_days: 14, epss_block_from: 0.05 })).toEqual([])
+    expect(loosenedRules({ ...cur, new_code_only: false }, { ...cur, new_code_only: true })).toEqual(['new_code_only'])
+    expect(loosenedRules(cur, { ...cur, vuln_block_from: 'low' }).length).toBe(0)
+    expect(loosenedRules(cur, {
+      ...cur, vuln_block_from: 'critical', iac_block_from: null, max_secrets: 2, kev_blocks: false, license_denied_blocks: false,
+      epss_block_from: null, quarantine_days: 0, feed_max_age_days: null,
+    }).sort()).toEqual(['epss_block_from', 'feed_max_age_days', 'iac_block_from', 'kev_blocks', 'license_denied_blocks', 'max_secrets', 'quarantine_days', 'vuln_block_from'])
   })
 })

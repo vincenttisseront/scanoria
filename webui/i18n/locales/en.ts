@@ -2887,6 +2887,7 @@ export default {
       unblocked: 'unblocked',
       unchanged: 'unchanged',
     },
+    loosened: 'These rules loosen the gate:',
     saveTitle: 'Save the rules',
     saveBody: 'The new rules of gate {slug} will apply to the next analyses of its {n} project(s). Simulated effect on history:',
   },
@@ -2951,6 +2952,8 @@ export default {
     statusLabel: 'VEX status',
     statusHelp: 'Optional. An approved exception with a VEX status becomes a VEX statement of the project.',
     statusNone: 'None',
+    approveNote: 'Approving will publish a “{status}” VEX statement in the exports and the release report.',
+    importScope: 'A request from an import covers the package in all its versions in the project: check the product before approving.',
     proposed: 'Proposed VEX status: {status}',
     status: {
       not_affected: 'not affected',

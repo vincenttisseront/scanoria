@@ -12,9 +12,11 @@
 //   catégorie, gravité, nombre. Jamais un chemin, un message, un extrait ni
 //   rien d'un autre projet. Rien pour un projet « aucun envoi à l'IA ».
 // - L'IA ne touche qu'aux seuils (nouveau code seulement, secrets tolérés,
-//   gravités bloquantes des vulnérabilités, du SAST et de l'IaC). H4, G13, KEV,
-//   EPSS, licences, quarantaine et fraîcheur restent ceux du gate : une
-//   proposition ne les assouplit jamais.
+//   gravités bloquantes des vulnérabilités, du SAST et de l'IaC), qu'elle peut
+//   relever ou assouplir : la simulation montre l'effet et l'interface signale
+//   chaque assouplissement. H4, G13, KEV, EPSS, licences, quarantaine et
+//   fraîcheur restent ceux du gate, et le plancher verrouillé d'un profil (G8)
+//   s'applique toujours à l'évaluation.
 // - Les exceptions candidates ne visent que des règles vues dans l'historique,
 //   jamais un avis malveillant (MAL-, H4). Elles sont affichées, pas créées :
 //   une personne les demande elle-même (F5).

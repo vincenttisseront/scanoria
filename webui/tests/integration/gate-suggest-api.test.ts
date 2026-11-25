@@ -19,6 +19,7 @@ describe.skipIf(!DATABASE_URL)('seuils suggérés I19 (PostgreSQL réel, faux Ol
   let c: AiConsole
   let admin: Client
   let viewer: Client
+  let operator: Client
   let projectId: string
   let optOutId: string
   let gateId: string
@@ -47,6 +48,7 @@ describe.skipIf(!DATABASE_URL)('seuils suggérés I19 (PostgreSQL réel, faux Ol
     c = await startAiConsole('gate-suggest')
     admin = await c.login('gs-admin', 'admin')
     viewer = await c.login('gs-viewer', 'viewer')
+    operator = await c.login('gs-operator', 'operator')
     gateId = (await c.db.pool.query<{ id: string }>(`SELECT id FROM gates WHERE slug = 'defaut'`)).rows[0]!.id
     projectId = await seed('boutique', false)
     optOutId = await seed('confidentiel', true)
@@ -59,7 +61,7 @@ describe.skipIf(!DATABASE_URL)('seuils suggérés I19 (PostgreSQL réel, faux Ol
   it('sans connecteur : aucune tâche, aucune simulation, page identique', async () => {
     const r = await c.call('/api/ai/explain', { method: 'POST', client: viewer, json: { kind: 'suggest-gate', subject_id: projectId } })
     expect(r.data).toEqual({ task_id: null })
-    expect((await c.call(`/api/gates/projects/${projectId}/suggestion/simulate`, { method: 'POST', client: viewer })).status).toBe(404)
+    expect((await c.call(`/api/gates/projects/${projectId}/suggestion/simulate`, { method: 'POST', client: operator })).status).toBe(404)
     expect((await c.call(`/api/gates/projects/${projectId}`, { client: viewer })).status).toBe(200)
   })
 
@@ -82,13 +84,15 @@ describe.skipIf(!DATABASE_URL)('seuils suggérés I19 (PostgreSQL réel, faux Ol
     expect(output.exceptions.map(e => e.rule_id)).toEqual(['javascript.audit.regexp'])
     expect(output.rules).toMatchObject({ iac_block_from: 'none', new_code_only: true })
 
-    const s1 = await c.call(`/api/gates/projects/${projectId}/suggestion/simulate`, { method: 'POST', client: viewer })
+    // Lancer un rejeu demande le rôle operator.
+    expect((await c.call(`/api/gates/projects/${projectId}/suggestion/simulate`, { method: 'POST', client: viewer })).status).toBe(403)
+    const s1 = await c.call(`/api/gates/projects/${projectId}/suggestion/simulate`, { method: 'POST', client: operator })
     expect(s1.status).toBe(200)
     expect(s1.data.simulation).toMatchObject({ origin: 'ai', status: 'done', project_id: projectId })
     // Seuils seulement : KEV, EPSS, licences, quarantaine et fraîcheur restent ceux du gate.
     expect(s1.data.rules).toMatchObject({ iac_block_from: null, kev_blocks: true, license_denied_blocks: true, quarantine_days: 7, feed_max_age_days: 7 })
     expect(s1.data.simulation.result.scans.total).toBe(3)
-    const s2 = await c.call(`/api/gates/projects/${projectId}/suggestion/simulate`, { method: 'POST', client: viewer })
+    const s2 = await c.call(`/api/gates/projects/${projectId}/suggestion/simulate`, { method: 'POST', client: operator })
     expect(s2.data.simulation.id).toBe(s1.data.simulation.id)
 
     // Enregistrement : clic d'un administrateur, audité « proposé par IA ».
@@ -116,7 +120,7 @@ describe.skipIf(!DATABASE_URL)('seuils suggérés I19 (PostgreSQL réel, faux Ol
     expect(r.data).toEqual({ task_id: null })
     await c.drain()
     expect(c.fake.chatCount()).toBe(before)
-    expect((await c.call(`/api/gates/projects/${optOutId}/suggestion/simulate`, { method: 'POST', client: viewer })).status).toBe(404)
+    expect((await c.call(`/api/gates/projects/${optOutId}/suggestion/simulate`, { method: 'POST', client: operator })).status).toBe(404)
     expect((await c.call(`/api/gates/suggestions/${crypto.randomUUID()}`, { client: viewer })).status).toBe(404)
   })
 })

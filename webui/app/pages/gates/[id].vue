@@ -138,6 +138,9 @@ async function applySuggestion() {
     suggestionError.value = t('gateSuggest.unavailable')
   }
 }
+/** Règles que le formulaire assouplit par rapport aux règles enregistrées. */
+const loosened = computed(() => (gate.value && parsed.value.success ? loosenedRules(GateRules.parse(gate.value.rules), parsed.value.data) : []))
+
 /** Mention IA tant que le formulaire porte encore la proposition (modifiée ou non). */
 const aiTaskId = computed(() => suggestion.value?.task_id ?? null)
 
@@ -151,6 +154,8 @@ async function save() {
     toast.add({ title: t('gates.saved'), color: 'success' })
     saveOpen.value = false
     suggestion.value = null
+    // La proposition est enregistrée : elle ne doit pas revenir au rechargement.
+    if (route.query.ai_task) await navigateTo({ path: route.path, query: {} }, { replace: true })
     await load()
   }
   catch (err) {
@@ -536,6 +541,15 @@ async function remove() {
       >
         {{ t('gateSuggest.auditNote') }}
       </p>
+      <UAlert
+        v-if="loosened.length"
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-triangle-alert"
+        :title="t('gateSim.loosened')"
+        :description="loosened.map(k => t(`gates.fields.${k}`)).join(', ')"
+        data-testid="gate-loosened"
+      />
       <GatesSimulationResult
         v-if="sim.simulation.value?.result"
         :simulation="sim.simulation.value"

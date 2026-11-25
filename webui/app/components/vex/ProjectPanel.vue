@@ -201,6 +201,9 @@ watch(docText, () => {
           <p class="text-muted">
             {{ t('vex.importHelp') }}
           </p>
+          <p class="text-xs text-warning">
+            {{ t('vex.importScope') }}
+          </p>
           <input
             type="file"
             accept=".json,application/json"

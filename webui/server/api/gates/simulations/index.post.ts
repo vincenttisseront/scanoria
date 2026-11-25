@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
     return row
   }
   catch (err) {
-    if (err instanceof SimulationError) throw apiError(err.code === 'E_NOT_FOUND' ? 404 : 400, err.code)
+    if (err instanceof SimulationError) throw apiError(err.code === 'E_NOT_FOUND' ? 404 : err.code === 'E_RATE_LIMITED' ? 429 : 400, err.code)
     throw err
   }
 })
