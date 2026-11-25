@@ -40,7 +40,10 @@ options:
   properties: {}
 scan:
   inputs: [repo, archive]
-  command: ["/app/bin/kics", "scan", "--path", "/src", "--output-path", "/out", "--output-name", "kics",
+  # KICS écrit les chemins relativement au répertoire courant (/app/bin dans
+  # l'image, d'où des « ../../src/… ») : il est lancé depuis /src sur « . ».
+  command: ["/bin/sh", "-c", "cd /src && exec \"$0\" \"$@\"",
+            "/app/bin/kics", "scan", "--path", ".", "--output-path", "/out", "--output-name", "kics",
             "--report-formats", "sarif", "--ci", "--no-progress",
             "--disable-secrets", "--ignore-on-exit", "results",
             "--queries-path", "/app/bin/assets/queries", "--queries-path", "/rules"]
@@ -56,7 +59,10 @@ outputs:
 testbed:
   path: testbed/
   expect:
-    # Relevé sur la sortie enregistrée (identifiants de requête KICS).
-    - { rule: kics-placeholder, category: iac, min: 1 }
+    # Relevé sur la sortie enregistrée (identifiants de requête KICS 2.2.1).
+    - { rule: 65905cec-d691-4320-b320-2000436cb696, category: iac, min: 1 }   # SSH ouvert à tout Internet
+    - { rule: 38c5ee0d-7f22-4260-ab72-5073048df100, category: iac, min: 1 }   # ACL S3 publique
+    - { rule: fd54f200-402c-4333-a5a4-36ef6709af2f, category: iac, min: 1 }   # Dockerfile sans USER
+    - { rule: f45ea400-6bbe-4501-9fc7-1c3d75c32067, category: iac, min: 1 }   # étiquette latest
 health: { command: ["/app/bin/kics", "version"] }
 upgrade: { policy: on-demand }

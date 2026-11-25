@@ -94,7 +94,14 @@ export interface ScanPlan {
   version: typeof PLAN_VERSION
   created_at: string
   /** « sbom » (0.5) : re-corrélation d'un SBOM déjà relevé (contrat 16). */
-  source: { kind: 'git' | 'archive' | 'sbom', ref: string, commit: string | null, history: 'shallow' | 'full' }
+  source: {
+    kind: 'git' | 'archive' | 'sbom'
+    ref: string
+    commit: string | null
+    history: 'shallow' | 'full'
+    /** 0.7 (D, contrat 33) : analyse incrémentale d'une PR, fichiers modifiés figés (G11, G18). */
+    changed_files?: string[]
+  }
   profile: { id: string, slug: string, categories: string[], include_modules: string[], exclude_modules: string[] }
   gate: { id: string, slug: string, rules: GateRules }
   modules: PlannedModule[]
@@ -332,6 +339,7 @@ export const scanPlanSchema = z.object({
     ref: z.string(),
     commit: z.string().nullable(),
     history: z.enum(['shallow', 'full']),
+    changed_files: z.array(z.string().min(1).max(1024)).max(3000).optional(),
   }),
   profile: z.object({
     id: z.string(), slug: z.string(), categories: z.array(z.string()),
@@ -352,4 +360,20 @@ export const scanPlanSchema = z.object({
 export function parsePlan(value: unknown): ScanPlan | null {
   const parsed = scanPlanSchema.safeParse(value)
   return parsed.success ? parsed.data as ScanPlan : null
+}
+
+/**
+ * 0.7 (D, contrat 33) : fichiers modifiés d'une analyse incrémentale de PR,
+ * figés dans le plan (G11). Absents, trop nombreux ou analyse non
+ * incrémentale : rien (analyse complète).
+ */
+export function incrementalFiles(scan: { incremental?: boolean | null, pull_request?: unknown }): string[] | undefined {
+  if (!scan.incremental) return undefined
+  const files = (scan.pull_request as { changed_files?: unknown } | null)?.changed_files
+  if (!Array.isArray(files) || files.length > 3000) return undefined
+  const ok = files.filter((f): f is string => typeof f === 'string' && f.length > 0 && f.length <= 1024
+    && !f.startsWith('/') && !f.split('/').some(s => s === '' || s === '.' || s === '..')
+    // eslint-disable-next-line no-control-regex
+    && !/[\u0000-\u001F\u007F]/.test(f))
+  return ok.length === files.length ? ok : undefined
 }
