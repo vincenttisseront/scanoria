@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Image d'outil Scanoria pour Opengrep (0.7, chantier A). Opengrep ne publie
+# aucune image de conteneur : seulement des binaires statiques signés par
+# cosign dans ses releases GitHub. Cette image part de python:3.13-slim
+# (épinglée par empreinte, déjà utilisée par le catalogue : l'enveloppe
+# sast_run.py de l'appliance est en Python) et y dépose le binaire
+# opengrep_linux_x86 de la version épinglée, vérifié par son sha256 ; la
+# signature cosign est vérifiée par verify.sh avant la construction.
+# Contexte de construction : ce dossier seul.
+FROM docker.io/library/python@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
+
+ARG SOURCE_DATE_EPOCH
+ARG OPENGREP_VERSION=v2.0.0
+ARG OPENGREP_SHA256=37e93f4da5fd04a18c5c1febbdd12f7e98dfccd4d0c9cf2593bcb25eeb462da0
+
+LABEL org.opencontainers.image.source="https://github.com/opengrep/opengrep" \
+      org.opencontainers.image.revision="v2.0.0" \
+      org.opencontainers.image.version="2.0.0" \
+      org.opencontainers.image.licenses="LGPL-2.1-only" \
+      org.opencontainers.image.description="Opengrep for Scanoria (static release binary, sha256-pinned)" \
+      io.scanoria.module="opengrep"
+
+# Téléchargement par la bibliothèque standard (l'image n'a ni curl ni wget),
+# puis contrôle de l'empreinte : une seule octet différent arrête la construction.
+RUN python3 -I -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \
+        "https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/opengrep_linux_x86" \
+        /usr/local/bin/opengrep \
+    && echo "${OPENGREP_SHA256}  /usr/local/bin/opengrep" | sha256sum -c - \
+    && chmod 0755 /usr/local/bin/opengrep \
+    && /usr/local/bin/opengrep --version
+
+USER 65534:65534

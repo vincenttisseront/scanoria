@@ -103,6 +103,7 @@ const sections = computed<NavigationMenuItem[][]>(() => {
       session.can('admin') && { label: t('triage.approvals.nav'), icon: 'i-lucide-stamp', to: '/findings/approvals', active: under('/findings/approvals'), badge: pending.count.value ? String(pending.count.value) : undefined },
       { label: t('components.nav'), icon: 'i-lucide-boxes', to: '/components', active: under('/components') },
       { label: t('gates.nav'), icon: 'i-lucide-gauge', to: '/gates', active: under('/gates') },
+      { label: t('rulesets.nav'), icon: 'i-lucide-file-code-2', to: '/rulesets', active: under('/rulesets') },
       { label: t('licenses.nav'), icon: 'i-lucide-scale', to: '/system/licenses', active: under('/system/licenses') },
       { label: t('nav.short.health'), icon: 'i-lucide-activity', to: '/scans/health', active: under('/scans/health') },
     ]),

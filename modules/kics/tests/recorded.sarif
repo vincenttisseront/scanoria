@@ -1,0 +1,1013 @@
+{
+	"$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+	"version": "2.1.0",
+	"runs": [
+		{
+			"tool": {
+				"driver": {
+					"name": "KICS",
+					"version": "v2.2.1",
+					"fullName": "Keeping Infrastructure as Code Secure",
+					"informationUri": "https://www.kics.io/",
+					"rules": [
+						{
+							"id": "38c5ee0d-7f22-4260-ab72-5073048df100",
+							"name": "S3 Bucket ACL Allows Read Or Write to All Users",
+							"shortDescription": {
+								"text": "S3 Bucket ACL Allows Read Or Write to All Users"
+							},
+							"fullDescription": {
+								"text": "S3 Buckets should not be readable and writable to all users"
+							},
+							"defaultConfiguration": {
+								"level": "error"
+							},
+							"helpUri": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT001",
+										"index": 1,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "9.1"
+							}
+						},
+						{
+							"id": "fd54f200-402c-4333-a5a4-36ef6709af2f",
+							"name": "Missing User Instruction",
+							"shortDescription": {
+								"text": "Missing User Instruction"
+							},
+							"fullDescription": {
+								"text": "Always set a user in the runtime stage of your Dockerfile. Without it, the container defaults to root, even if earlier build stages define a user."
+							},
+							"defaultConfiguration": {
+								"level": "error"
+							},
+							"helpUri": "https://docs.docker.com/engine/reference/builder/#user",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT005",
+										"index": 13,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "7.7"
+							}
+						},
+						{
+							"id": "381c3f2a-ef6f-4eff-99f7-b169cda3422c",
+							"name": "Sensitive Port Is Exposed To Entire Network",
+							"shortDescription": {
+								"text": "Sensitive Port Is Exposed To Entire Network"
+							},
+							"fullDescription": {
+								"text": "A sensitive port, such as port 23 or port 110, is open for the whole network in either TCP or UDP protocol"
+							},
+							"defaultConfiguration": {
+								"level": "error"
+							},
+							"helpUri": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT009",
+										"index": 3,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "7.7"
+							}
+						},
+						{
+							"id": "4728cd65-a20c-49da-8b31-9c08b423e4db",
+							"name": "Unrestricted Security Group Ingress",
+							"shortDescription": {
+								"text": "Unrestricted Security Group Ingress"
+							},
+							"fullDescription": {
+								"text": "Security groups allow ingress from 0.0.0.0:0 and/or ::/0"
+							},
+							"defaultConfiguration": {
+								"level": "error"
+							},
+							"helpUri": "https://www.terraform.io/docs/providers/aws/r/security_group.html",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT009",
+										"index": 3,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "7.2"
+							}
+						},
+						{
+							"id": "f45ea400-6bbe-4501-9fc7-1c3d75c32067",
+							"name": "Image Version Using 'latest'",
+							"shortDescription": {
+								"text": "Image Version Using 'latest'"
+							},
+							"fullDescription": {
+								"text": "When building images, always tag them with useful tags which codify version information, intended destination (prod or test, for instance), stability, or other information that is useful when deploying the application in different environments. Do not rely on the automatically-created latest tag"
+							},
+							"defaultConfiguration": {
+								"level": "warning"
+							},
+							"helpUri": "https://docs.docker.com/develop/dev-best-practices/",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT004",
+										"index": 2,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "5.1"
+							}
+						},
+						{
+							"id": "f861041c-8c9f-4156-acfc-5e6e524f5884",
+							"name": "S3 Bucket Logging Disabled",
+							"shortDescription": {
+								"text": "S3 Bucket Logging Disabled"
+							},
+							"fullDescription": {
+								"text": "Server Access Logging should be enabled on S3 Buckets so that all changes are logged and trackable"
+							},
+							"defaultConfiguration": {
+								"level": "warning"
+							},
+							"helpUri": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT010",
+										"index": 4,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "5.1"
+							}
+						},
+						{
+							"id": "568a4d22-3517-44a6-a7ad-6a7eed88722c",
+							"name": "S3 Bucket Without Versioning",
+							"shortDescription": {
+								"text": "S3 Bucket Without Versioning"
+							},
+							"fullDescription": {
+								"text": "S3 bucket should have versioning enabled"
+							},
+							"defaultConfiguration": {
+								"level": "warning"
+							},
+							"helpUri": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket#versioning",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT003",
+										"index": 8,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "5.7"
+							}
+						},
+						{
+							"id": "65905cec-d691-4320-b320-2000436cb696",
+							"name": "Security Group With Unrestricted Access To SSH",
+							"shortDescription": {
+								"text": "Security Group With Unrestricted Access To SSH"
+							},
+							"fullDescription": {
+								"text": "'SSH' (TCP:22) should not be public in AWS Security Group"
+							},
+							"defaultConfiguration": {
+								"level": "warning"
+							},
+							"helpUri": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT009",
+										"index": 3,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "5.2"
+							}
+						},
+						{
+							"id": "d3499f6d-1651-41bb-a9a7-de925fea487b",
+							"name": "Unpinned Package Version in Apk Add",
+							"shortDescription": {
+								"text": "Unpinned Package Version in Apk Add"
+							},
+							"fullDescription": {
+								"text": "Package version pinning reduces the range of versions that can be installed, reducing the chances of failure due to unanticipated changes"
+							},
+							"defaultConfiguration": {
+								"level": "warning"
+							},
+							"helpUri": "https://docs.docker.com/develop/develop-images/dockerfile_best-practices/",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT013",
+										"index": 6,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "5.7"
+							}
+						},
+						{
+							"id": "b03a748a-542d-44f4-bb86-9199ab4fd2d5",
+							"name": "Healthcheck Instruction Missing",
+							"shortDescription": {
+								"text": "Healthcheck Instruction Missing"
+							},
+							"fullDescription": {
+								"text": "Ensure that HEALTHCHECK is being used. The HEALTHCHECK instruction tells Docker how to test a container to check that it is still working"
+							},
+							"defaultConfiguration": {
+								"level": "note"
+							},
+							"helpUri": "https://docs.docker.com/engine/reference/builder/#healthcheck",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT007",
+										"index": 14,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "3.6"
+							}
+						},
+						{
+							"id": "e592a0c5-5bdb-414c-9066-5dba7cdea370",
+							"name": "IAM Access Analyzer Not Enabled",
+							"shortDescription": {
+								"text": "IAM Access Analyzer Not Enabled"
+							},
+							"fullDescription": {
+								"text": "IAM Access Analyzer should be enabled and configured to continuously monitor resource permissions"
+							},
+							"defaultConfiguration": {
+								"level": "note"
+							},
+							"helpUri": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/accessanalyzer_analyzer",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT004",
+										"index": 2,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "3.5"
+							}
+						},
+						{
+							"id": "e38a8e0a-b88b-4902-b3fe-b0fcb17d5c10",
+							"name": "Resource Not Using Tags",
+							"shortDescription": {
+								"text": "Resource Not Using Tags"
+							},
+							"fullDescription": {
+								"text": "AWS services resource tags are an essential part of managing components. As a best practice, the field 'tags' should have additional tags defined other than 'Name'"
+							},
+							"defaultConfiguration": {
+								"level": "none"
+							},
+							"helpUri": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/guides/resource-tagging",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT004",
+										"index": 2,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "0.0"
+							}
+						},
+						{
+							"id": "4849211b-ac39-479e-ae78-5694d506cb24",
+							"name": "Security Group Not Used",
+							"shortDescription": {
+								"text": "Security Group Not Used"
+							},
+							"fullDescription": {
+								"text": "Security group must be used or not declared"
+							},
+							"defaultConfiguration": {
+								"level": "none"
+							},
+							"helpUri": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT001",
+										"index": 1,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "0.0"
+							}
+						},
+						{
+							"id": "68eb4bf3-f9bf-463d-b5cf-e029bb446d2e",
+							"name": "Security Group Rule Without Description",
+							"shortDescription": {
+								"text": "Security Group Rule Without Description"
+							},
+							"fullDescription": {
+								"text": "It's considered a best practice for all rules in AWS Security Group to have a description"
+							},
+							"defaultConfiguration": {
+								"level": "none"
+							},
+							"helpUri": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group#description",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT004",
+										"index": 2,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "0.0"
+							}
+						},
+						{
+							"id": "cb3f5ed6-0d18-40de-a93d-b3538db31e8c",
+							"name": "Security Group Without Description",
+							"shortDescription": {
+								"text": "Security Group Without Description"
+							},
+							"fullDescription": {
+								"text": "It's considered a best practice for AWS Security Group to have a description"
+							},
+							"defaultConfiguration": {
+								"level": "none"
+							},
+							"helpUri": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group#description",
+							"relationships": [
+								{
+									"target": {
+										"id": "CAT004",
+										"index": 2,
+										"toolComponent": {
+											"name": "Categories",
+											"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f"
+										}
+									}
+								}
+							],
+							"properties": {
+								"riskScore": "0.0"
+							}
+						}
+					]
+				}
+			},
+			"results": [
+				{
+					"ruleId": "38c5ee0d-7f22-4260-ab72-5073048df100",
+					"ruleIndex": 0,
+					"kind": "fail",
+					"message": {
+						"text": "aws_s3_bucket_acl[public-read].acl is %!s(MISSING)",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "9.1"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 18
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "fd54f200-402c-4333-a5a4-36ef6709af2f",
+					"ruleIndex": 1,
+					"kind": "fail",
+					"message": {
+						"text": "The 'Dockerfile' does not contain any 'USER' instruction",
+						"properties": {
+							"platform": "Dockerfile",
+							"riskScore": "7.7"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/Dockerfile"
+								},
+								"region": {
+									"startLine": 2
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "381c3f2a-ef6f-4eff-99f7-b169cda3422c",
+					"ruleIndex": 2,
+					"kind": "fail",
+					"message": {
+						"text": "SSH (TCP:22) is allowed",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "7.7"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 4
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "4728cd65-a20c-49da-8b31-9c08b423e4db",
+					"ruleIndex": 3,
+					"kind": "fail",
+					"message": {
+						"text": "aws_security_group[ssh_world].ingress.cidr_blocks contains '0.0.0.0/0'",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "7.2"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 8
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "f45ea400-6bbe-4501-9fc7-1c3d75c32067",
+					"ruleIndex": 4,
+					"kind": "fail",
+					"message": {
+						"text": "FROM docker.io/library/alpine:latest'",
+						"properties": {
+							"platform": "Dockerfile",
+							"riskScore": "5.1"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/Dockerfile"
+								},
+								"region": {
+									"startLine": 2
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "f861041c-8c9f-4156-acfc-5e6e524f5884",
+					"ruleIndex": 5,
+					"kind": "fail",
+					"message": {
+						"text": "'logging' is undefined or null",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "5.1"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 12
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "568a4d22-3517-44a6-a7ad-6a7eed88722c",
+					"ruleIndex": 6,
+					"kind": "fail",
+					"message": {
+						"text": "'versioning' is undefined or null",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "5.7"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 12
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "65905cec-d691-4320-b320-2000436cb696",
+					"ruleIndex": 7,
+					"kind": "fail",
+					"message": {
+						"text": "aws_security_group[ssh_world].ingress 'SSH' (Port:22) is open",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "5.2"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 4
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "d3499f6d-1651-41bb-a9a7-de925fea487b",
+					"ruleIndex": 8,
+					"kind": "fail",
+					"message": {
+						"text": "RUN instruction apk add --no-cache curl does not use package pinning form",
+						"properties": {
+							"platform": "Dockerfile",
+							"riskScore": "5.7"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/Dockerfile"
+								},
+								"region": {
+									"startLine": 3
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "b03a748a-542d-44f4-bb86-9199ab4fd2d5",
+					"ruleIndex": 9,
+					"kind": "fail",
+					"message": {
+						"text": "Dockerfile doesn't contain instruction 'HEALTHCHECK'",
+						"properties": {
+							"platform": "Dockerfile",
+							"riskScore": "3.6"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/Dockerfile"
+								},
+								"region": {
+									"startLine": 2
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "e592a0c5-5bdb-414c-9066-5dba7cdea370",
+					"ruleIndex": 10,
+					"kind": "fail",
+					"message": {
+						"text": "'aws_accessanalyzer_analyzer' is undefined",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "3.5"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 2
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "e38a8e0a-b88b-4902-b3fe-b0fcb17d5c10",
+					"ruleIndex": 11,
+					"kind": "informational",
+					"message": {
+						"text": "aws_s3_bucket[{{public}}].tags is undefined or null",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "0.0"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 12
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "e38a8e0a-b88b-4902-b3fe-b0fcb17d5c10",
+					"ruleIndex": 11,
+					"kind": "informational",
+					"message": {
+						"text": "aws_security_group[{{ssh_world}}].tags is undefined or null",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "0.0"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 2
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "4849211b-ac39-479e-ae78-5694d506cb24",
+					"ruleIndex": 12,
+					"kind": "informational",
+					"message": {
+						"text": "'aws_security_group[ssh_world]' is not used",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "0.0"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 2
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "68eb4bf3-f9bf-463d-b5cf-e029bb446d2e",
+					"ruleIndex": 13,
+					"kind": "informational",
+					"message": {
+						"text": "aws_security_group[ssh_world].ingress.description is undefined or null",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "0.0"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 4
+								}
+							}
+						}
+					]
+				},
+				{
+					"ruleId": "cb3f5ed6-0d18-40de-a93d-b3538db31e8c",
+					"ruleIndex": 14,
+					"kind": "informational",
+					"message": {
+						"text": "aws_security_group[ssh_world] description is undefined or null",
+						"properties": {
+							"platform": "Terraform",
+							"riskScore": "0.0"
+						}
+					},
+					"locations": [
+						{
+							"physicalLocation": {
+								"artifactLocation": {
+									"uri": "infra/main.tf"
+								},
+								"region": {
+									"startLine": 2
+								}
+							}
+						}
+					]
+				}
+			],
+			"taxonomies": [
+				{
+					"guid": "58cdcc6f-fe41-4724-bfb3-131a93df4c3f",
+					"name": "Categories",
+					"fullDescription": {
+						"text": "This taxonomy contains the types an issue can assume"
+					},
+					"shortDescription": {
+						"text": "Vulnerabilities categories"
+					},
+					"taxa": [
+						{
+							"name": "Undefined Category",
+							"id": "CAT000",
+							"shortDescription": {
+								"text": "Category is not defined"
+							},
+							"fullDescription": {
+								"text": "Category is not defined"
+							}
+						},
+						{
+							"name": "Access Control",
+							"id": "CAT001",
+							"shortDescription": {
+								"text": "Service permission and identity management"
+							},
+							"fullDescription": {
+								"text": "Service permission and identity management"
+							}
+						},
+						{
+							"name": "Best Practices",
+							"id": "CAT004",
+							"shortDescription": {
+								"text": "Metadata management"
+							},
+							"fullDescription": {
+								"text": "Metadata management"
+							}
+						},
+						{
+							"name": "Networking and Firewall",
+							"id": "CAT009",
+							"shortDescription": {
+								"text": "Network port exposure and firewall configuration"
+							},
+							"fullDescription": {
+								"text": "Network port exposure and firewall configuration"
+							}
+						},
+						{
+							"name": "Observability",
+							"id": "CAT010",
+							"shortDescription": {
+								"text": "Logging and Monitoring"
+							},
+							"fullDescription": {
+								"text": "Logging and Monitoring"
+							}
+						},
+						{
+							"name": "Resource Management",
+							"id": "CAT011",
+							"shortDescription": {
+								"text": "Resource and privilege limit configuration"
+							},
+							"fullDescription": {
+								"text": "Resource and privilege limit configuration"
+							}
+						},
+						{
+							"name": "Supply-Chain",
+							"id": "CAT013",
+							"shortDescription": {
+								"text": "Dependency version management"
+							},
+							"fullDescription": {
+								"text": "Dependency version management"
+							}
+						},
+						{
+							"name": "Structure and Semantics",
+							"id": "CAT014",
+							"shortDescription": {
+								"text": "Malformed document structure or inadequate semantics"
+							},
+							"fullDescription": {
+								"text": "Malformed document structure or inadequate semantics"
+							}
+						},
+						{
+							"name": "Backup",
+							"id": "CAT003",
+							"shortDescription": {
+								"text": "Survivability and Recovery"
+							},
+							"fullDescription": {
+								"text": "Survivability and Recovery"
+							}
+						},
+						{
+							"name": "Encryption",
+							"id": "CAT006",
+							"shortDescription": {
+								"text": "Data Security and Encryption configuration"
+							},
+							"fullDescription": {
+								"text": "Data Security and Encryption configuration"
+							}
+						},
+						{
+							"name": "Insecure Defaults",
+							"id": "CAT008",
+							"shortDescription": {
+								"text": "Configurations that are insecure by default"
+							},
+							"fullDescription": {
+								"text": "Configurations that are insecure by default"
+							}
+						},
+						{
+							"name": "Secret Management",
+							"id": "CAT012",
+							"shortDescription": {
+								"text": "Secret and Key management"
+							},
+							"fullDescription": {
+								"text": "Secret and Key management"
+							}
+						},
+						{
+							"name": "Availability",
+							"id": "CAT002",
+							"shortDescription": {
+								"text": "Reliability and Scalability"
+							},
+							"fullDescription": {
+								"text": "Reliability and Scalability"
+							}
+						},
+						{
+							"name": "Build Process",
+							"id": "CAT005",
+							"shortDescription": {
+								"text": "Insecure configurations when building/deploying"
+							},
+							"fullDescription": {
+								"text": "Insecure configurations when building/deploying"
+							}
+						},
+						{
+							"name": "Insecure Configurations",
+							"id": "CAT007",
+							"shortDescription": {
+								"text": "Configurations which expose the application unnecessarily"
+							},
+							"fullDescription": {
+								"text": "Configurations which expose the application unnecessarily"
+							}
+						},
+						{
+							"name": "Bill Of Materials",
+							"id": "CAT015",
+							"shortDescription": {
+								"text": "List of resources provisioned"
+							},
+							"fullDescription": {
+								"text": "List of resources provisioned"
+							}
+						}
+					]
+				}
+			]
+		}
+	]
+}

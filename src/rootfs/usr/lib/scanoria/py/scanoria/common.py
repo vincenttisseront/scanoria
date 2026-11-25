@@ -71,6 +71,7 @@ REQUEST_TYPES = (
     "export-bundle", "import-bundle", "set-mirror", "trust-key",
     "self-sbom", "run-canaries", "start-trial",
     "prefetch-images",
+    "validate-ruleset",
 )
 REJECT_CODES = frozenset((
     "E_INVALID_NAME", "E_NOT_REGULAR_FILE", "E_BAD_OWNER", "E_TOO_LARGE", "E_INVALID_JSON",
@@ -95,6 +96,7 @@ ERROR_CODES = frozenset((
     "E_KEY_INVALID",
     "E_CANARY_FAILED", "E_TRIAL_INVALID", "E_TRIAL_IMAGE", "E_SELFSBOM_IMAGE", "E_SELFSBOM_OUTPUT",
     "E_PREFETCH_FAILED", "E_PREFETCH_UNKNOWN_IMAGE",
+    "E_RULESET_INVALID", "E_RULESET_MISSING", "E_RULESET_NONE", "E_RULESET_ENGINE_MISSING",
     "E_RELAY_UNAVAILABLE", "E_RELAY_TOKEN",
 ))
 ALL_CODES = frozenset(("OK",)) | REJECT_CODES | ERROR_CODES

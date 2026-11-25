@@ -63,6 +63,10 @@ scan:
   history_command: ["gitleaks", "git", "/src", "--no-banner", "--redact", "--exit-code", "0",
                     "--max-target-megabytes", "{opt.max_target_megabytes}",
                     "--report-format", "sarif", "--report-path", "/out/result.sarif"]
+  # 0.7 (G4, contrat 34) : configuration gitleaks gérée dans la console (un seul
+  # jeu de règles du moteur « gitleaks »), passée par GITLEAKS_CONFIG ; sans jeu
+  # rattaché, gitleaks garde sa configuration par défaut. Ignoré avant la 0.7.
+  rulesets: { engine: gitleaks, mount: /rules, env: GITLEAKS_CONFIG }
   timeout_s: 900
   network: none
   exit_codes_ok: [0]
