@@ -61,6 +61,17 @@ describe('masquage des secrets', () => {
     expect(redactText(`x = "${v}"`).text).not.toContain(v)
   })
 
+  it('masque une valeur aléatoire faite de lettres seules, en casse mélangée', () => {
+    const v = 'jUKDJoNTkhbzDRuEIbePhtZgbEYHrEAs'
+    expect(redactText(`x = "${v}"`).text).not.toContain(v)
+  })
+
+  it('laisse intacts les identifiants en camelCase ou PascalCase', () => {
+    for (const id of ['getUserAccountByIdentifier', 'AbstractSingletonProxyFactoryBean', 'handleIncomingWebhookRequest']) {
+      expect(redactText(`x = ${id}()`).text).toContain(id)
+    }
+  })
+
   it('laisse intact le code ordinaire', () => {
     const code = 'def find(name):\n    return db.execute(f"SELECT * FROM users WHERE name = \'{name}\'")'
     expect(redactText(code)).toEqual({ text: code, count: 0 })

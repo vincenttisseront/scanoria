@@ -6,6 +6,7 @@
 // verrouillage, premier administrateur.
 
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -100,6 +101,72 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
     })
   })
 
+  describe('0.7 (014 profils, 015 forges)', () => {
+    it('hiérarchie des profils sans cycle, archivage', async () => {
+      const q = db.pool
+      const ent = (await q.query<{ id: string }>(`INSERT INTO profiles (slug, level) VALUES ('ent14', 'enterprise') RETURNING id`)).rows[0]!.id
+      const team = (await q.query<{ id: string }>(`INSERT INTO profiles (slug, level, parent_id) VALUES ('team14', 'team', $1) RETURNING id`, [ent])).rows[0]!.id
+      const proj = (await q.query<{ id: string }>(`INSERT INTO profiles (slug, level, parent_id) VALUES ('proj14', 'project', $1) RETURNING id`, [team])).rows[0]!.id
+      await q.query(`INSERT INTO profiles (slug, level, parent_id) VALUES ('proj14b', 'project', $1)`, [ent])
+      await expect(q.query(`INSERT INTO profiles (slug, level, parent_id) VALUES ('team14b', 'team', $1)`, [team])).rejects.toThrow(/profiles_parent_level|higher level/)
+      await expect(q.query(`INSERT INTO profiles (slug, level, parent_id) VALUES ('team14c', 'team', $1)`, [proj])).rejects.toThrow(/higher level/)
+      await expect(q.query(`UPDATE profiles SET parent_id = $1 WHERE id = $2`, [proj, team])).rejects.toThrow(/higher level/)
+      await expect(q.query(`UPDATE profiles SET level = 'project' WHERE id = $1`, [team])).rejects.toThrow(/lower level/)
+      await q.query(`UPDATE profiles SET archived_at = now() WHERE id = $1`, [proj])
+      await q.query(`DELETE FROM profiles WHERE slug IN ('proj14', 'proj14b')`)
+      await q.query(`DELETE FROM profiles WHERE slug IN ('team14', 'ent14')`)
+    })
+
+    it('G9 : profils par déclencheur par défaut posés sur les projets existants', async () => {
+      const q = db.pool
+      const p = (await q.query<{ id: string }>(`SELECT id FROM profiles WHERE slug = 'complet'`)).rows[0]!.id
+      const g = (await q.query<{ id: string }>(`SELECT id FROM gates WHERE slug = 'defaut'`)).rows[0]!.id
+      const project = (await q.query<{ id: string }>(
+        `INSERT INTO projects (slug, name, source_kind, profile_id, gate_id, profile_release_id) VALUES ('socle14', 'socle14', 'archive', $1, $2, $1) RETURNING id`, [p, g])).rows[0]!.id
+      const sql = readFileSync(new URL('../../server/db/migrations/014_profiles.sql', import.meta.url), 'utf8')
+      await q.query(sql.slice(sql.indexOf('UPDATE projects p')))
+      const r = (await q.query<{ pr: string, nightly: string, release: string }>(
+        `SELECT pr.slug AS pr, n.slug AS nightly, r.slug AS release FROM projects x
+           JOIN profiles pr ON pr.id = x.profile_pr_id JOIN profiles n ON n.id = x.profile_nightly_id JOIN profiles r ON r.id = x.profile_release_id
+          WHERE x.id = $1`, [project])).rows[0]!
+      expect(r).toEqual({ pr: 'rapide', nightly: 'complet', release: 'complet' })
+      await q.query('DELETE FROM projects WHERE id = $1', [project])
+    })
+
+    it('jetons de forge et suspension des projets', async () => {
+      const q = db.pool
+      const kinds = (await q.query<{ def: string }>(`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'forge_apps_kind'`)).rows[0]!.def
+      for (const k of ['github-app', 'forgejo-oauth', 'gitlab-oauth', 'forgejo-token', 'gitlab-token']) expect(kinds).toContain(`'${k}'`)
+      const p = (await q.query<{ id: string }>(`SELECT id FROM profiles ORDER BY slug LIMIT 1`)).rows[0]!.id
+      const g = (await q.query<{ id: string }>(`SELECT id FROM gates WHERE slug = 'defaut'`)).rows[0]!.id
+      const project = (await q.query<{ id: string }>(
+        `INSERT INTO projects (slug, name, source_kind, profile_id, gate_id) VALUES ('socle15', 'socle15', 'archive', $1, $2) RETURNING id`, [p, g])).rows[0]!.id
+      await expect(q.query(`UPDATE projects SET suspended_at = now() WHERE id = $1`, [project])).rejects.toThrow(/projects_suspension/)
+      await expect(q.query(`UPDATE projects SET suspended_at = now(), suspended_reason = 'console' WHERE id = $1`, [project])).rejects.toThrow(/suspended_reason/)
+      await q.query(`UPDATE projects SET suspended_at = now(), suspended_reason = 'forge-archived' WHERE id = $1`, [project])
+      await q.query(`UPDATE projects SET suspended_at = NULL, suspended_reason = NULL WHERE id = $1`, [project])
+      await q.query('DELETE FROM projects WHERE id = $1', [project])
+    })
+
+    it('inventaire des agents (016) : cadres connus, taille bornée, suppression en cascade', async () => {
+      const q = db.pool
+      const p = (await q.query<{ id: string }>(`SELECT id FROM profiles ORDER BY slug LIMIT 1`)).rows[0]!.id
+      const g = (await q.query<{ id: string }>(`SELECT id FROM gates WHERE slug = 'defaut'`)).rows[0]!.id
+      const project = (await q.query<{ id: string }>(
+        `INSERT INTO projects (slug, name, source_kind, profile_id, gate_id) VALUES ('socle16', 'socle16', 'archive', $1, $2) RETURNING id`, [p, g])).rows[0]!.id
+      const scan = (await q.query<{ id: string }>(
+        `INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id) VALUES ($1, 1, 'manual', 5, 'main', $2, $3) RETURNING id`, [project, p, g])).rows[0]!.id
+      const ins = (fw: string[], inv: string) => q.query(
+        `INSERT INTO agent_inventories (scan_id, project_id, module_version, frameworks, inventory) VALUES ($1, $2, '0.1.0', $3, $4::jsonb)`, [scan, project, fw, inv])
+      await expect(ins(['inconnu'], '{}')).rejects.toThrow(/agent_inventories_frameworks_check/)
+      await expect(ins(['crewai'], '[]')).rejects.toThrow(/agent_inventories_inventory_check/)
+      await expect(ins(['crewai'], JSON.stringify({ x: 'a'.repeat(1048576) }))).rejects.toThrow(/agent_inventories_inventory_check/)
+      await ins(['langgraph', 'crewai'], '{"agents": []}')
+      await q.query('DELETE FROM projects WHERE id = $1', [project])
+      expect((await q.query('SELECT 1 FROM agent_inventories WHERE scan_id = $1', [scan])).rowCount).toBe(0)
+    })
+  })
+
   describe('socle 0.6 (012)', () => {
     it('essais, résultats externes, statut not-applicable et réutilisation', async () => {
       const q = db.pool
@@ -141,13 +208,13 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
         `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1`,
       )
       expect(rows.map(r => r.table_name)).toEqual([
-        'ai_cache', 'ai_calls', 'ai_embeddings', 'ai_feedback', 'ai_tasks', 'api_tokens', 'appliance_settings', 'audit_log', 'canary_runs', 'content_detection', 'credentials', 'exceptions',
+        'agent_inventories', 'ai_cache', 'ai_calls', 'ai_embeddings', 'ai_feedback', 'ai_tasks', 'api_tokens', 'appliance_settings', 'audit_log', 'canary_runs', 'content_detection', 'credentials', 'exceptions',
         'findings', 'forge_apps', 'forge_publications', 'forges', 'gates', 'helper_requests', 'license_policies', 'module_samples', 'module_trials', 'offline_bundles', 'owner_mappings', 'profile_rulesets', 'profiles', 'project_module_pins', 'projects', 'result_cache', 'roles', 'ruleset_versions', 'rulesets', 'sbom_components', 'scan_findings', 'scan_modules',
         'scans', 'schema_migrations', 'self_vulns', 'sessions', 'severity_maps', 'triage_rules', 'trusted_keys', 'update_history', 'users', 'vuln_intel', 'webhook_deliveries',
       ])
       const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       const files = loadMigrationsFromDir(MIGRATIONS_DIR)
-      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql', '012_offline.sql', '013_triage_forges.sql'])
+      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql', '012_offline.sql', '013_triage_forges.sql', '014_profiles.sql', '015_forges.sql', '016_agent_inventories.sql'])
       expect(mig.rows).toEqual(files.map((f, i) => ({ version: i + 1, name: f.name, checksum: f.checksum })))
     })
 
