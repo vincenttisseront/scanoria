@@ -54,6 +54,52 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
     })
   })
 
+  describe('socle 0.7 (013)', () => {
+    it('exceptions : demande sans décision, personne ne décide de sa propre demande', async () => {
+      const q = db.pool
+      const p = (await q.query<{ id: string }>(`SELECT id FROM profiles ORDER BY slug LIMIT 1`)).rows[0]!.id
+      const g = (await q.query<{ id: string }>(`SELECT id FROM gates WHERE slug = 'defaut'`)).rows[0]!.id
+      const project = (await q.query<{ id: string }>(
+        `INSERT INTO projects (slug, name, source_kind, profile_id, gate_id) VALUES ('socle07', 'socle07', 'archive', $1, $2) RETURNING id`, [p, g])).rows[0]!.id
+      const u = (await q.query<{ id: number }>(`INSERT INTO users (username, role, kind, password_hash) VALUES ('agent07', 'operator', 'agent', $1) RETURNING id`, [await hashPassword('x-long-password-for-tests')])).rows[0]!.id
+      const legacy = (await q.query<{ status: string, decided_at: Date | null }>(
+        `INSERT INTO exceptions (project_id, kind, target, reason, expires_on) VALUES ($1, 'path', '{"path": "tests/**"}', 'motif', current_date + 30) RETURNING status, decided_at`, [project])).rows[0]!
+      expect(legacy.status).toBe('approved')
+      expect(legacy.decided_at).not.toBeNull()
+      const req = (await q.query<{ id: string }>(
+        `INSERT INTO exceptions (project_id, kind, target, reason, expires_on, created_by, status, decided_at, requested_via, requester_is_human)
+         VALUES ($1, 'path', '{"path": "docs/**"}', 'motif', current_date + 30, $2, 'requested', NULL, 'pr-comment', false) RETURNING id`, [project, u])).rows[0]!.id
+      await expect(q.query(`UPDATE exceptions SET status = 'approved', decided_at = now(), decided_by = $2 WHERE id = $1`, [req, u]))
+        .rejects.toThrow(/exceptions_not_self_decided/)
+      await expect(q.query(`UPDATE exceptions SET status = 'approved' WHERE id = $1`, [req])).rejects.toThrow(/exceptions_decision/)
+      await expect(q.query(`INSERT INTO exceptions (project_id, kind, target, reason, expires_on, status) VALUES ($1, 'path', '{"path": "x"}', 'motif', current_date + 1, 'requested')`, [project]))
+        .rejects.toThrow(/exceptions_decision/)
+      await q.query('DELETE FROM projects WHERE id = $1', [project])
+      await q.query('DELETE FROM users WHERE id = $1', [u])
+    })
+
+    it('résultats IA, profils hiérarchiques et PR incrémentale', async () => {
+      const q = db.pool
+      const ent = (await q.query<{ id: string }>(`INSERT INTO profiles (slug, level) VALUES ('ent07', 'enterprise') RETURNING id`)).rows[0]!.id
+      await expect(q.query(`INSERT INTO profiles (slug, level) VALUES ('team07', 'team')`)).rejects.toThrow(/profiles_level_parent/)
+      await expect(q.query(`INSERT INTO profiles (slug, level, parent_id) VALUES ('ent07b', 'enterprise', $1)`, [ent])).rejects.toThrow(/profiles_level_parent/)
+      await q.query(`INSERT INTO profiles (slug, level, parent_id) VALUES ('team07', 'team', $1)`, [ent])
+      await expect(q.query('DELETE FROM profiles WHERE id = $1', [ent])).rejects.toThrow(/foreign key/)
+      await q.query(`DELETE FROM profiles WHERE slug IN ('team07', 'ent07')`)
+      const p = (await q.query<{ id: string }>(`SELECT id FROM profiles ORDER BY slug LIMIT 1`)).rows[0]!.id
+      const g = (await q.query<{ id: string }>(`SELECT id FROM gates WHERE slug = 'defaut'`)).rows[0]!.id
+      const project = (await q.query<{ id: string }>(
+        `INSERT INTO projects (slug, name, source_kind, profile_id, gate_id) VALUES ('socle07b', 'socle07b', 'archive', $1, $2) RETURNING id`, [p, g])).rows[0]!.id
+      await expect(q.query(`INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id, incremental) VALUES ($1, 1, 'webhook', 70, 'main', $2, $3, true)`, [project, p, g]))
+        .rejects.toThrow(/scans_incremental_pr/)
+      await q.query(`INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id, incremental, pull_request)
+        VALUES ($1, 2, 'webhook', 70, 'refs/pull/7/head', $2, $3, true, '{"number": 7, "base_sha": "${'a'.repeat(40)}"}')`, [project, p, g])
+      await expect(q.query(`INSERT INTO ai_calls (kind, outcome, via) VALUES ('x', 'ok', 'relay')`)).rejects.toThrow(/ai_calls_relay_module/)
+      await q.query(`INSERT INTO ai_calls (kind, outcome, via, module_id) VALUES ('x', 'ok', 'relay', 'kodus')`)
+      await q.query('DELETE FROM projects WHERE id = $1', [project])
+    })
+  })
+
   describe('socle 0.6 (012)', () => {
     it('essais, résultats externes, statut not-applicable et réutilisation', async () => {
       const q = db.pool
@@ -96,12 +142,12 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
       )
       expect(rows.map(r => r.table_name)).toEqual([
         'ai_cache', 'ai_calls', 'ai_embeddings', 'ai_feedback', 'ai_tasks', 'api_tokens', 'appliance_settings', 'audit_log', 'canary_runs', 'content_detection', 'credentials', 'exceptions',
-        'findings', 'forges', 'gates', 'helper_requests', 'license_policies', 'module_samples', 'module_trials', 'offline_bundles', 'profiles', 'project_module_pins', 'projects', 'result_cache', 'roles', 'sbom_components', 'scan_findings', 'scan_modules',
-        'scans', 'schema_migrations', 'self_vulns', 'sessions', 'severity_maps', 'trusted_keys', 'update_history', 'users', 'vuln_intel',
+        'findings', 'forge_apps', 'forge_publications', 'forges', 'gates', 'helper_requests', 'license_policies', 'module_samples', 'module_trials', 'offline_bundles', 'owner_mappings', 'profile_rulesets', 'profiles', 'project_module_pins', 'projects', 'result_cache', 'roles', 'ruleset_versions', 'rulesets', 'sbom_components', 'scan_findings', 'scan_modules',
+        'scans', 'schema_migrations', 'self_vulns', 'sessions', 'severity_maps', 'triage_rules', 'trusted_keys', 'update_history', 'users', 'vuln_intel', 'webhook_deliveries',
       ])
       const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       const files = loadMigrationsFromDir(MIGRATIONS_DIR)
-      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql', '012_offline.sql'])
+      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql', '012_offline.sql', '013_triage_forges.sql'])
       expect(mig.rows).toEqual(files.map((f, i) => ({ version: i + 1, name: f.name, checksum: f.checksum })))
     })
 

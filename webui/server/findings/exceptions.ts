@@ -102,8 +102,9 @@ export async function createException(db: Queryable, input: ExceptionCreate, use
     if (f.rows[0].malicious) throw new ExceptionError('E_MALICIOUS')
   }
   const r = await db.query<{ id: string }>(
-    `INSERT INTO exceptions (project_id, kind, target, reason, expires_on, created_by)
-     VALUES ($1, $2, $3, $4, $5::date, $6) RETURNING id`,
+    // Avant le circuit F5 (0.7, chantier B) : exception créée approuvée, sans décideur distinct.
+    `INSERT INTO exceptions (project_id, kind, target, reason, expires_on, created_by, status, decided_at)
+     VALUES ($1, $2, $3, $4, $5::date, $6, 'approved', now()) RETURNING id`,
     [input.project_id, input.kind, JSON.stringify(input.target), redact(input.reason), input.expires_on, userId],
   )
   return (await getException(db, r.rows[0]!.id))!
