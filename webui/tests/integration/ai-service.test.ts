@@ -177,7 +177,7 @@ describe.skipIf(!DATABASE_URL)('service scanoria-ai (PostgreSQL réel, faux Olla
     expect(sent).not.toContain('Other project finding')
     const calls = (await pool.query('SELECT * FROM ai_calls')).rows
     expect(calls.length).toBeGreaterThan(0)
-    expect(Object.keys(calls[0]!).sort()).toEqual(['at', 'bytes_sent', 'duration_ms', 'id', 'kind', 'model', 'outcome', 'project_id', 'task_id'])
+    expect(Object.keys(calls[0]!).sort()).toEqual(['at', 'bytes_sent', 'duration_ms', 'id', 'kind', 'model', 'module_id', 'outcome', 'project_id', 'task_id', 'via'])
   })
 
   it('un secret n\'envoie ni message ni extrait, seulement son type', async () => {

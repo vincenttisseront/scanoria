@@ -78,6 +78,25 @@ export const GateRules = z.object({
 }).strict()
 export type GateRules = z.infer<typeof GateRules>
 
+/**
+ * 0.7 (contrat 28, figé par l'intégrateur) : exigences verrouillées d'un profil
+ * (G8, table profiles.locks). Un profil enfant ne peut pas les assouplir :
+ * catégories et modules requis s'ajoutent, un plancher de gate n'est relevé
+ * que dans le sens le plus strict, « aucun envoi à l'IA » imposé ne se lève pas.
+ */
+/** Règles du gate sans défauts : seules les clés posées comptent dans un plancher. */
+const GateFloor = z.object(Object.fromEntries(
+  Object.entries(GateRules.shape).map(([k, v]) => [k, v.unwrap().optional()]),
+) as { [K in keyof typeof GateRules.shape]: z.ZodOptional<ReturnType<(typeof GateRules.shape)[K]['unwrap']>> }).strict()
+
+export const ProfileLocks = z.object({
+  required_categories: z.array(z.enum(CATEGORIES)).max(32).default([]),
+  required_modules: z.array(z.string().regex(MODULE_ID_RE)).max(64).default([]),
+  gate_floor: GateFloor.default({}),
+  ai_opt_out: z.boolean().default(false),
+}).strict()
+export type ProfileLocks = z.infer<typeof ProfileLocks>
+
 /** Raison d'un verdict, ordonnée par l'évaluateur ; base de I9 (verdict expliqué). */
 export const VerdictReason = z.object({
   code: z.enum([
@@ -123,5 +142,5 @@ export const ExceptionTargets = {
 export type ExceptionKind = (typeof EXCEPTION_KINDS)[number]
 
 /** Sujets d'une tâche IA (ai_tasks.subject_type, migration 006). */
-export const AI_SUBJECT_TYPES = ['finding', 'scan', 'testbed', 'rule', 'module', 'license', 'appliance'] as const
+export const AI_SUBJECT_TYPES = ['finding', 'scan', 'testbed', 'rule', 'module', 'license', 'appliance', 'exception', 'query'] as const
 export type AiSubjectType = (typeof AI_SUBJECT_TYPES)[number]

@@ -522,7 +522,7 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
     db.query<GateException>(
       `SELECT id, kind, target, reason, to_char(expires_on, 'YYYY-MM-DD') AS expires_on
          FROM exceptions
-        WHERE project_id = $1 AND revoked_at IS NULL AND expires_on >= $2::date`,
+        WHERE project_id = $1 AND status = 'approved' AND revoked_at IS NULL AND expires_on >= $2::date`,
       [row.project_id, row.today],
     ),
   ])
