@@ -33,6 +33,7 @@ interface Pending {
   requester_label: string | null
   requester_is_human: boolean
   commit_authors: string[]
+  vex_status?: string | null
   created_by: string | null
   created_at: string
   expired: boolean
@@ -170,6 +171,13 @@ const { refresh: refreshPendingCount } = usePendingExceptions()
                 />
                 <span class="font-mono text-xs break-all">{{ targetText(e) }}</span>
                 <UBadge
+                  v-if="e.vex_status"
+                  color="primary"
+                  variant="subtle"
+                  :label="`VEX : ${t(`vex.status.${e.vex_status}`)}`"
+                  data-testid="approval-vex"
+                />
+                <UBadge
                   v-if="e.expired"
                   color="warning"
                   variant="subtle"
@@ -244,6 +252,13 @@ const { refresh: refreshPendingCount } = usePendingExceptions()
             class="text-xs"
           >
             {{ t('triage.approvals.approveBody', { date: current.expires_on }) }}
+          </p>
+          <p
+            v-if="form.decision === 'approved' && current.vex_status"
+            class="text-xs font-medium"
+            data-testid="approval-vex-note"
+          >
+            {{ t('vex.approveNote', { status: t(`vex.status.${current.vex_status}`) }) }}
           </p>
           <UFormField :label="t('triage.approvals.decisionReason')">
             <UTextarea

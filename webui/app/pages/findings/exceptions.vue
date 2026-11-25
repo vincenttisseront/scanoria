@@ -138,21 +138,35 @@ function isoDay(days: number) {
 }
 const createOpen = ref(false)
 const saving = ref(false)
-const form = reactive<{ kind: Kind, target: Record<string, string>, reason: string, expires_on: string }>({
-  kind: 'path', target: {}, reason: '', expires_on: isoDay(90),
+/** H7 (0.8) : statut VEX proposé avec la demande (vulnérabilité ou résultat seulement). */
+const VEX_NONE = '__none__'
+const VEX_VALUES = ['not_affected', 'affected', 'fixed', 'under_investigation'] as const
+const vexItems = computed(() => [
+  { label: t('vex.statusNone'), value: VEX_NONE },
+  ...VEX_VALUES.map(v => ({ label: t(`vex.status.${v}`), value: v })),
+])
+const form = reactive<{ kind: Kind, target: Record<string, string>, reason: string, expires_on: string, vex_status: string }>({
+  kind: 'path', target: {}, reason: '', expires_on: isoDay(90), vex_status: VEX_NONE,
 })
+const vexAllowed = computed(() => form.kind === 'vuln' || form.kind === 'finding')
 function openCreate(kind: Kind = 'path', target: Record<string, string> = {}) {
-  Object.assign(form, { kind, target: { ...target }, reason: '', expires_on: isoDay(90) })
+  Object.assign(form, { kind, target: { ...target }, reason: '', expires_on: isoDay(90), vex_status: VEX_NONE })
   createOpen.value = true
 }
 function changeKind(kind: Kind) {
   form.kind = kind
   form.target = {}
 }
-/** I10 : motif proposé recopié, à relire ; la durée est bornée à un an. */
-function useDraft(d: { reason: string, days: number }) {
-  form.reason = d.reason.slice(0, 2000)
+/**
+ * I10 : motif proposé recopié, à relire ; la durée est bornée à un an. Depuis
+ * la 0.8, le statut VEX proposé est présélectionné et la justification OpenVEX
+ * placée en tête du motif (« [justification] »), où la personne la relit.
+ */
+function useDraft(d: { reason: string, days: number, vex_status?: string | null, vex_justification?: string | null }) {
+  const head = d.vex_status === 'not_affected' && d.vex_justification ? `[${d.vex_justification}] ` : ''
+  form.reason = `${head}${d.reason}`.slice(0, 2000)
   form.expires_on = isoDay(Math.min(366, Math.max(1, Math.round(d.days))))
+  if (vexAllowed.value) form.vex_status = d.vex_status && (VEX_VALUES as readonly string[]).includes(d.vex_status) ? d.vex_status : VEX_NONE
 }
 const draftFinding = computed(() => (form.kind === 'finding' && UUID.test(form.target.finding_id ?? '') ? form.target.finding_id! : ''))
 const createValid = computed(() => form.reason.trim().length >= 3
@@ -168,6 +182,7 @@ async function create() {
     }
     const body: Record<string, unknown> = { project_id: projectId.value, kind: form.kind, target, reason: form.reason.trim(), expires_on: form.expires_on }
     if (routeScan) body.scan_id = routeScan
+    if (vexAllowed.value && form.vex_status !== VEX_NONE) body.vex_status = form.vex_status
     await api('/api/exceptions', { method: 'POST', body })
     toast.add({ title: t('triage.approvals.requested'), color: 'success' })
     createOpen.value = false
@@ -382,6 +397,18 @@ async function revoke() {
               :maxlength="2000"
               class="w-full"
               data-testid="exception-reason"
+            />
+          </UFormField>
+          <UFormField
+            v-if="vexAllowed"
+            :label="t('vex.statusLabel')"
+            :help="t('vex.statusHelp')"
+          >
+            <USelect
+              v-model="form.vex_status"
+              :items="vexItems"
+              class="w-60"
+              data-testid="exception-vex-status"
             />
           </UFormField>
           <UFormField

@@ -51,6 +51,33 @@ export function gateFields(): GateField[] {
   return out
 }
 
+const SEVERITY_RANK: Record<string, number> = { critical: 5, high: 4, medium: 3, low: 2, info: 1 }
+/** Rang d'un seuil « bloquant à partir de » : plus il est haut, plus le seuil est souple ; null (ne bloque jamais) est le plus souple. */
+const sevRank = (v: unknown) => (typeof v === 'string' ? SEVERITY_RANK[v] ?? 0 : Number.POSITIVE_INFINITY)
+/** Rang d'un nombre « plus souple quand plus grand », null le plus souple. */
+const upRank = (v: unknown) => (typeof v === 'number' ? v : Number.POSITIVE_INFINITY)
+
+/**
+ * Règles que les règles candidates ASSOUPLISSENT par rapport aux règles
+ * actuelles (I19 et F9 : signalées avant l'enregistrement).
+ */
+export function loosenedRules(current: Record<string, unknown>, candidate: Record<string, unknown>): string[] {
+  const out: string[] = []
+  for (const k of Object.keys(candidate)) {
+    const a = current[k]
+    const b = candidate[k]
+    if (a === b) continue
+    let looser = false
+    if (k.endsWith('_block_from') && k !== 'epss_block_from') looser = sevRank(b) > sevRank(a)
+    else if (k === 'new_code_only') looser = b === true
+    else if (typeof a === 'boolean' || typeof b === 'boolean') looser = a === true && b === false
+    else if (k === 'max_secrets' || k === 'epss_block_from' || k === 'feed_max_age_days') looser = upRank(b) > upRank(a)
+    else if (k === 'quarantine_days') looser = Number(b) < Number(a)
+    if (looser) out.push(k)
+  }
+  return out
+}
+
 interface ErrLike { data?: { data?: { code?: string }, code?: string } }
 
 /** Code d'erreur renvoyé par l'API (data.code). */
