@@ -511,7 +511,8 @@
             {
               "enum": [
                 "none",
-                "target"
+                "target",
+                "ai-relay"
               ]
             },
             {
@@ -519,7 +520,7 @@
               "pattern": "^service:[a-z0-9][a-z0-9-]{1,40}$"
             }
           ],
-          "description": "Réseau du conteneur : « none » (défaut), « target » (DAST), ou « service:<id> » (contrat 12 de la 0.4) : rattaché au seul réseau interne scanoria-mod-<id>_scan du module service <id>, qui doit être installé et actif ; jeton d'analyse du service passé par un secret Podman."
+          "description": "Réseau du conteneur : « none » (défaut), « target » (DAST), « service:<id> » (contrat 12 de la 0.4) : rattaché au seul réseau interne scanoria-mod-<id>_scan du module service <id>, qui doit être installé et actif ; jeton d'analyse du service passé par un secret Podman. « ai-relay » (0.7, contrat 31) : module d'analyse par IA, toujours sans réseau, relié au relais compatible OpenAI de scanoria-ai par le pont de l'appliance (OPENAI_BASE_URL, jeton éphémère) ; ses résultats sont marqués IA et hors verdict tant qu'une personne ne les a pas confirmés (contrat 32). Sans connecteur IA, le module est « skipped »."
         },
         "exit_codes_ok": {
           "type": "array",
@@ -601,6 +602,11 @@
           "type": "boolean",
           "default": false,
           "description": "Le module ne lit que le SBOM de l'analyse (/sbom/sbom.cdx.json) : sans SBOM, il est « skipped » avec sa raison, sans effet sur le verdict. Il tourne après les modules qui produisent le SBOM."
+        },
+        "relay_python": {
+          "type": "string",
+          "pattern": "^(python3|/[A-Za-z0-9._/-]{1,120}/python3(\\.[0-9]{1,2})?)$",
+          "description": "Avec scan.network: ai-relay : interpréteur Python de l'image qui lance le pont du relais (python3 par défaut, sinon un chemin absolu)."
         },
         "service_optional": {
           "type": "boolean",

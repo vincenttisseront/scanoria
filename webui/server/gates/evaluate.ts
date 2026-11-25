@@ -25,6 +25,7 @@ import {
   type ExceptionKind, type ScanModuleStatus, type Severity,
 } from '#shared/analysis'
 import { collapseCorrelated } from '../findings/correlation'
+import { excludeUnconfirmedAi } from '../findings/ai-findings'
 import { intelJoin } from '../intel/lookup'
 import { decideComponent, loadPolicy } from '../licenses/policy'
 
@@ -55,6 +56,9 @@ export interface GateFinding {
   kev?: boolean | null
   /** F16 (0.5) : clé de recoupement ; un groupe compte une seule fois. */
   correlation_key?: string | null
+  /** 0.7 (contrat 32) : origine (module, external, ai) et confirmation humaine d'un résultat IA. */
+  origin?: string | null
+  ai_confirmed_at?: string | null
 }
 
 export interface GateModule {
@@ -250,8 +254,9 @@ export function computeVerdict(input: GateInput): VerdictDetails {
 
   // 1. Résultats retenus : présents dans l'analyse, non écartés par un tri humain,
   //    nouveaux si new_code_only (sauf malveillants, toujours retenus : H4).
+  //    0.7 (contrat 32) : les résultats IA non confirmés n'entrent jamais dans le verdict.
   const counted: GateFinding[] = []
-  for (const f of input.findings) {
+  for (const f of excludeUnconfirmedAi(input.findings).kept) {
     if (f.malicious) {
       counted.push(f)
       continue
@@ -591,7 +596,8 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
       `SELECT f.id, f.tool, f.rule_id, f.category, f.severity, f.path, f.vuln_ids,
               f.package->>'name' AS package_name, f.malicious, f.secret_type, f.secret_state, f.status,
               to_char(f.status_until, 'YYYY-MM-DD') AS status_until, sf.is_new,
-              round(intel.epss::numeric, 6)::float8 AS epss, intel.kev, f.correlation_key
+              round(intel.epss::numeric, 6)::float8 AS epss, intel.kev, f.correlation_key,
+              f.origin, f.ai_confirmed_at::text AS ai_confirmed_at
          FROM scan_findings sf JOIN findings f ON f.id = sf.finding_id
          ${intelJoin('f')}
         WHERE sf.scan_id = $1`,

@@ -487,7 +487,23 @@ def run(manifest, timeout=None):
             # le banc d'essai porte son SBOM, sbom.cdx.json, à la racine.
             mounts.append((src, "/sbom", "ro"))
         started = time.monotonic()
-        if svc:
+        from . import airelay
+        if airelay.uses_relay(manifest):
+            # 0.7 (contrat 31, I23) : module d'analyse par IA, banc d'essai passé par le
+            # relais (jeton « testbed », sans projet) ; sans connecteur, il ne peut pas
+            # être vérifié, donc pas activé.
+            try:
+                with airelay.Lease(manifest, project_id=None, scan_id=None, timeout_s=t + 60,
+                                   workdir=work, purpose="testbed") as lease:
+                    rc, hint = run_confined(manifest, airelay.wrap_command(manifest, cmd), mounts, timeout=t,
+                                            env=scan.get("env"), with_stderr=True,
+                                            network=["--network=none"] + lease.args())
+                    hint = hint.replace(lease.token, "***")
+            except airelay.Unavailable as u:
+                raise Fail("E_RELAY_UNAVAILABLE" if u.code != airelay.E_RELAY_TOKEN else "E_RELAY_TOKEN",
+                           "%s: activate the AI connector (System › AI) before this module" % u.message
+                           if u.code == airelay.E_RELAY_UNAVAILABLE else u.message)
+        elif svc:
             try:
                 with svcnet.Attachment(svc, svcnet.TESTBED_KEY, budget_s=max(60, t - 60)) as att:
                     rc, hint = run_confined(manifest, cmd, mounts, timeout=t, env=scan.get("env"),

@@ -14,6 +14,8 @@ import { readBoundedText } from './fsread'
 export interface ModuleHints {
   categories: string[]
   severityMap: Record<string, string> | null
+  /** 0.7 (contrat 32) : module relié au relais IA (scan.network: ai-relay), résultats origin = 'ai'. */
+  aiRelay?: boolean
 }
 
 const hintsSchema = z.object({
@@ -22,6 +24,7 @@ const hintsSchema = z.object({
   categories: z.array(z.string().max(32)).max(16).catch([]),
   scan: z.object({
     severity_map: z.record(z.string().max(64), z.enum(SEVERITIES)).catch({}).optional(),
+    network: z.string().max(64).catch('none').optional(),
   }).passthrough().nullable().catch(null).optional(),
 }).passthrough()
 
@@ -54,5 +57,5 @@ export async function readModuleHints(moduleId: string, version?: string | null,
   }
   if (!best) return empty
   const map = best.scan?.severity_map
-  return { categories: best.categories, severityMap: map && Object.keys(map).length ? map : null }
+  return { categories: best.categories, severityMap: map && Object.keys(map).length ? map : null, aiRelay: best.scan?.network === 'ai-relay' }
 }

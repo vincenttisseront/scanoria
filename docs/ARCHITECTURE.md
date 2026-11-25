@@ -795,3 +795,82 @@ SHA-256 est gardée). `POST /api/projects/:id/scans {ref, profile?}` → `202
   déterministe) et livré dans le lot signé sous
   `/usr/share/scanoria/sbom/console.cdx.json`.
 
+
+## 14. Relais IA des modules d'analyse par IA (0.7, chantier E, contrats 31 et 32)
+
+Un module `scanner` qui déclare `scan.network: ai-relay` (K1–K10) parle une
+API compatible OpenAI, mais ne joint jamais Ollama ni aucun réseau : son
+conteneur reste en `--network=none`.
+
+```
+conteneur du module (--network=none, utilisateur 65534)
+  outil ──HTTPS──▶ 127.0.0.1:8443 (pont, scan-tools/ai-relay/bridge.py)
+                     │ octets relayés, sans rien lire
+                     ▼
+  /run/scanoria-relay/relay.sock (montage ro)  ═══  /run/scanoria-ai/relay.sock (hôte)
+                                                      │ HTTPS, certificat ai-relay.<nom>
+                                                      ▼
+                                              scanoria-ai : relais (server/ai/relay.ts)
+                                                      │ garde-fous § 3.5, journal, cache
+                                                      ▼
+                                              Ollama externe (règle nftables meta skuid)
+```
+
+- **Transport** : le relais est servi par `scanoria-ai` en HTTPS sur un socket
+  Unix (`/run/scanoria-ai/relay.sock`, 0666 dans un répertoire 0700), avec le
+  certificat `ai-relay.<nom de l'appliance>` émis par l'AC interne
+  (`scanoria-ca issue-relay`, renouvelé avec `cert-renew`, copié en 0400 dans
+  le répertoire d'exécution par `aiendpoint.install_runtime`). L'AC interne est
+  contrainte à `DNS:<nom>` et exclut toute adresse IP : d'où le nom et non une
+  adresse. Le runner monte le seul socket, en lecture seule, dans le
+  conteneur ; aucun réseau Podman, aucune règle nftables, aucun autre
+  conteneur ne le joint. Le pont écoute sur la boucle locale du conteneur, et
+  un `/etc/hosts` monté désigne `ai-relay.<nom>` par `127.0.0.1` : le TLS va de
+  l'outil au relais.
+- **Variables** : `OPENAI_BASE_URL` et `OPENAI_API_BASE`
+  (`https://ai-relay.<nom>:8443/v1`), `SCANORIA_AI_MODEL=scanoria` (alias : le
+  modèle est choisi par l'appliance, clé de sélection `relay`, qui suit le
+  modèle par défaut), `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
+  `NODE_EXTRA_CA_CERTS` (`/run/scanoria-relay/ca.pem`). La commande du module
+  est lancée sous le pont (`python3 -I /scanoria-relay/bridge.py -- …`,
+  interpréteur réglable par `scan.relay_python`).
+- **Jeton éphémère** : `scr_` + 48 octets aléatoires, créé par le runner pour un
+  module d'une analyse ; sa portée `{purpose, module_id, project_id, scan_id,
+  expires_at}` est écrite sous son empreinte dans `/run/scanoria-relay/tokens`
+  (root:scanoria-ai 0750, fichiers 0640), seul endroit que lit le relais. Le
+  jeton passe par un secret Podman monté pour l'utilisateur 65534 et lu par le
+  pont, qui le donne à l'outil par `OPENAI_API_KEY` : jamais en argument, ni
+  dans `podman inspect`, ni dans le journal (masqué). Il est retiré à la fin du
+  module et expire au-delà du délai du module ; le runner purge au démarrage
+  jetons et secrets orphelins.
+- **Vérification préalable** : avant le conteneur, le runner appelle
+  `GET /v1/relay/check`. Relais absent, connecteur inactif, disjoncteur
+  ouvert, aucun modèle (`E_RELAY_UNAVAILABLE`), projet « aucun envoi à l'IA »,
+  archivé ou inconnu (`E_RELAY_OPT_OUT`), jeton refusé (`E_RELAY_TOKEN`) :
+  module `skipped`, jamais une erreur au sens de G13. Un module relié au relais
+  n'est jamais repris du cache de résultats (V4).
+- **Garde-fous par requête** (`prepareChat`) : consigne de l'appliance en
+  tête ; outils, `functions`, `tool_choice` retirés ; rôles `tool`/`function`
+  et contenus non textuels refusés ; chaque message masqué (secrets, y compris
+  les messages système fournis par l'outil) ; corps ≤ 512 Kio, 64 messages,
+  240 000 caractères ; `max_tokens` borné ; JSON (`response_format`) transmis à
+  Ollama ; sortie nettoyée. Une requête à la fois vers Ollama (file de 8, puis
+  503), même disjoncteur que les tâches de la console, cache par projet et
+  module (`ai_cache`, kind `relay`), journal `ai_calls` (`via = 'relay'`,
+  `module_id`, modèle `nom@empreinte12`), sans le contenu. Routes :
+  `GET /v1/models`, `POST /v1/chat/completions` (flux SSE en un morceau si
+  demandé), `POST /v1/embeddings`, `GET /v1/relay/check`.
+- **Banc d'essai I23** : le banc d'essai d'installation d'un module relié tourne
+  par le relais (jeton `testbed`, sans projet) ; sans connecteur, l'installation
+  échoue avec `E_RELAY_UNAVAILABLE`. Un module d'IA qui échoue à son canari
+  nocturne est désactivé de lui-même (`vigilance.disable_failed_ai_modules`).
+
+**Résultats IA (contrat 32)** : les résultats d'un module relié sont ingérés
+avec `origin = 'ai'` (badge « IA », niveau informatif, modèle et empreinte lus
+dans le journal du relais de la dernière analyse). `evaluate.ts` les écarte du
+verdict avant toute règle (`excludeUnconfirmedAi`, même un avis `MAL-` cité par
+un modèle) tant que `ai_confirmed_at` est vide. `POST /api/findings/:id/ai-confirm`
+(operator ou plus, compte `kind = 'human'` seulement, audit
+`finding.ai-confirm`) les confirme : statut `nouveau` → `confirmé`, et le
+résultat compte comme un autre dans les verdicts évalués ensuite. I24 : accord
+IA/humain par module (`/api/ai/agreement`, champ `modules`).

@@ -112,6 +112,15 @@ le reste en arguments. Le moteur lance le conteneur ainsi :
 
 - `--network=none` (`scan.network: none`) ; `target` est réservé aux modules
   `dast` et à leur cible autorisée (§ 6.5) ;
+- `scan.network: ai-relay` (modules d'analyse par IA, 0.7) : toujours
+  `--network=none`, plus le socket du relais de `scanoria-ai`, le pont de
+  l'appliance, l'AC interne et un jeton éphémère ; l'outil voit une API
+  compatible OpenAI sur `OPENAI_BASE_URL`, avec la clé `OPENAI_API_KEY` et le
+  modèle `SCANORIA_AI_MODEL` (`scanoria`). La commande tourne sous le pont,
+  lancé par `scan.relay_python` (`python3` par défaut) : l'image doit donc
+  contenir Python 3. Sans connecteur IA ou pour un projet « aucun envoi à
+  l'IA », le module est `skipped`. Ses résultats sont marqués « IA » et hors
+  verdict jusqu'à confirmation humaine (ARCHITECTURE § 14) ;
 - `--read-only`, `--cap-drop=ALL`, `--security-opt=no-new-privileges`,
   utilisateur 65534, limites mémoire, CPU et PIDs, délai `scan.timeout_s` ;
 - sources en lecture seule sur `/src`, `/out` écrivable, `/tmp` en tmpfs ;

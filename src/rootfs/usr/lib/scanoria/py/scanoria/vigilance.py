@@ -471,6 +471,32 @@ def run_canary(m, timeout):
     return res
 
 
+def disable_failed_ai_modules(failed):
+    """I23 (0.7, contrat 31) : un module d'analyse par IA qui ne passe plus son
+    banc d'essai est désactivé de lui-même, et c'est signalé (last_error, état
+    publié). Un module sans IA reste actif (G14 : alerte seulement)."""
+    from . import airelay, modules
+    if not failed:
+        return []
+    reg = modules.load_registry()
+    done = []
+    for mid in failed:
+        e = reg["modules"].get(mid)
+        if not isinstance(e, dict) or not airelay.uses_relay(e.get("manifest")) or e.get("enabled") is not True:
+            continue
+        if modules.dependents(reg, mid, only_enabled=True):
+            continue
+        e["enabled"] = False
+        e["status"] = "disabled"
+        e["last_error"] = ("AI testbed below its threshold (I23): module disabled automatically; "
+                           "re-enable it after checking the AI model")
+        done.append(mid)
+        common.log("canary: AI module %s disabled (testbed below its threshold)" % mid)
+    if done:
+        modules.save_registry(reg)
+    return done
+
+
 def act_run_canaries(c):
     from . import modules
     reg = modules.load_registry()
@@ -503,6 +529,9 @@ def act_run_canaries(c):
     out = {"canaries": results, "at": common.iso(common.now())}
     failed = [r["module"] for r in results
               if not r["ok"] and (r["details"].get("error") or {}).get("class") != "infra"]
+    disabled = disable_failed_ai_modules(failed)
+    if disabled:
+        out["disabled"] = disabled
     if failed:
         raise Fail("E_CANARY_FAILED", "canary failed for: %s" % ", ".join(failed), out)
     return out

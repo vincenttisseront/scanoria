@@ -141,7 +141,7 @@ interface UpsertRow {
   secret_type: string | null
 }
 
-async function upsert(db: Queryable, scan: ScanRow, findings: (ParsedFinding & { severity: string })[]): Promise<UpsertRow[]> {
+async function upsert(db: Queryable, scan: ScanRow, findings: (ParsedFinding & { severity: string })[], origin: 'module' | 'ai' = 'module'): Promise<UpsertRow[]> {
   const out: UpsertRow[] = []
   for (let i = 0; i < findings.length; i += BATCH) {
     const batch = findings.slice(i, i + BATCH).map(f => ({
@@ -168,10 +168,10 @@ async function upsert(db: Queryable, scan: ScanRow, findings: (ParsedFinding & {
     const res = await db.query<UpsertRow>(
       `INSERT INTO findings AS f (project_id, fingerprint, tool, rule_id, category, severity, native_severity,
               title, message, path, start_line, end_line, snippet, cwe, vuln_ids, package, malicious,
-              secret_type, secret_state, first_scan_id, first_commit, last_scan_id, last_commit)
+              secret_type, secret_state, first_scan_id, first_commit, last_scan_id, last_commit, origin)
        SELECT $1, x.fingerprint, x.tool, x.rule_id, x.category, x.severity, x.native_severity,
               x.title, x.message, x.path, x.start_line, x.end_line, x.snippet, x.cwe, x.vuln_ids, x.package, x.malicious,
-              x.secret_type, CASE WHEN x.secret_type IS NOT NULL THEN 'to-revoke' END, $2, $3, $2, $3
+              x.secret_type, CASE WHEN x.secret_type IS NOT NULL THEN 'to-revoke' END, $2, $3, $2, $3, $5
          FROM jsonb_to_recordset($4::jsonb) AS x(fingerprint text, tool text, rule_id text, category text, severity text,
               native_severity text, title text, message text, path text, start_line integer, end_line integer, snippet text,
               cwe text[], vuln_ids text[], package jsonb, malicious boolean, secret_type text)
@@ -194,7 +194,7 @@ async function upsert(db: Queryable, scan: ScanRow, findings: (ParsedFinding & {
                                THEN now() ELSE f.status_at END,
               last_scan_id = EXCLUDED.last_scan_id, last_commit = EXCLUDED.last_commit, updated_at = now()
        RETURNING id, (xmax = 0) AS inserted, severity, tool, rule_id, category, secret_type`,
-      [scan.project_id, scan.id, scan.commit_sha, JSON.stringify(batch)],
+      [scan.project_id, scan.id, scan.commit_sha, JSON.stringify(batch), origin],
     )
     out.push(...res.rows)
     await db.query(
@@ -233,7 +233,8 @@ export async function ingestModuleOutputs(db: Db, input: IngestInput): Promise<I
   const rows = await inTransaction(db, async (q) => {
     const severities = await resolveSeverities(q, input.moduleId, unique.map(f => f.nativeSeverity), hints.severityMap)
     const withSeverity = unique.map(f => ({ ...f, severity: severities.get(f.nativeSeverity) ?? 'medium' }))
-    const res = await upsert(q, scan, withSeverity)
+    // 0.7 (contrat 32) : résultats d'un module relié au relais IA, hors verdict jusqu'à confirmation.
+    const res = await upsert(q, scan, withSeverity, hints.aiRelay && !input.external ? 'ai' : 'module')
     // F16 (0.5, contrat 18) : clé de recoupement entre outils, sans toucher à l'empreinte G19.
     await assignCorrelationKeys(q, res.map(r => r.id))
     // G15 : sortie tronquée ou illisible consignée dans la couverture. Une sortie

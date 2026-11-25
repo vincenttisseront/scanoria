@@ -35,7 +35,7 @@ import urllib.parse
 
 import contextlib
 
-from . import applicability, catalogverify, common, feeds, fetch, gitmirror, modules, resultcache, sbom, \
+from . import airelay, applicability, catalogverify, common, feeds, fetch, gitmirror, modules, resultcache, sbom, \
     schedule, schema, svcnet, testbed, vigilance, workspace
 from .common import Fail
 
@@ -352,6 +352,9 @@ def recover():
     feeds.release_all()
     shutil.rmtree(fetch.CRED_DIR, ignore_errors=True)
     svcnet.remove_orphan_secrets()
+    # 0.7 (contrat 31) : jetons et secrets du relais IA laissés par un arrêt brutal.
+    airelay.remove_orphan_secrets()
+    airelay.purge_tokens(everything=True)
     fetch.reset_network()
 
 
@@ -421,6 +424,13 @@ def plan(reg, job):
             out.append((_module_entry(mid, ver, "skipped", _err(
                 "E_NETWORK_UNSUPPORTED", "input", "networked scanners are not supported yet"), m), None))
             continue
+        if airelay.uses_relay(m):
+            # 0.7 (contrat 31) : module d'analyse par IA ; le relais est vérifié juste avant le conteneur.
+            try:
+                airelay.python_of(m)
+            except airelay.Unavailable as u:
+                out.append((_module_entry(mid, ver, "missing", _err(u.code, "input", u.message), m), None))
+                continue
         # Contrat 12 (0.4) : branche par défaut seulement, puis service joignable.
         # Branches et PR (option « branches » du service) : sinon branche par défaut seulement.
         feats = svcnet.service_features(reg, m)
@@ -690,6 +700,13 @@ def feed_mounts(m, leases):
     return out
 
 
+def relay_lease(m, job, timeout, ws):
+    """Bail du relais IA d'un module (contrat 31) : jeton lié à l'analyse, au projet et au module."""
+    airelay.purge_tokens()
+    return airelay.Lease(m, project_id=job.get("project_id"), scan_id=job.get("scan_id"),
+                         timeout_s=timeout + 60, workdir=ws)
+
+
 def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
     """Lance un module confiné sur ws/src ; complète entry (statut, sorties, journal, mesures).
 
@@ -757,7 +774,11 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
     cache = scan_cache_dir(m, job)
     if cache:
         mounts.append((cache, "/cache", "rw"))
-    if reuse_cached(job, entry, spec, ws, mdir, sbom_dir, use_sbom):
+    relay = airelay.uses_relay(m)
+    if relay:
+        # 0.7 (contrat 31) : une sortie d'IA dépend du modèle du moment ; jamais reprise (V4).
+        entry.pop("cache_key", None)
+    elif reuse_cached(job, entry, spec, ws, mdir, sbom_dir, use_sbom):
         finish("ok")
         _drop_stats(entry)
         return None
@@ -768,6 +789,19 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
         return finish("error", _err("E_MODULE_INVALID", "input", f.message))
     svc = spec.get("service")
     stack = contextlib.ExitStack()
+    if relay:
+        try:
+            lease = stack.enter_context(relay_lease(m, job, timeout, ws))
+        except airelay.Unavailable as u:
+            stack.close()
+            # Sans connecteur, projet « aucun envoi à l'IA », disjoncteur ouvert :
+            # module « skipped », jamais une erreur au sens de G13 (§ 3.5).
+            return finish("skipped", _err(u.code, "input", u.message))
+        except (Fail, OSError) as f:
+            stack.close()
+            return finish("error", _err(airelay.E_RELAY_UNAVAILABLE, "infra", getattr(f, "message", str(f))))
+        args = args + lease.args()
+        secrets = list(secrets or []) + [lease.token]
     if svc:
         try:
             att = stack.enter_context(svcnet.Attachment(svc, svc["key"], budget_s=max(60, timeout - 60)))
@@ -788,6 +822,8 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
         cmd = spec["command"]
         if use_sbom:
             cmd = spec["sbom_command"]
+        if relay:
+            cmd = airelay.wrap_command(m, cmd)
         args += ["--entrypoint", json.dumps([cmd[0]]), m["image"]] + list(cmd[1:])
         sampler = Sampler(name)
         sampler.start()

@@ -34,6 +34,7 @@ export type ApiErrorCode
     | 'E_MALICIOUS' | 'E_NOT_SECRET' | 'E_AI_STALE'
     | 'E_NOT_PERMANENT' | 'E_BACKUP_NOT_FOUND' | 'E_BACKUP_INVALID'
     | 'E_PRECONDITION' | 'E_GONE'
+    | 'E_NOT_AI' | 'E_AI_CONFIRMED'
 
 export function apiError(statusCode: number, code: ApiErrorCode, extra: Record<string, unknown> = {}) {
   return createError({ statusCode, statusMessage: code, data: { code, ...extra } })

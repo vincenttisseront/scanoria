@@ -12,7 +12,7 @@ import { runLoop } from '../server/ai/runtime'
 const databaseUrl = process.env.SCANORIA_AI_DATABASE_URL || 'postgresql:///scanoria?host=/var/run/postgresql'
 const runtimeDir = process.env.SCANORIA_AI_RUNTIME_DIR || '/run/scanoria-ai'
 
-const pool = new pg.Pool({ connectionString: databaseUrl, max: 2, idleTimeoutMillis: 30_000, application_name: 'scanoria-ai' })
+const pool = new pg.Pool({ connectionString: databaseUrl, max: 3, idleTimeoutMillis: 30_000, application_name: 'scanoria-ai' })
 pool.on('error', err => console.error('[scanoria-ai] idle client error:', err.message))
 
 const controller = new AbortController()

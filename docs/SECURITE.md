@@ -40,6 +40,23 @@ Pour signaler une vulnérabilité, voir [SECURITY.md](../SECURITY.md).
 - **Sans jeton** : l'appliance interroge l'API publique de GitHub sans
   identifiant, en HTTPS seul.
 
+### Relais IA des modules d'analyse par IA (0.7)
+
+- Le conteneur d'un module d'IA reste en `--network=none` : il ne joint que le
+  socket Unix du relais, monté en lecture seule, à travers un pont qui ne lit
+  rien de ce qui passe ; le TLS (certificat `ai-relay.<nom>` de l'AC interne)
+  va de l'outil au relais. Aucun réseau Podman, aucune règle nftables ajoutée.
+- Jeton éphémère par module et par analyse, lié au projet ; jamais en argument
+  ni en variable visible de `podman inspect` (secret Podman lu par le pont),
+  masqué dans les journaux, retiré après le module.
+- Le relais applique les garde-fous de CLAUDE.md § 3.5 à chaque requête :
+  outils retirés, secrets masqués (messages système compris), consigne de
+  l'appliance en tête, « aucun envoi à l'IA » et cloisonnement par projet,
+  taille bornée, modèle choisi par l'appliance, journal sans contenu.
+- Les résultats d'un module d'IA n'entrent dans aucun verdict sans
+  confirmation d'une personne (compte humain, rôle operator ou plus, audit) ;
+  un compte « agent » ou « bot » et un jeton d'API ne confirment jamais.
+
 ## 2. Dépôt et CI
 
 - **Dépôt public, mais non annoncé** : aucun nom d'hôte, domaine, adresse ou
