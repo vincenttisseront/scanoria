@@ -35,8 +35,6 @@ END $$;
 
 CREATE TRIGGER profiles_hierarchy BEFORE INSERT OR UPDATE OF parent_id, level ON profiles
     FOR EACH ROW EXECUTE FUNCTION profiles_check_hierarchy();
-<<<<<<< HEAD
-=======
 
 -- G9 : profil par déclencheur, avec les défauts de l'entreprise (principe 8) :
 -- PR → rapide, nuit → complet, release → release (tous les modules). Un champ
@@ -46,4 +44,3 @@ UPDATE projects p
        profile_nightly_id = COALESCE(p.profile_nightly_id, (SELECT id FROM profiles WHERE slug = 'complet' AND builtin)),
        profile_release_id = COALESCE(p.profile_release_id, (SELECT id FROM profiles WHERE slug = 'release' AND builtin))
  WHERE p.profile_pr_id IS NULL OR p.profile_nightly_id IS NULL OR p.profile_release_id IS NULL;
->>>>>>> origin/main
