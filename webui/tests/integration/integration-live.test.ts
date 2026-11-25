@@ -37,7 +37,7 @@ import { setConsoleUrl } from '../../server/forges/context'
 import { createForge } from '../../server/projects/forges'
 import { discoverForge } from '../../server/projects/discover'
 import { getForge } from '../../server/forges'
-import { createBinding, createIssuer, listBindings, listIssuers, resetJwksThrottle } from '../../server/ci/oidc'
+import { createBinding, createIssuer, defaultRefPatterns, listBindings, listIssuers, resetJwksThrottle } from '../../server/ci/oidc'
 import { decideProtection, listIntegrationRequests, runCiIntegration } from '../../server/ci/integration'
 import { badTokenLimiter, publicLimiter, tokenLimiter } from '../../server/middleware/api-token'
 
@@ -260,7 +260,7 @@ describe.skipIf(!DATABASE_URL || !FORGEJO)('b39-live : vrai Forgejo, PR d’int�
 
   it('4. OIDC : l’étape Forgejo lance l’analyse sans secret ; un autre dépôt est refusé', async () => {
     const { id: issuerId } = await createIssuer(db.pool, { kind: 'forgejo', issuer: oidcUrl })
-    expect(await createBinding(db.pool, { issuerId, projectId, repository: 'equipe/app', repositoryId: String(repoId) })).toBeTruthy()
+    expect(await createBinding(db.pool, { issuerId, projectId, repository: 'equipe/app', repositoryId: String(repoId), refPatterns: defaultRefPatterns('forgejo', 'main') })).toBeTruthy()
     resetJwksThrottle()
     for (const l of [publicLimiter, badTokenLimiter, tokenLimiter]) l.reset('127.0.0.1')
     const env = {
@@ -274,9 +274,13 @@ describe.skipIf(!DATABASE_URL || !FORGEJO)('b39-live : vrai Forgejo, PR d’int�
     const seen = new Set<string>()
     // Le worker n'est pas lancé ici : l'analyse créée par l'étape est terminée à la main.
     async function runAndPass(extra: Record<string, string> = {}) {
-      const step = runStep({ ...env, ...extra })
-      const scan = await until('analyse créée par la CI', async () => (await db.pool.query(
-        `SELECT id, ref, api_token_id FROM scans WHERE project_id = $1 AND NOT (id::text = ANY($2::text[]))`, [projectId, [...seen]])).rows[0])
+      let done: { code: number | null, out: string } | null = null
+      const step = runStep({ ...env, ...extra }).then(r => (done = r))
+      const scan = await until('analyse créée par la CI', async () => {
+        if (done) throw new Error(`étape terminée sans analyse (code ${done.code}) :\n${done.out}`)
+        return (await db.pool.query(
+          `SELECT id, ref, api_token_id FROM scans WHERE project_id = $1 AND NOT (id::text = ANY($2::text[]))`, [projectId, [...seen]])).rows[0]
+      })
       seen.add(scan.id)
       expect(scan.api_token_id).toBeNull()
       await db.pool.query(`UPDATE scans SET status = 'done', finished_at = now(), verdict = 'passed', verdict_details = $2 WHERE id = $1`,
