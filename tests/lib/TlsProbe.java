@@ -19,7 +19,10 @@ public class TlsProbe {
         HttpRequest req = HttpRequest.newBuilder(URI.create(args[0])).timeout(Duration.ofSeconds(20)).build();
         try {
             System.out.println(client.send(req, HttpResponse.BodyHandlers.discarding()).statusCode());
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.out.println("error:interrupted");
+        } catch (java.io.IOException | RuntimeException e) {
             for (Throwable t = e; t != null; t = t.getCause()) {
                 if (t instanceof javax.net.ssl.SSLException || t instanceof java.security.cert.CertificateException) {
                     System.out.println("untrusted");
