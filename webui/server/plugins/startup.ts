@@ -9,6 +9,7 @@ import { setBuildInfo } from '../utils/appliance'
 import { closePool } from '../utils/db'
 import { startConsole, stopConsole } from '../utils/runtime'
 import { registerForgeVerdictHook } from '../forges/verdict-hook'
+import { registerReleaseHooks } from '../release/hooks'
 
 export default defineNitroPlugin((nitroApp) => {
   const config = useRuntimeConfig()
@@ -28,6 +29,8 @@ export default defineNitroPlugin((nitroApp) => {
   void startConsole(loadMigrations)
   // 0.7 (D) : republication dans la forge après une exception approuvée (contrat 27).
   registerForgeVerdictHook()
+  // 0.8 (A) : statut scanoria/release-gate republié après une exception approuvée.
+  registerReleaseHooks()
 
   nitroApp.hooks.hook('close', async () => {
     stopConsole()

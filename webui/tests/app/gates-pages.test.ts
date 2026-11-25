@@ -81,6 +81,15 @@ describe('liste des gates', () => {
   })
 })
 
+const simulationRow = (rules: Record<string, unknown>) => ({
+  id: '55555555-5555-4555-8555-555555555555', project_id: null, gate_id: GATE, rules, since: '2026-08-27T00:00:00Z', origin: 'manual', status: 'done', created_at: '2026-11-25T08:00:00Z',
+  result: {
+    since: '2026-08-27T00:00:00Z', rules, changed_rules: ['new_code_only'],
+    scans: { total: 0, blocked: 0, unblocked: 0, unchanged: 0, drift: 0, errors: 0 }, releases: { total: 0, blocked: 0, unblocked: 0, unchanged: 0 },
+    by_rule: [], items: [], truncated: false, limited: false,
+  },
+})
+
 describe('détail d’un gate', () => {
   const detail = (patch: Record<string, unknown> = {}) => ({ ...gateRow(), project_list: [{ id: PROJECT, slug: 'alpha', name: 'Alpha' }], locked: {}, ...patch })
 
@@ -88,6 +97,7 @@ describe('détail d’un gate', () => {
     setUser('admin')
     route('GET', `/api/gates/${GATE}`, () => detail())
     route('PATCH', `/api/gates/${GATE}`, () => detail())
+    route('POST', '/api/gates/simulations', (_e, body) => simulationRow((body as { rules: Record<string, unknown> }).rules))
     await mount(GatePage, { route: `/gates/${GATE}` })
     const text = bodyText()
     for (const label of ['Nouveau code seulement', 'Secrets tolérés', 'Vulnérabilités bloquantes à partir de', 'Paquet malveillant bloquant', 'Non concluant = bloquant']) {
@@ -102,8 +112,16 @@ describe('détail d’un gate', () => {
     // Bascule « nouveau code seulement » puis enregistre.
     const sw = document.body.querySelector<HTMLButtonElement>('[data-testid="rule-new_code_only"] button[role="switch"]')!
     await click(sw)
+    // F9 : l'enregistrement attend une simulation des règles exactes du formulaire.
+    expect(save.disabled).toBe(true)
+    expect(bodyText()).toContain('Simulez ces règles avant de les enregistrer.')
+    await click(document.body.querySelector<HTMLButtonElement>('[data-testid="gate-simulate"]')!)
+    expect(callsTo('POST', '/api/gates/simulations')[0]!.body).toEqual({ gate_id: GATE, rules: { ...RULES, new_code_only: false }, since_days: 90 })
     expect(save.disabled).toBe(false)
     await click(save)
+    expect(bodyText()).toContain('Enregistrer les règles')
+    expect(callsTo('PATCH', `/api/gates/${GATE}`)).toHaveLength(0)
+    await click(button('Enregistrer'))
     expect(callsTo('PATCH', `/api/gates/${GATE}`)[0]!.body).toEqual({ rules: { ...RULES, new_code_only: false } })
     expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ title: 'Règles enregistrées.' }))
   })

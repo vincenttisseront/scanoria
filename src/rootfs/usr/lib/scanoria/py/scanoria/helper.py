@@ -30,9 +30,17 @@ import uuid
 from . import aiendpoint, bundle, common, mirror, modules, netutil, offline, pkgdates, prefetch, provision, schema, vigilance
 from . import dns as dnscheck
 from . import rulesets
+from . import attest
+from . import release
 from .common import Fail
 
 MAX_SIZE = 128 * 1024
+# 0.8 (contrat 37) : seuls les types de signature portent un contenu de 4 Mio
+# (base64 compris). Tout autre type au-delà de MAX_SIZE est refusé avant le
+# décodage JSON (repère du type lu dans les octets bruts, puis revérifié).
+LARGE_TYPES = {"sign-release-report": 6 * 1024 * 1024}
+MAX_READ = max([MAX_SIZE] + list(LARGE_TYPES.values()))
+LARGE_TYPE_RE = re.compile(rb'"type":"(' + b"|".join(re.escape(t.encode()) for t in LARGE_TYPES) + rb')"')
 NAME_RE = re.compile(r"([0-9]{8}T[0-9]{6}Z)-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.json\Z")
 TIMEOUTS = {
     "set-hostname": 300, "set-admin-networks": 60, "issue-certificate": 120,
@@ -49,6 +57,8 @@ TIMEOUTS = {
     "self-sbom": 3300, "run-canaries": 3300, "start-trial": 1200,
     "prefetch-images": 3300,
     "validate-ruleset": 420,
+    "sign-attestation": 120,
+    "sign-release-report": 120,
 }
 # Marge laissée entre l'échéance passée à scanoria-selfupdate et l'arrêt forcé
 # du helper : selfupdate ne franchit le point de non-retour (arrêt de la
@@ -185,6 +195,15 @@ def remove_entry(dirfd, name):
         os.unlink(name, dir_fd=dirfd)
 
 
+def large_allowed(data):
+    """Demande de plus de MAX_SIZE : seulement un type de LARGE_TYPES, dans sa limite.
+
+    Repère lu dans l'en-tête brut (avant tout décodage JSON), revérifié par
+    validate() une fois l'objet décodé."""
+    m = LARGE_TYPE_RE.search(data[:512])
+    return bool(m) and len(data) <= LARGE_TYPES[m.group(1).decode()]
+
+
 def take(name):
     """Déplace incoming/name dans work/ et en lit une copie unique.
 
@@ -202,7 +221,7 @@ def take(name):
                 return None, ("E_NOT_REGULAR_FILE", "hard link")
             if st.st_uid != common.scanoria_ids()[0]:
                 return None, ("E_BAD_OWNER", "unexpected owner")
-            if st.st_size > MAX_SIZE:
+            if st.st_size > MAX_READ:
                 return None, ("E_TOO_LARGE", "request too large")
             fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY, dir_fd=work)
             try:
@@ -210,7 +229,7 @@ def take(name):
                 if (st2.st_ino, st2.st_dev) != (st.st_ino, st.st_dev) or not stat.S_ISREG(st2.st_mode):
                     return None, ("E_NOT_REGULAR_FILE", "file changed")
                 chunks, total = [], 0
-                while total <= MAX_SIZE:
+                while total <= MAX_READ:
                     b = os.read(fd, 65536)
                     if not b:
                         break
@@ -219,7 +238,7 @@ def take(name):
             finally:
                 os.close(fd)
             data = b"".join(chunks)
-            if len(data) > MAX_SIZE:
+            if len(data) > MAX_SIZE and not large_allowed(data):
                 return None, ("E_TOO_LARGE", "request too large")
             return data, None
         finally:
@@ -229,13 +248,15 @@ def take(name):
         os.close(work)
 
 
-def validate(obj, expected_id=None, name_ts=None):
+def validate(obj, expected_id=None, name_ts=None, size=0):
     """Contrôles de forme (§ 5.4, point 4). Retourne (type, None) ou (type, (code, msg))."""
     if not isinstance(obj, dict):
         return None, ("E_SCHEMA", "request must be an object")
     rtype = obj.get("type")
     if not isinstance(rtype, str) or rtype not in common.REQUEST_TYPES:
         return None, ("E_UNKNOWN_TYPE", "unknown request type")
+    if size > LARGE_TYPES.get(rtype, MAX_SIZE):
+        return rtype, ("E_TOO_LARGE", "request too large")
     v = schema.load("requests", rtype)
     errs = v.errors(obj)
     if errs:
@@ -508,6 +529,8 @@ ACTIONS = {
     "start-trial": vigilance.act_start_trial,
     "prefetch-images": prefetch.act_prefetch_images,
     "validate-ruleset": rulesets.act_validate_ruleset,
+    "sign-attestation": attest.act_sign_attestation,
+    "sign-release-report": release.act_sign_release_report,
 }
 
 
@@ -566,7 +589,7 @@ def handle(name):
         except common.JsonError:
             err = ("E_INVALID_JSON", "invalid JSON")
         else:
-            rtype, err = validate(obj, rid, name_ts)
+            rtype, err = validate(obj, rid, name_ts, len(data))
     if err is not None:
         rname = name
         if err[0] == "E_DUPLICATE_ID" or id_seen(rid):

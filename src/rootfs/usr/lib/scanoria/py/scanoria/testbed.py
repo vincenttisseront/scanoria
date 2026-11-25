@@ -512,8 +512,13 @@ def run(manifest, timeout=None):
             except airelay.Unavailable as u:
                 if u.code == "E_MODULE_INVALID":
                     raise Fail(u.code, u.message)
+                # Connecteur actif mais aucun modèle de conversation retenu : le
+                # conseil « activer le connecteur » égarait l'administrateur.
+                advice = ("no chat model is selected: check the models of the AI connector (System › AI)"
+                          if "no_model" in u.message or "no_embedding_model" in u.message
+                          else "activate the AI connector (System › AI) before this module")
                 raise Fail("E_RELAY_UNAVAILABLE" if u.code != airelay.E_RELAY_TOKEN else "E_RELAY_TOKEN",
-                           "%s: activate the AI connector (System › AI) before this module" % u.message
+                           "%s: %s" % (u.message, advice)
                            if u.code == airelay.E_RELAY_UNAVAILABLE else u.message)
         elif svc:
             try:

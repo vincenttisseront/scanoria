@@ -21,6 +21,7 @@ import { ForgeError } from '../forges/http'
 import { discoverForge, dueForges } from './discover'
 import { runCiIntegration } from '../ci/integration'
 import { nightlyFullScans, pollPullRequests } from '../forges/poll'
+import { pollReleases } from '../release/poll'
 import { getProject, projectClient, refreshDetection, type ProjectRow } from './service'
 
 /** Contrat 4 (chantier C) : webui/server/scans/enqueue.ts. */
@@ -186,5 +187,9 @@ export async function runProjectSchedules(db: ScheduleDb, now: Date, enqueue: En
     result.errors += pr.errors
   }
   result.enqueued += await nightlyFullScans(db, now).catch(() => 0)
+  // 0.8 (A, § 7.2) : mode tiré des releases (tags et pré-versions) ; ne lève jamais.
+  // Ses erreurs (forge injoignable, tags illisibles) sont journalisées et retentées avec recul.
+  const rel = await pollReleases(db, now).catch(() => null)
+  if (rel) result.enqueued += rel.scans
   return result
 }

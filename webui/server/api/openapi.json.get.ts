@@ -12,6 +12,8 @@ import { PROFILE_OPS, profileSchemas } from '../profiles/openapi'
 import { RULESET_OPS, rulesetSchemas } from '../rulesets/openapi'
 import { TRIAGE_OPS, triageSchemas } from '../findings/openapi-07'
 import { CI_OPS, ciSchemas } from '../ci/openapi'
+import { RELEASE_OPS, releaseSchemas } from '../release/openapi'
+import { GATE_VEX_OPS, gateVexSchemas } from '../gates/openapi-08'
 
 type Role = 'public' | 'viewer' | 'operator' | 'admin'
 
@@ -149,6 +151,8 @@ const OPS: Record<string, Record<string, Op>> = {
   ...RULESET_OPS,
   ...TRIAGE_OPS,
   ...CI_OPS,
+  ...RELEASE_OPS,
+  ...GATE_VEX_OPS,
   '/api/scans': {
     get: { summary: 'Scan queue (status=active, in worker order) or history (filters: project, status, verdict, trigger; paginated)', role: 'viewer' },
     post: { summary: 'Queue a manual scan {project_id, ref?, profile?}; 200 when merged into an identical queued scan', role: 'operator', body: 'ScanCreate', status: 202 },
@@ -189,6 +193,19 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/licenses/policy/{id}': { delete: { summary: 'Remove a license decision (back to the global or default decision); audited', role: 'admin' } },
   '/api/licenses/evaluate': { post: { summary: 'Evaluate an SPDX expression against the policy (OR = best, AND = worst, WITH = base license)', role: 'viewer' } },
   '/api/licenses/scans/{id}': { get: { summary: 'License decision of each SBOM component of a scan, with counts', role: 'viewer' } },
+  // 0.8, chantier D : déploiement après verdict favorable (J9, J11–J13, J16).
+  '/api/deploy/projects/{id}/targets': {
+    get: { summary: 'Deployment targets of a project (J11 CD trigger, J12 GitOps PR, J13 registry promotion); credentials never returned', role: 'viewer' },
+    post: { summary: 'Declare a deployment target (config validated per kind; registry promotion on releases only; 409 on duplicate kind and environment); audited', role: 'admin', status: 201 },
+  },
+  '/api/deploy/projects/{id}/proposals': { get: { summary: 'Proposed CD targets (J11): manual workflows of the repository that declare scanoria_* inputs', role: 'admin' } },
+  '/api/deploy/projects/{id}/chain': { get: { summary: 'Autonomous chain of a project (J16): pull requests and auto-merge result, releases with verdict, report, attestations and deployments (refusals explained)', role: 'viewer' } },
+  '/api/deploy/targets/{id}': {
+    patch: { summary: 'Enable, disable or reconfigure a target; auto_merge (forge native auto-merge, GitOps only) recorded with its author; audited', role: 'admin' },
+    delete: { summary: 'Remove a deployment target; audited', role: 'admin', status: 204 },
+  },
+  '/api/deploy/scans/{id}': { get: { summary: 'Deployments and attestations of a scan (never the signatures inline)', role: 'viewer' } },
+  '/api/deploy/attestations/{id}': { get: { summary: 'Signed DSSE envelope (in-toto Statement v1, Scanoria release verdict predicate) as application/vnd.dsse.envelope.v1+json', role: 'viewer' } },
 }
 
 const HELPER_BODIES = [
@@ -382,6 +399,7 @@ export default defineEventHandler(async () => {
                 inconclusive_blocks: { const: true },
               },
             },
+            ai_task_id: { type: 'string', format: 'uuid', description: 'I19: the rules come from this AI suggestion; the audit records « proposed by AI »' },
           },
         },
         GateAssign: { type: 'object', additionalProperties: false, required: ['project_id'], properties: { project_id: { type: 'string', format: 'uuid' } } },
@@ -404,6 +422,8 @@ export default defineEventHandler(async () => {
         ...rulesetSchemas(),
         ...triageSchemas(),
         ...ciSchemas(),
+        ...releaseSchemas(),
+        ...gateVexSchemas(),
         FindingStatus: {
           type: 'object', additionalProperties: false, required: ['status'],
           properties: {

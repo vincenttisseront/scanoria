@@ -28,12 +28,18 @@ const CI_ROUTES: { method: string, re: RegExp, project: boolean }[] = [
   { method: 'POST', re: new RegExp(`^/api/projects/(${UUID})/results$`), project: true },
   // J15 (0.7, B) : demande d'exception depuis la CI (identité non humaine : demande, jamais décision).
   { method: 'POST', re: new RegExp(`^/api/projects/(${UUID})/exception-requests$`), project: true },
+  // 0.8 (A, § 7.2) : release en mode poussé, et rapport signé téléchargé par scanoria-scan --report.
+  { method: 'POST', re: new RegExp(`^/api/projects/(${UUID})/releases$`), project: true },
+  { method: 'GET', re: new RegExp(`^/api/releases/(${UUID})/report\\.json$`), project: false },
 ]
 const PUBLIC_ROUTES: { method: string, re: RegExp }[] = [
   { method: 'GET', re: /^\/api\/badges\/[a-z0-9][a-z0-9-]{0,62}\.svg$/ },
   { method: 'GET', re: /^\/api\/gates\/client$/ },
   // 0.7 (D, J1) : webhook de forge, authentifié par sa signature HMAC.
   { method: 'POST', re: /^\/api\/forges\/[0-9a-f-]{36}\/webhook$/ },
+  // 0.8 (A, contrat 37) : clé publique de l'appliance et client scanoria-verify.
+  { method: 'GET', re: /^\/api\/system\/appliance-key$/ },
+  { method: 'GET', re: /^\/api\/releases\/client$/ },
 ]
 
 /** Par jeton : 300 requêtes par minute (attente active de plusieurs CI). */

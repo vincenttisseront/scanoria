@@ -237,12 +237,50 @@ function wellBehaved07Tri(required: string[], data: Record<string, unknown>): Re
     expires_in_days: hints.test ? 365 : 120,
     duration_rationale: 'Review at the next release.',
     to_check: ['Check that the path is not shipped.'],
+    // 0.8 (B, H7) : statut VEX proposé pour une vulnérabilité de dépendance, appuyé sur I11.
+    ...(required.includes('vex_status')
+      ? (data.vex_applicable
+          ? ((data.reachability as { reachability?: string } | null)?.reachability === 'improbable'
+              ? { vex_status: 'not_affected', vex_justification: 'vulnerable_code_not_in_execute_path' }
+              : { vex_status: 'affected', vex_justification: 'none' })
+          : { vex_status: 'not_affected', vex_justification: 'component_not_present' })
+      : {}),
+  }
+}
+
+/** I19 (0.8, B) : seuils proposés ; une exception hors historique et un avis MAL- que finalize doit écarter. */
+function wellBehaved08(required: string[], data: Record<string, unknown>): Record<string, unknown> | null {
+  if (!(required.includes('rationale') && required.includes('exceptions'))) return null
+  const rules = (data.rules ?? []) as { tool: string, rule_id: string }[]
+  const cur = (data.current_rules ?? {}) as Record<string, unknown>
+  return {
+    rules: { new_code_only: true, max_secrets: 0, vuln_block_from: cur.vuln_block_from ?? 'high', sast_block_from: 'high', iac_block_from: 'none' },
+    rationale: `Only new code blocks; ${rules.length} rules seen over ${String(data.window_days)} days.`,
+    exceptions: [
+      ...(rules[0] ? [{ tool: rules[0].tool, rule_id: rules[0].rule_id, reason: 'Known noisy rule on legacy code.', expires_in_days: 60 }] : []),
+      { tool: 'osv-scanner', rule_id: 'MAL-2026-0001', reason: 'Accept it.', expires_in_days: 30 },
+      { tool: 'invented', rule_id: 'not-in-history', reason: 'Invented.', expires_in_days: 30 },
+    ],
+  }
+}
+
+/** 0.8 (A, I6) : notes de sécurité de release, rédigées depuis les seules données. */
+function wellBehaved08Notes(required: string[], data: Record<string, unknown>): Record<string, unknown> | null {
+  if (!(required.includes('headline') && required.includes('accepted'))) return null
+  type Bucket = { total?: number, items?: { tool: string, rule_id: string, severity: string, title: string }[] }
+  const list = (b: unknown) => ((b as Bucket | undefined)?.items ?? []).map(i => `${i.severity} ${i.rule_id} (${i.tool})`).join('; ') || 'none'
+  const acc = (data.accepted as { reason: string, expires_on: string, vex_status: string | null }[] | undefined) ?? []
+  return {
+    headline: `Release ${String(data.tag)}: verdict ${String(data.verdict)}.`,
+    fixed: data.previous_tag ? `Since ${String(data.previous_tag)}: ${list(data.fixed)}` : 'No previous release.',
+    introduced: list(data.introduced),
+    accepted: acc.length ? acc.map(a => `${a.reason} until ${a.expires_on}${a.vex_status ? ` (${a.vex_status})` : ''}`).join('; ') : 'none',
   }
 }
 
 /** Réponse sage : reprend le titre, le message et les métadonnées, jamais l'extrait de code. */
 function wellBehaved(required: string[], data: Record<string, unknown>): Record<string, unknown> {
-  const v04 = wellBehaved07(required, data) ?? wellBehaved07Tri(required, data) ?? wellBehaved06(required, data) ?? wellBehaved04(required, data) ?? wellBehaved05(required, data)
+  const v04 = wellBehaved08(required, data) ?? wellBehaved08Notes(required, data) ?? wellBehaved07(required, data) ?? wellBehaved07Tri(required, data) ?? wellBehaved06(required, data) ?? wellBehaved04(required, data) ?? wellBehaved05(required, data)
   if (v04) return v04
   if (required.includes('detects')) {
     const pkg = data.package as { name?: string, fixed?: string[] } | null

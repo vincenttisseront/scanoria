@@ -257,6 +257,8 @@ const example = computed(() => {
         </dl>
       </UCard>
 
+      <GatesSuggestion :project-id="info.project.id" />
+
       <UCard v-if="isOperator">
         <template #header>
           <div class="flex items-center justify-between">
