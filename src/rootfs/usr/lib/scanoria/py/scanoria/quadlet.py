@@ -165,7 +165,8 @@ def render(manifest, host_port, enabled, has_env, subnet=None, secrets=(), ulimi
             ip = ipaddress.IPv4Address(addr)
         except (ipaddress.AddressValueError, ValueError, TypeError):
             raise Fail("E_INVALID_PARAM", "invalid host address")
-        lines.append("AddHost=%s:%s" % (name, ip))
+        # Clé AddHost= absente du Quadlet de Podman 4.9 : option passée telle quelle.
+        lines.append("PodmanArgs=--add-host=%s:%s" % (name, ip))
     for k in sorted(ulimits or {}):
         v = ulimits[k]
         if k not in ("nofile", "nproc") or not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= 1 << 22:

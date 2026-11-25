@@ -347,7 +347,7 @@ print(json.dumps({"nft_dt": "tcp dport 9790 ip saddr != %s counter drop" % servi
                   "urls": sorted({v.split("/")[2] for k, v in props.items() if k.endswith("url")}),
                   "schemes": sorted({v.split(":")[0] for k, v in props.items() if k.endswith("url")}),
                   "secret": "Secret=scanoria-mod-dependency-track-truststore,type=mount,target=/opt/java/lib/security/cacerts,mode=0444" in unit,
-                  "host": "AddHost=feeds.analyse.exemple.test:10.90.3.1" in unit, "bad": bad,
+                  "host": "PodmanArgs=--add-host=feeds.analyse.exemple.test:10.90.3.1" in unit, "bad": bad,
                   "listen": "listen 9790 ssl;" in site, "name": "server_name feeds.analyse.exemple.test;" in site,
                   "allow": "allow 10.90.3.0/24;" in site and "10.90.0.0/16" not in site,
                   "cert": "ssl_certificate /etc/scanoria/pki/feeds/fullchain.pem;" in site, "hostile": hostile}))')
