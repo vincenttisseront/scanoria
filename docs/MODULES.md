@@ -497,15 +497,19 @@ amont (`cosign verify-blob`…). Il doit sortir en 0.
 1. La PR qui ajoute ou modifie `image/` porte `image_pending: true` et aucun
    champ `image`. Le workflow construit l'image (sans rien pousser), vérifie
    l'utilisateur 65534 et lance la commande de santé du manifeste sans
-   réseau ; `tests/b36-live.sh` (ou la batterie `-live` du module) la
-   construit aussi localement pour passer le banc d'essai. `catalog/build.py`
+   réseau ; la batterie `-live` qui éprouve le module la construit aussi
+   localement pour passer le banc d'essai (`tests/b10-live.sh` écarte les
+   modules en attente d'image). `catalog/build.py`
    écarte le module de l'index et refuse qu'un module publié ou un pack le
    cite.
 2. Après la fusion, le workflow pousse l'image vers
-   `ghcr.io/vincenttisseront/scanoria-<id>:<version>` (seul travail avec
+   `ghcr.io/<propriétaire du dépôt>/scanoria-<id>:<version>` (seul travail avec
    `packages: write`), y attache une attestation de provenance
    (`actions/attest-build-provenance`) et affiche l'empreinte dans le résumé
-   du travail.
+   du travail. Une étiquette déjà publiée n'est jamais remplacée : modifier
+   l'image demande une nouvelle `version` dans `module.yaml`. Sans base de
+   comparaison, rien n'est publié ; `workflow_dispatch` (un module) reste le
+   moyen explicite de reconstruire une image.
 3. Une PR de suivi pose `image: ghcr.io/vincenttisseront/scanoria-<id>@sha256:…`,
    retire `image_pending` et incrémente `catalog/VERSION` : le module entre
    alors dans le catalogue. Une image construite ici n'est jamais publiée sous

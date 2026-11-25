@@ -74,6 +74,11 @@ jobs:
                 changed=$(git diff --name-only "$base" HEAD -- 'modules/*/image/**' | cut -d/ -f2 | LC_ALL=C sort -u)
                 # Une PR qui ne change que ce workflow construit toutes les images.
                 if [[ "$EVENT" == push || -n "$changed" ]]; then all=$(comm -12 <(echo "$all") <(echo "$changed")); fi
+              elif [[ "$EVENT" == push ]]; then
+                # Sur main, jamais de publication de toutes les images faute de base de comparaison :
+                # workflow_dispatch reste le moyen explicite de (re)construire une image.
+                echo "base de comparaison absente : aucune publication" >&2
+                all=""
               fi
               ;;
           esac
@@ -102,6 +107,7 @@ jobs:
         env:
           MODULE: ${{ matrix.module }}
         run: |
+          sudo apt-get update -q > /dev/null
           sudo apt-get install -y -q --no-install-recommends python3-yaml python3-jsonschema > /dev/null
           python3 tests/lib/modcheck.py containerfile "modules/$MODULE/image/Containerfile" "$MODULE"
       - name: Vérification amont (verify.sh facultatif)
@@ -139,9 +145,12 @@ jobs:
           version=$(python3 -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["version"])' "modules/$MODULE/module.yaml")
           # Une étiquette OCI n'admet pas « + » (version 1.0+build).
           tag=${version//+/_}
-          mapfile -t health < <(python3 -c 'import sys, yaml
+          # Variable intermédiaire : un échec de python3 arrête l'étape (set -e).
+          cmd=$(python3 -c 'import sys, yaml
           h = (yaml.safe_load(open(sys.argv[1])).get("health") or {}).get("command") or []
           print("\n".join(h))' "modules/$MODULE/module.yaml")
+          health=()
+          [[ -n "$cmd" ]] && mapfile -t health <<< "$cmd"
           uid=$(podman run --rm --network=none --entrypoint id "localhost/scanoria-$MODULE:$tag" -u)
           [[ "$uid" == 65534 ]] || { echo "utilisateur $uid au lieu de 65534" >&2; exit 1; }
           if [[ ${#health[@]} -gt 0 ]]; then
@@ -194,6 +203,16 @@ jobs:
           tag=${version//+/_}
           repo="ghcr.io/${OWNER,,}/scanoria-$MODULE"
           printf '%s' "$TOKEN" | podman login ghcr.io -u "$ACTOR" --password-stdin
+          # Une étiquette publiée n'est jamais remplacée : une modification de l'image
+          # passe par une nouvelle version dans module.yaml.
+          if skopeo inspect --raw "docker://$repo:$tag" > /dev/null 2> "$RUNNER_TEMP/inspect.err"; then
+            echo "$repo:$tag existe déjà : changer « version » dans modules/$MODULE/module.yaml" >&2
+            exit 1
+          elif ! grep -qiE 'manifest unknown|not found|name unknown|denied' "$RUNNER_TEMP/inspect.err"; then
+            # Erreur réseau ou autre : on ne pousse pas à l'aveugle.
+            cat "$RUNNER_TEMP/inspect.err" >&2
+            exit 1
+          fi
           podman load -i "$RUNNER_TEMP/image.tar"
           podman tag "localhost/scanoria-$MODULE:$tag" "$repo:$tag"
           podman push --digestfile "$RUNNER_TEMP/digest" "$repo:$tag"

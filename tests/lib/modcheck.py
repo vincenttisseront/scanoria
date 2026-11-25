@@ -40,7 +40,8 @@ OPTION_NAME = re.compile(r"^[a-z][a-z0-9_]{0,40}\Z")
 ENV_NAME = re.compile(r"^(?!LD_|PATH\Z|HOME\Z)[A-Z][A-Z0-9_]{0,63}\Z")
 TESTBED_NAME = re.compile(r"^[A-Za-z0-9._+@-]+\Z")
 # Images d'outils construites par la CI de Scanoria (0.7, modules/<id>/image/).
-FROM_PINNED = re.compile(r"^FROM\s+(?:--platform=\S+\s+)?[a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]{1,5})?(/[a-z0-9]+([._-]{1,2}[a-z0-9]+)*)+@sha256:[0-9a-f]{64}(\s+AS\s+[A-Za-z0-9_-]+)?\s*$", re.IGNORECASE)
+FROM_PINNED = re.compile(r"^FROM\s+(?:--platform=\S+\s+)?[a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]{1,5})?(/[a-z0-9]+([._-]{1,2}[a-z0-9]+)*)+@sha256:[0-9a-f]{64}(\s+AS\s+(?P<alias>[A-Za-z0-9_-]+))?\s*$")
+FROM_STAGE = re.compile(r"^FROM\s+(?:--platform=\S+\s+)?([A-Za-z0-9_-]+)(\s+AS\s+[A-Za-z0-9_-]+)?\s*$")
 TOOL_IMAGE_REPO = "ghcr.io/vincenttisseront/scanoria-"
 OCI_LABELS = ("org.opencontainers.image.source", "org.opencontainers.image.revision",
               "org.opencontainers.image.version", "org.opencontainers.image.licenses")
@@ -173,20 +174,34 @@ def containerfile_errors(path, mid):
         logical.append((cur + line).strip())
         cur = ""
     errs = []
-    froms = [ln for ln in logical if ln.split(None, 1)[0].upper() == "FROM"]
-    if not froms:
+    stages, aliases = [], set()
+    for ln in logical:
+        if ln.split(None, 1)[0] == "FROM":
+            m = FROM_PINNED.match(ln)
+            st = FROM_STAGE.match(ln)
+            if m:
+                if m.group("alias"):
+                    aliases.add(m.group("alias"))
+            elif not (st and st.group(1) in aliases):
+                # Seule une étape déjà déclarée (« FROM build ») échappe à l'épinglage.
+                errs.append(f"image/Containerfile : FROM non épinglé par empreinte : {ln[:120]}")
+            stages.append([])
+        elif ln.split(None, 1)[0].upper() == "FROM":
+            errs.append(f"image/Containerfile : FROM en majuscules attendu : {ln[:120]}")
+            stages.append([])
+        elif stages:
+            stages[-1].append(ln)
+    if not stages:
         errs.append("image/Containerfile : aucun FROM")
-    for ln in froms:
-        if not FROM_PINNED.match(ln):
-            errs.append(f"image/Containerfile : FROM non épinglé par empreinte : {ln[:120]}")
-    users = [ln.split(None, 1)[1].strip() if len(ln.split(None, 1)) > 1 else "" for ln in logical if ln.split(None, 1)[0].upper() == "USER"]
-    if not users or users[-1] != "65534:65534":
-        errs.append("image/Containerfile : la dernière instruction USER doit être 65534:65534")
+    # Utilisateur de l'image finale : dernier USER de la dernière étape seulement.
+    final_users = [ln.split(None, 1)[1].strip() if len(ln.split(None, 1)) > 1 else "" for ln in (stages[-1] if stages else []) if ln.split(None, 1)[0].upper() == "USER"]
+    if not final_users or final_users[-1] != "65534:65534":
+        errs.append("image/Containerfile : la dernière instruction USER de l'étape finale doit être 65534:65534")
     labels = " ".join(ln for ln in logical if ln.split(None, 1)[0].upper() == "LABEL")
     for key in OCI_LABELS:
-        if key + "=" not in labels:
-            errs.append(f"image/Containerfile : étiquette {key} absente")
-    if f"io.scanoria.module={mid}" not in labels and f'io.scanoria.module="{mid}"' not in labels:
+        if not re.search(r"(^|\s)" + re.escape(key) + r'=("[^"\s][^"]*"|[^"\s]+)', labels):
+            errs.append(f"image/Containerfile : étiquette {key} absente ou vide")
+    if not re.search(r'(^|\s)io\.scanoria\.module=("?)' + re.escape(mid) + r'\2(\s|$)', labels):
         errs.append(f"image/Containerfile : étiquette io.scanoria.module={mid} absente")
     for ln in logical:
         word = ln.split(None, 1)[0].upper()
@@ -205,8 +220,14 @@ def image_errors(module_dir, manifest):
     cf = os.path.join(module_dir, "image", "Containerfile")
     image = manifest.get("image") or ""
     built_here = image.startswith(TOOL_IMAGE_REPO)
-    if os.path.islink(os.path.join(module_dir, "image")) or os.path.islink(cf):
+    idir = os.path.join(module_dir, "image")
+    if os.path.islink(idir):
         return ["image/ : lien symbolique interdit"]
+    if os.path.isdir(idir):
+        for dirpath, dirnames, filenames in os.walk(idir):
+            for n in dirnames + filenames:
+                if os.path.islink(os.path.join(dirpath, n)):
+                    return [f"image/ : lien symbolique interdit : {os.path.relpath(os.path.join(dirpath, n), idir)}"]
     if not os.path.isfile(cf):
         if manifest.get("image_pending") or built_here:
             return ["image/Containerfile absent (image construite par la CI de Scanoria)"]

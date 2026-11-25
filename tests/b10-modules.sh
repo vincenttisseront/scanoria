@@ -274,13 +274,19 @@ cf_case() { # libellé attendu(ok|ko) motif sed
 cf_case "gabarit conforme accepté" ok "" 's/^$//'
 cf_case "FROM par étiquette refusé" ko "non épinglé" "s|python@sha256:$D64 AS build|python:3.13-slim AS build|"
 cf_case "FROM sans registre explicite refusé" ko "non épinglé" "s|FROM docker.io/library/python@sha256:$D64\$|FROM python@sha256:$D64|"
-cf_case "utilisateur root refusé" ko "USER doit être 65534:65534" 's/^USER 65534:65534$/USER root/'
-cf_case "USER absent refusé" ko "USER doit être 65534:65534" '/^USER /d'
+cf_case "utilisateur root refusé" ko "étape finale doit être 65534:65534" 's/^USER 65534:65534$/USER root/'
+cf_case "USER absent refusé" ko "étape finale doit être 65534:65534" '/^USER /d'
 cf_case "pip install sans --require-hashes refusé" ko "require-hashes" 's/--require-hashes //'
 cf_case "téléchargement sans sha256sum refusé" ko "sha256sum" 's/sha256sum -c -/true/'
 cf_case "ADD d'une URL refusé" ko "ADD d'une URL" 's|^COPY requirements.lock|ADD https://exemple.test/r.lock|'
 cf_case "étiquette de licence absente refusée" ko "org.opencontainers.image.licenses" '/image.licenses=/d'
 cf_case "étiquette du module absente refusée" ko "io.scanoria.module=essai" 's/io.scanoria.module="essai"/io.scanoria.module="autre"/'
+cf_case "étiquette du module préfixe refusée" ko "io.scanoria.module=essai" 's/io.scanoria.module="essai"/io.scanoria.module="essai-bis"/'
+cf_case "étiquette vide refusée" ko "org.opencontainers.image.licenses" 's/image.licenses="Apache-2.0"/image.licenses=""/'
+cf_case "empreinte en majuscules refusée" ko "non épinglé" "s|python@sha256:$D64 AS build|python@sha256:${D64//0/A} AS build|"
+cf_case "USER 65534 dans une étape intermédiaire seulement refusé" ko "étape finale doit être 65534:65534" 's/^COPY requirements.lock/USER 65534:65534\nCOPY requirements.lock/;$d'
+cf_case "FROM d'une étape déclarée accepté" ok "" 's|^FROM docker.io/library/python@sha256:0*$|FROM build|'
+cf_case "FROM d'une étape inconnue refusé" ko "non épinglé" 's|^FROM docker.io/library/python@sha256:0*$|FROM inconnue|'
 mkdir -p "$TMP/pend/m"
 check "image en attente sans Containerfile refusée" python3 -c '
 import sys; sys.path.insert(0, sys.argv[1]); import modcheck
@@ -294,6 +300,12 @@ assert not modcheck.image_errors(sys.argv[2], {"id": "m", "image_pending": True}
 assert not modcheck.image_errors(sys.argv[2], {"id": "m", "image": "ghcr.io/vincenttisseront/scanoria-m@sha256:" + d})
 errs = modcheck.image_errors(sys.argv[2], {"id": "m", "image": "ghcr.io/vincenttisseront/scanoria-autre@sha256:" + d})
 sys.exit(0 if any("publiée sous" in e for e in errs) else 1)' "$ROOT/tests/lib" "$TMP/pend/m"
+ln -s /etc/passwd "$TMP/pend/m/image/lien"
+check "lien symbolique dans image/ refusé" python3 -c '
+import sys; sys.path.insert(0, sys.argv[1]); import modcheck
+errs = modcheck.image_errors(sys.argv[2], {"id": "m", "image_pending": True})
+sys.exit(0 if any("lien symbolique" in e for e in errs) else 1)' "$ROOT/tests/lib" "$TMP/pend/m"
+rm -f "$TMP/pend/m/image/lien"
 check "manifeste en attente d’image accepté par le schéma (sans image)" python3 -c '
 import sys, yaml; sys.path.insert(0, sys.argv[1]); import modcheck
 m = yaml.safe_load(open(sys.argv[2])); del m["image"]; m["image_pending"] = True
