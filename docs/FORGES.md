@@ -30,7 +30,10 @@ simple :
 - un seul secret à garder, chiffré en base, jamais réaffiché.
 
 La console l'affiche ainsi pour chaque forge de ce type, avec les portées
-exactes. Les types `forgejo-oauth` et `gitlab-oauth` restent prévus dans le
+exactes. Pour poser les webhooks, le compte de service doit **administrer**
+les dépôts (collaborateur « administrateur », ou équipe de l'organisation avec
+ce droit) ; avec un simple droit d'écriture, tout fonctionne en mode tiré
+(interrogation), et l'échec est journalisé. Les types `forgejo-oauth` et `gitlab-oauth` restent prévus dans le
 schéma pour une version ultérieure.
 
 **Portées exactes demandées :**

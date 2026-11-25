@@ -135,7 +135,11 @@ async function ensureWebhooks(db: Queryable, forge: ForgeRow): Promise<number> {
   const publisher = forgePublisher(await forgeAccessFor(db, forge), { consoleUrl: url })
   let created = 0
   for (const r of rows) {
-    const out = await publisher.ensureWebhook(r.repo_full_name, `${url}/api/forges/${forge.id}/webhook`, secret).catch(() => null)
+    const out = await publisher.ensureWebhook(r.repo_full_name, `${url}/api/forges/${forge.id}/webhook`, secret).catch((err: unknown) => {
+      // Droits insuffisants ou forge muette : mode tiré pour ce dépôt (jamais le secret dans le journal).
+      console.error('[discover] webhook', r.repo_full_name, (err as { code?: string }).code ?? (err as Error)?.message)
+      return null
+    })
     if (out === 'created') created++
   }
   return created
