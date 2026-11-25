@@ -101,6 +101,7 @@ export const ASSET_FILES = [
   { name: 'scanoria-release-report.json', source: 'report.json', type: 'application/json' },
   { name: 'scanoria-results.sarif', source: 'results.sarif', type: 'application/sarif+json' },
   { name: 'scanoria-sbom.cdx.json', source: 'sbom.cdx.json', type: 'application/vnd.cyclonedx+json' },
+  { name: 'scanoria-vex.openvex.json', source: 'vex.json', type: 'application/json' },
 ] as const
 
 export interface AssetsResult {

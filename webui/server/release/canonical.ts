@@ -36,7 +36,8 @@ function encode(v: unknown, path: string, depth: number): string {
   }
   if (Array.isArray(v)) return `[${v.map((x, i) => encode(x, `${path}[${i}]`, depth + 1)).join(',')}]`
   if (typeof v === 'object') {
-    const keys = Object.keys(v as object).sort()
+    // Ordre des unités de code UTF-16 (comme le helper Python), jamais localeCompare.
+    const keys = Object.keys(v as object).sort((a, b) => (a < b ? -1 : 1))
     const parts: string[] = []
     for (const k of keys) {
       const x = (v as Record<string, unknown>)[k]

@@ -214,8 +214,13 @@ describe.skipIf(!DATABASE_URL || !hasTools)('gate de release (chantier A, Postgr
     expect(rr.rows[0].report).toMatchObject({ schema: 'scanoria-release-report/1', tag: 'v1.0.0', scan_id: first, verdict: { value: 'passed' } })
     // Finalisation (même passe) : statut favorable, trois fichiers joints, événement émis.
     expect(repo.statuses.at(-1)).toMatchObject({ state: 'success', context: 'scanoria/release-gate', target_url: `${CONSOLE}/releases/${first}` })
-    // Pas de SBOM dans cette analyse : rapport et SARIF seulement.
-    expect(repo.releases![0]!.assets.map(a => a.name).sort()).toEqual(['scanoria-release-report.json', 'scanoria-results.sarif'])
+    // Pas de SBOM dans cette analyse : rapport, SARIF et VEX seulement.
+    expect(repo.releases![0]!.assets.map(a => a.name).sort()).toEqual(['scanoria-release-report.json', 'scanoria-results.sarif', 'scanoria-vex.openvex.json'])
+    // VEX (contrat 38) : document rangé à côté du rapport, couvert par son empreinte dans le rapport signé.
+    const vexRef = (rr.rows[0].report as { vex: { name: string, sha256: string, statements: number } }).vex
+    expect(vexRef).toMatchObject({ name: 'vex.json', statements: 0 })
+    const vexAsset = repo.releases![0]!.assets.find(a => a.name === 'scanoria-vex.openvex.json')!.body
+    expect(sha256Hex(vexAsset)).toBe(vexRef.sha256)
     expect(events.filter(e => e.scanId === first)).toHaveLength(1)
     expect(events[0]).toMatchObject({ projectId, verdict: 'passed', reportSha256: rr.rows[0].report_sha256 })
     await releaseTick(db.pool, requestsDir, () => {})
@@ -281,6 +286,9 @@ describe.skipIf(!DATABASE_URL || !hasTools)('gate de release (chantier A, Postgr
     expect(rep.headers.get('content-disposition')).toContain('v1.0.0-report.json')
     expect(rep.data).toMatchObject({ schema: 'scanoria-signed-release-report/1' })
     expect((await call(`/api/releases/${first}/results.sarif`, 'viewer')).data).toMatchObject({ version: '2.1.0' })
+    const vexDl = await call(`/api/releases/${first}/vex.json`, 'viewer')
+    expect(vexDl.status).toBe(200)
+    expect(vexDl.data).toMatchObject({ '@context': expect.stringContaining('openvex') })
     expect((await call(`/api/releases/${first}/../etc`, 'viewer')).status).toBe(404)
     expect((await call(`/api/releases/${first}/other.json`, 'viewer')).status).toBe(404)
     expect((await db.pool.query(`SELECT 1 FROM audit_log WHERE action = 'release.download'`)).rowCount).toBeGreaterThanOrEqual(2)

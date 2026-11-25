@@ -2041,6 +2041,7 @@ export default {
       report: 'Rapport JSON signé',
       sarif: 'SARIF fusionné',
       sbom: 'SBOM CycloneDX',
+      vex: 'VEX (OpenVEX)',
       verify: 'Client scanoria-verify',
       key: 'Clé publique de l’appliance',
       help: 'Vérifiez le rapport hors de l’appliance : scanoria-verify rapport.json --key appliance.pem --commit (empreinte du commit). Les fichiers sont aussi joints à la release de la forge quand l’accès le permet.',

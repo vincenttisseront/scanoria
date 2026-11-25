@@ -14,7 +14,7 @@ import { sbomDocument, scanSbom } from '../sbom/ingest'
 import { canonicalBytes, sha256Hex, toSafeJson } from './canonical'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-export const ARTIFACT_NAMES = ['report.json', 'results.sarif', 'sbom.cdx.json', 'notes.md'] as const
+export const ARTIFACT_NAMES = ['report.json', 'results.sarif', 'sbom.cdx.json', 'notes.md', 'vex.json'] as const
 export type ArtifactName = (typeof ARTIFACT_NAMES)[number]
 export const MAX_SARIF_RESULTS = 20_000
 

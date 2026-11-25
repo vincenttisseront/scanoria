@@ -6,6 +6,7 @@
 //   aussi lisible par le jeton d'API du projet (scanoria-scan --report) ;
 // - results.sarif, sbom.cdx.json : fichiers rangés à la création du rapport,
 //   dont l'empreinte est inscrite dans le rapport signé ;
+// - vex.json : document OpenVEX de l'analyse, dont l'empreinte est dans le rapport ;
 // - notes.md : annexe I6 non signée, proposée par IA (si elle existe).
 
 import { defineEventHandler, getRouterParam, setHeader } from 'h3'
@@ -23,6 +24,7 @@ const FILES = {
   'results.sarif': 'application/sarif+json',
   'sbom.cdx.json': 'application/vnd.cyclonedx+json',
   'notes.md': 'text/markdown; charset=utf-8',
+  'vex.json': 'application/json',
 } as const
 
 export default defineEventHandler(async (event) => {

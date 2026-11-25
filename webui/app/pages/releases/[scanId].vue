@@ -112,6 +112,7 @@ const files = [
   { name: 'report.json', icon: 'i-lucide-file-badge', key: 'report' },
   { name: 'results.sarif', icon: 'i-lucide-file-json', key: 'sarif' },
   { name: 'sbom.cdx.json', icon: 'i-lucide-package', key: 'sbom' },
+  { name: 'vex.json', icon: 'i-lucide-shield-question', key: 'vex' },
 ] as const
 const pubKeys = [['gate', 'gate.published'], ['assets', 'assets'], ['notes', 'notes.uploaded']] as const
 const pubText = (p: Publication) => {

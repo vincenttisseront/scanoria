@@ -88,7 +88,7 @@ export async function releaseView(db: Queryable, scanId: string) {
       publications: await publications(db, scanId), files: {}, comparison: null,
     }
   }
-  const files = Object.fromEntries(await Promise.all((['results.sarif', 'sbom.cdx.json'] as const).map(async n => [n, !!(await readArtifact(scanId, n))])))
+  const files = Object.fromEntries(await Promise.all((['results.sarif', 'sbom.cdx.json', 'vex.json'] as const).map(async n => [n, !!(await readArtifact(scanId, n))])))
   const comparison = rel.previous_scan_id ? await compareScans(db, rel.previous_scan_id, scanId) : null
   const signedVerdict = (rel.report.verdict as { value?: string } | undefined)?.value ?? null
   return {

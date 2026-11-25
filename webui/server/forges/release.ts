@@ -140,6 +140,14 @@ function forgejo(access: ForgeAccess): ReleaseForge {
   }
 }
 
+/** Chemin de téléversement GitHub : [/api/uploads]/repos/<owner>/<repo>/releases/<id>/assets. */
+export function isUploadPath(pathname: string): boolean {
+  const s = pathname.split('/')
+  const rest = s[1] === 'api' && s[2] === 'uploads' ? s.slice(3) : s.slice(1)
+  return s[0] === '' && rest.length === 6 && rest[0] === 'repos' && !!rest[1] && !!rest[2]
+    && rest[3] === 'releases' && /^\d+$/.test(rest[4]!) && rest[5] === 'assets'
+}
+
 function github(access: ForgeAccess): ReleaseForge {
   const api = githubApiBase(access.base_url)
   const req: ForgeRequest = { token: access.token, authScheme: 'Bearer', accept: 'application/vnd.github+json', headers: { 'x-github-api-version': '2022-11-28' } }
@@ -167,7 +175,7 @@ function github(access: ForgeAccess): ReleaseForge {
       if (!tmpl) throw new ForgeError('E_FORGE_RESPONSE')
       const target = new URL(tmpl.replace(/\{[^}]*\}$/, ''))
       // Jamais de jeton vers un autre hôte que celui des téléversements de cette forge.
-      if (target.origin !== uploadOrigin || !/^\/(api\/uploads\/)?repos\/[^?#]+\/releases\/\d+\/assets$/.test(target.pathname)) throw new ForgeError('E_FORGE_URL')
+      if (target.origin !== uploadOrigin || !isUploadPath(target.pathname)) throw new ForgeError('E_FORGE_URL')
       target.search = `name=${encodeURIComponent(name)}`
       return sendOrExists(() => forgeSendJson(target.toString(), req, { method: 'POST', bytes: { data, contentType } }))
     },
