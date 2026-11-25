@@ -3,8 +3,8 @@
 #
 # Module kics (0.7, chantier A) : erreurs de configuration de l'IaC par les
 # requêtes Rego de KICS (Checkmarx), en complément de Checkov. Hors ligne :
-# --disable-full-descriptions (sans elle, KICS demande les descriptions à
-# l'API de Checkmarx), requêtes de secrets écartées (gitleaks les couvre).
+# requêtes de secrets écartées (gitleaks les couvre) ; KICS 2.x ne demande plus
+# de descriptions en ligne (--disable-full-descriptions a disparu).
 # Requêtes maison : jeux de règles G4 du moteur « kics » (document JSON
 # {queries: [{id, metadata, query}]}), dépliés par le runner sous
 # /rules/<slug>/<id>/{query.rego,metadata.json} ; /rules est toujours monté.
@@ -41,7 +41,7 @@ options:
 scan:
   inputs: [repo, archive]
   command: ["/app/bin/kics", "scan", "--path", "/src", "--output-path", "/out", "--output-name", "kics",
-            "--report-formats", "sarif", "--ci", "--no-progress", "--disable-full-descriptions",
+            "--report-formats", "sarif", "--ci", "--no-progress",
             "--disable-secrets", "--ignore-on-exit", "results",
             "--queries-path", "/app/bin/assets/queries", "--queries-path", "/rules"]
   rulesets: { engine: kics, mount: /rules }

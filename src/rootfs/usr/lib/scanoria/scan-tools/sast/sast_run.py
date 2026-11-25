@@ -275,6 +275,34 @@ def run_grep(engine, args):
 # Checkov
 # --------------------------------------------------------------------------
 
+CHECKOV_COND_TYPES = {"attribute", "connection", "filter"}
+
+
+def checkov_definition_error(node, depth=0):
+    """Première erreur de forme d'une définition de politique YAML Checkov, ou None."""
+    if depth > 20:
+        return "definition is nested too deeply"
+    if isinstance(node, list):
+        if not node:
+            return "empty condition list"
+        for n in node:
+            e = checkov_definition_error(n, depth + 1)
+            if e:
+                return e
+        return None
+    if not isinstance(node, dict):
+        return "condition must be a mapping"
+    ops = [k for k in ("and", "or", "not") if k in node]
+    if ops:
+        return checkov_definition_error(node[ops[0]], depth + 1)
+    ct = node.get("cond_type")
+    if ct not in CHECKOV_COND_TYPES:
+        return "unknown cond_type %r" % (str(ct)[:40],)
+    if not isinstance(node.get("operator"), str):
+        return "condition needs an operator"
+    return None
+
+
 def checkov_external_dirs(work):
     """policies.yaml d'un jeu de règles : une politique ou une liste de
     politiques YAML Checkov ; chacune devient un fichier de work/<slug>/."""
@@ -295,6 +323,10 @@ def checkov_external_dirs(work):
                     or not isinstance(p.get("definition"), (dict, list)) \
                     or not isinstance(p["metadata"].get("id"), str):
                 raise ToolError(RC_RULESET, "ruleset %s: policy %d needs metadata.id and definition" % (slug, i + 1))
+            # Checkov ignore en silence une condition qu'il ne comprend pas : elle est refusée ici.
+            bad = checkov_definition_error(p["definition"])
+            if bad:
+                raise ToolError(RC_RULESET, "ruleset %s: policy %d: %s" % (slug, i + 1, bad))
             with open(os.path.join(d, "policy-%03d.yaml" % i), "w", encoding="utf-8") as f:
                 yaml.safe_dump(p, f)
             ids.append(str(p["metadata"]["id"]))

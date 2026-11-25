@@ -304,6 +304,9 @@ def act_validate_ruleset(c):
         for s in samples:
             _write(os.path.join(src, s["name"]), s["content"].encode("utf-8"))
             os.chmod(os.path.join(src, s["name"]), 0o644)
+        # Comme au banc d'essai : les exemples sont à l'utilisateur du conteneur
+        # (le masque du helper rendrait src illisible pour lui).
+        testbed._give_to_container(src)
         testbed._prepare_out(out)
         staged = stage([{"slug": "candidate", "engine": engine, "version": 1, "sha256": sha, "data": data}],
                        os.path.join(work, "rules"))

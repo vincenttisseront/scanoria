@@ -82,7 +82,12 @@ for id in "${MODS[@]}"; do
 		IMG[$id]="localhost/scanoria-$id:b31"
 		if podman build -q --pull=always -t "${IMG[$id]}" "$ROOT/modules/$id/image" > "$TMP/build.log" 2>&1; then ok "$id : image construite"
 		else ko "$id : construction de l'image"; tail -n 15 "$TMP/build.log" | sed 's/^/     /'; continue; fi
-		# Le registre du test porte l'image locale (l'appliance reçoit l'image publiée, épinglée).
+		# Le registre du test porte l'image locale, épinglée par son empreinte comme
+		# l'image publiée que reçoit l'appliance (le runner refuse une étiquette).
+		dg=$(podman image inspect --format '{{.Digest}}' "${IMG[$id]}" 2> /dev/null || true)
+		if [[ "$dg" == sha256:* ]] && podman image exists "localhost/scanoria-$id@$dg"; then
+			IMG[$id]="localhost/scanoria-$id@$dg"
+		else ko "$id : empreinte de l'image locale introuvable ($dg)"; fi
 		jq --arg i "${IMG[$id]}" '.image = $i | del(.image_pending)' "$TMP/$id.json" > "$TMP/$id.j" && mv "$TMP/$id.j" "$TMP/$id.json"
 	else
 		IMG[$id]=$(jq -r .image "$TMP/$id.json")
@@ -158,10 +163,18 @@ scan() { # module dossier [rulesets] → résultat JSON
 	cat "$SCANS/results/$id/result.json" 2> /dev/null || echo '{}'
 }
 last_scan() { LAST="$SCANS/results/$(cat "$TMP/last.id")"; }
+STORE="$SCANS/jobs/rulesets"
+mkdir -p "$STORE"
+put() { local sha; sha=$(printf '%s' "$1" | sha256sum | cut -d' ' -f1); printf '%s' "$1" > "$STORE/$sha"; chmod 0600 "$STORE/$sha"; echo "$sha"; }
 mkdir -p "$TMP/recorded"
 for id in "${MODS[@]}"; do
 	[[ -n "${IMG[$id]:-}" ]] || continue
-	R=$(scan "$id" "$ROOT/modules/$id/testbed")
+	rs=""
+	if [[ "$id" == semgrep ]]; then
+		# Semgrep CE exige un jeu de règles attaché (règles officielles importées) : les règles maison en tiennent lieu.
+		rs="[{\"slug\": \"maison\", \"engine\": \"semgrep\", \"version\": 1, \"sha256\": \"$(put "$(cat "$ROOT/src/rootfs/usr/lib/scanoria/scan-tools/sast/rules/opengrep/scanoria-base.yaml")")\"}]"
+	fi
+	R=$(scan "$id" "$ROOT/modules/$id/testbed" "$rs")
 	last_scan
 	expect "$id : analyse du banc d'essai par le runner" "$(jq -r '.status + "/" + (.modules[0].status // "?")' <<< "$R")" ok/ok
 	[[ "$(jq -r .status <<< "$R")" == ok ]] || { jq -c '.modules[0] | {status, error, exit_code}' <<< "$R"; tail -n 20 "$TMP/runner.err" | sed 's/^/     /'; }
@@ -183,9 +196,6 @@ for id in "${MODS[@]}"; do
 done
 
 # --- 4. Opengrep avec un jeu de règles G4 -------------------------------------------------------
-STORE="$SCANS/jobs/rulesets"
-mkdir -p "$STORE"
-put() { local sha; sha=$(printf '%s' "$1" | sha256sum | cut -d' ' -f1); printf '%s' "$1" > "$STORE/$sha"; chmod 0600 "$STORE/$sha"; echo "$sha"; }
 if [[ -n "${IMG[opengrep]:-}" ]]; then
 	GOOD=$(put $'rules:\n  - id: interne-print-secret\n    pattern: print(...)\n    message: Sortie standard en production\n    languages: [python]\n    severity: WARNING\n')
 	mkdir -p "$TMP/og-src"

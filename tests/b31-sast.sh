@@ -205,11 +205,11 @@ expect "opengrep : binaire absent → échec de l'outil (code 2)" "$R" 2
 if python3 -c 'import yaml' 2> /dev/null; then
 	R=$(st '
 os.makedirs(s.RULES + "/pol")
-open(s.RULES + "/pol/policies.yaml", "w").write("- metadata: {id: CKV2_INT_1, name: a}\n  definition: {cond_type: attribute, resource_types: [aws_s3_bucket], attribute: acl, operator: not_equals, value: public-read}\n- metadata: {id: CKV2_INT_2, name: b}\n  definition: {and: []}\n")
+open(s.RULES + "/pol/policies.yaml", "w").write("- metadata: {id: CKV2_INT_1, name: a}\n  definition: {cond_type: attribute, resource_types: [aws_s3_bucket], attribute: acl, operator: not_equals, value: public-read}\n- metadata: {id: CKV2_INT_2, name: b}\n  definition: {or: [{cond_type: attribute, resource_types: [aws_s3_bucket], attribute: versioning, operator: exists}]}\n")
 dirs, ids = s.checkov_external_dirs(s.CHECKOV_WORK)
 print(json.dumps([ids, sorted(os.listdir(dirs[0]))]))')
 	expect "checkov : politiques découpées une par fichier" "$R" '[["CKV2_INT_1", "CKV2_INT_2"], ["policy-000.yaml", "policy-001.yaml"]]'
-	for bad in '"!!python/object/apply:os.system [id]"' '"- metadata: {name: sans-id}\n  definition: {}"' '"a: [1"' '"- 42"'; do
+	for bad in '"!!python/object/apply:os.system [id]"' '"- metadata: {name: sans-id}\n  definition: {}"' '"a: [1"' '"- 42"' '"- metadata: {id: CKV2_INT_3}\n  definition: {cond_type: nimporte, operator: x}"' '"- metadata: {id: CKV2_INT_4}\n  definition: {and: []}"'; do
 		R=$(st "
 os.makedirs(s.RULES + '/pol'); open(s.RULES + '/pol/policies.yaml', 'w').write($bad)
 print(rc(s.checkov_external_dirs, s.CHECKOV_WORK))")
