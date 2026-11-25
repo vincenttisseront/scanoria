@@ -42,6 +42,7 @@ const emit = defineEmits<{ triaged: [], open: [id: string] }>()
     <AiReachability :finding-id="findingId" />
     <AiSimilarFindings
       :finding-id="findingId"
+      :project-id="projectId"
       @triaged="emit('triaged')"
       @open="emit('open', $event)"
     />

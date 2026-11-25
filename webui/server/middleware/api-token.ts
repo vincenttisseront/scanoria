@@ -24,6 +24,8 @@ const CI_ROUTES: { method: string, re: RegExp, project: boolean }[] = [
   { method: 'GET', re: new RegExp(`^/api/scans/(${UUID})/verdict$`), project: false },
   // J6 (0.6) : résultats externes téléversés par la CI (portée scan:create).
   { method: 'POST', re: new RegExp(`^/api/projects/(${UUID})/results$`), project: true },
+  // J15 (0.7, B) : demande d'exception depuis la CI (identité non humaine : demande, jamais décision).
+  { method: 'POST', re: new RegExp(`^/api/projects/(${UUID})/exception-requests$`), project: true },
 ]
 const PUBLIC_ROUTES: { method: string, re: RegExp }[] = [
   { method: 'GET', re: /^\/api\/badges\/[a-z0-9][a-z0-9-]{0,62}\.svg$/ },
