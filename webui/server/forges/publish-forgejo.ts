@@ -8,7 +8,7 @@
 import { ForgeError, forgeGetJson, forgeSendJson, type ForgeRequest } from './http'
 import { checkCommit, checkFullName, encodePath, type ForgeAccess } from './types'
 import {
-  checkNumber, emailOf, loginOf, toPullRequest, uniqueAuthors,
+  checkLogin, checkNumber, emailOf, collaboratorPermission, loginOf, toPullRequest, uniqueAuthors,
   type ForgeComment, type ForgePublisherImpl, type PullRequestRef,
 } from './pr-types'
 
@@ -89,6 +89,8 @@ export function forgejoPublisher(access: ForgeAccess): ForgePublisherImpl {
       const raw = await pages<unknown>(p => `${repoUrl(repo)}/pulls?state=open&limit=${PAGE}&page=${p}`, max)
       return raw.map(toPullRequest).filter((p): p is PullRequestRef => !!p)
     },
+
+    permission: async (repo, login) => collaboratorPermission(`${repoUrl(repo)}/collaborators/${encodeURIComponent(checkLogin(login))}/permission`, req),
 
     async comments(repo, number, since) {
       const q = since ? `&since=${encodeURIComponent(since)}` : ''

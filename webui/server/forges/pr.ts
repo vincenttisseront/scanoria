@@ -98,7 +98,7 @@ const HELP: Record<'fr' | 'en', Record<CommandError | 'usage', string>> = {
   },
 }
 
-type ReplyKey = 'requested' | 'approve' | 'note' | 'notFound' | 'ambiguous' | 'malicious' | 'locked' | 'invalid' | 'bot'
+type ReplyKey = 'requested' | 'approve' | 'note' | 'notFound' | 'ambiguous' | 'malicious' | 'locked' | 'invalid' | 'bot' | 'notAllowed' | 'limited'
 const REPLY: Record<'fr' | 'en', Record<ReplyKey, string>> = {
   fr: {
     requested: 'Demande d\'exception enregistrée pour le résultat',
@@ -110,6 +110,8 @@ const REPLY: Record<'fr' | 'en', Record<ReplyKey, string>> = {
     locked: 'Cette exigence est verrouillée par le profil : aucune exception n\'est possible.',
     invalid: 'Demande refusée : date de fin passée ou à plus d\'un an, ou motif invalide.',
     bot: 'Les commandes des comptes de robots ne sont pas prises en compte.',
+    notAllowed: 'Seuls l\'auteur de la PR et les comptes qui ont le droit d\'écriture sur le dépôt peuvent demander une exception.',
+    limited: 'Trop de commandes Scanoria de votre part sur cette PR : au plus {n} par heure. Les suivantes sont ignorées jusqu\'à la fin de l\'heure.',
   },
   en: {
     requested: 'Exception request recorded for finding',
@@ -121,7 +123,17 @@ const REPLY: Record<'fr' | 'en', Record<ReplyKey, string>> = {
     locked: 'This requirement is locked by the profile: no exception is possible.',
     invalid: 'Request refused: end date in the past or more than one year ahead, or invalid reason.',
     bot: 'Commands from bot accounts are ignored.',
+    notAllowed: 'Only the PR author and accounts with write access to the repository can request an exception.',
+    limited: 'Too many Scanoria commands from you on this PR: at most {n} per hour. Further ones are ignored until the hour is over.',
   },
+}
+
+/** Auteur de la PR (relu dans la forge si l'analyse ne le porte pas) ou droit d'écriture sur le dépôt. */
+async function mayRequest(ctx: ProjectForge, number: number, login: string, knownAuthor: string | null): Promise<boolean> {
+  const author = knownAuthor ?? await ctx.publisher.pullRequest(ctx.repo, number).then(p => p.author).catch(() => null)
+  if (author && author.toLowerCase() === login.toLowerCase()) return true
+  const perm = await ctx.publisher.permission(ctx.repo, login).catch(() => 'none' as const)
+  return perm === 'write' || perm === 'admin'
 }
 
 /** Compte de service de la forge (jamais une commande : ce sont nos propres réponses). */
@@ -132,9 +144,9 @@ async function serviceLogin(db: Queryable, ctx: ProjectForge): Promise<string | 
 }
 
 /** Dernière analyse terminée de la PR (celle dont le commentaire montre les résultats). */
-async function latestPrScan(db: Queryable, projectId: string, number: number): Promise<{ id: string, commit_sha: string | null } | null> {
-  const r = await db.query<{ id: string, commit_sha: string | null }>(
-    `SELECT id, commit_sha FROM scans WHERE project_id = $1 AND pull_request IS NOT NULL
+async function latestPrScan(db: Queryable, projectId: string, number: number): Promise<{ id: string, commit_sha: string | null, author: string | null } | null> {
+  const r = await db.query<{ id: string, commit_sha: string | null, author: string | null }>(
+    `SELECT id, commit_sha, pull_request ->> 'author' AS author FROM scans WHERE project_id = $1 AND pull_request IS NOT NULL
         AND (pull_request ->> 'number')::bigint = $2 AND status = 'done'
       ORDER BY finished_at DESC NULLS LAST LIMIT 1`, [projectId, number])
   return r.rows[0] ?? null
@@ -154,6 +166,9 @@ async function resolveFinding(db: Queryable, scanId: string, ref: string): Promi
 /** Marque des commentaires déjà traités (webhook_deliveries, hors calcul du mode). */
 export const COMMENT_SEEN = 'comment-seen'
 
+/** Commandes /scanoria traitées par heure, par PR et par identité de la forge ; au-delà, ignorées. */
+export const MAX_COMMANDS_PER_HOUR = 10
+
 export interface CommentInput {
   number: number
   comment: { id: string, author: string | null, author_is_bot: boolean, body: string }
@@ -163,7 +178,7 @@ export interface CommentInput {
  * Traite un commentaire de PR. Rend ce qui a été fait (pour le journal du
  * webhook) ; la réponse est publiée dans la PR par le client (contrat 30).
  */
-export async function handlePrComment(db: Queryable, ctx: ProjectForge, input: CommentInput): Promise<'ignored' | 'help' | 'requested' | 'refused'> {
+export async function handlePrComment(db: Queryable, ctx: ProjectForge, input: CommentInput): Promise<'ignored' | 'help' | 'requested' | 'refused' | 'limited'> {
   const cmd = parseScanoriaCommand(input.comment.body)
   if (!cmd) return 'ignored'
   const locale = forgeLocale()
@@ -177,15 +192,32 @@ export async function handlePrComment(db: Queryable, ctx: ProjectForge, input: C
   }
   // Un commentaire n'est traité qu'une fois, qu'il arrive par webhook ou par interrogation.
   if (!/^[0-9]{1,20}$/.test(input.comment.id)) return 'ignored'
+  // La marque porte la PR et l'identité : elle sert aussi à borner le nombre de commandes.
+  const who = `cmd:${ctx.projectId}:${input.number}:${input.comment.author.toLowerCase()}`.slice(0, 500)
   const once = await db.query(
-    `INSERT INTO webhook_deliveries (forge_id, delivery_id, event, status, detail) VALUES ($1, $2, '${COMMENT_SEEN}', 'ignored', NULL)
-     ON CONFLICT (forge_id, delivery_id) DO NOTHING`, [ctx.forge.id, `comment:${input.comment.id}`])
+    `INSERT INTO webhook_deliveries (forge_id, delivery_id, event, status, detail) VALUES ($1, $2, '${COMMENT_SEEN}', 'ignored', $3)
+     ON CONFLICT (forge_id, delivery_id) DO NOTHING`, [ctx.forge.id, `comment:${input.comment.id}`, who])
   if (!once.rowCount) return 'ignored'
+  const recent = await db.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM webhook_deliveries
+      WHERE forge_id = $1 AND event = '${COMMENT_SEEN}' AND detail = $2 AND received_at > now() - interval '1 hour'`, [ctx.forge.id, who])
+  const n = recent.rows[0]?.n ?? 0
+  if (n > MAX_COMMANDS_PER_HOUR) {
+    // Une seule réponse au premier dépassement : répondre à chaque fois serait aussi une inondation.
+    if (n === MAX_COMMANDS_PER_HOUR + 1) await reply(t.limited.replace('{n}', String(MAX_COMMANDS_PER_HOUR)))
+    return 'limited'
+  }
   if (cmd.kind === 'help') {
     await reply([cmd.error ? HELP[locale][cmd.error] : '', HELP[locale].usage].filter(Boolean).join(' '))
     return 'help'
   }
   const scan = await latestPrScan(db, ctx.projectId, input.number)
+  // Dépôt éventuellement public : seuls l'auteur de la PR et les comptes qui
+  // peuvent écrire dans le dépôt (lu dans la forge) demandent une exception.
+  if (!(await mayRequest(ctx, input.number, input.comment.author, scan?.author ?? null))) {
+    await reply(t.notAllowed)
+    return 'refused'
+  }
   const found = scan ? await resolveFinding(db, scan.id, cmd.finding) : 'none'
   if (found === 'none' || found === 'ambiguous' || !scan) {
     await reply(`${found === 'ambiguous' ? t.ambiguous : t.notFound} \`${cmd.finding}\`. ${HELP[locale].usage}`)

@@ -34,6 +34,8 @@ export interface FakeRepoState {
   reviews: { number: number, body: string, comments: { path: string, new_position: number, body: string }[] }[]
   hooks: { id: number, config: { url: string, secret: string }, events: string[] }[]
   authors: Record<string, { login: string, email: string }>
+  /** Droits des collaborateurs (admin, write, read) ; un compte absent n'en a aucun (404). */
+  permissions: Record<string, string>
 }
 
 export interface FakePrForge {
@@ -50,7 +52,7 @@ export interface FakePrForge {
 let commentSeq = 1000
 
 export function addRepo(f: FakePrForge, full_name: string, archived = false): FakeRepoState {
-  const r: FakeRepoState = { full_name, archived, prs: [], comments: new Map(), statuses: [], reviews: [], hooks: [], authors: {} }
+  const r: FakeRepoState = { full_name, archived, prs: [], comments: new Map(), statuses: [], reviews: [], hooks: [], authors: {}, permissions: {} }
   f.repos.set(full_name, r)
   return r
 }
@@ -167,6 +169,10 @@ async function handle(f: FakePrForge, req: IncomingMessage, res: ServerResponse)
   if ((x = /^\/git\/commits\/([0-9a-f]+)$/.exec(rest))) {
     const a = repo.authors[x[1]!]
     return a ? send(res, 200, { sha: x[1], author: { login: a.login }, committer: { login: a.login }, commit: { author: { email: a.email }, committer: { email: a.email } } }) : send(res, 404, {})
+  }
+  if ((x = /^\/collaborators\/([^/]+)\/permission$/.exec(rest))) {
+    const perm = repo.permissions[decodeURIComponent(x[1]!)]
+    return perm ? send(res, 200, { permission: perm }) : send(res, 404, { message: 'not a collaborator' })
   }
   if (rest === '/hooks') {
     if (method === 'POST') {

@@ -3,7 +3,7 @@
 //
 // Types et lectures communes du contrat 30 (client de forge pour les PR).
 
-import { ForgeError } from './http'
+import { ForgeError, forgeGetJson, type ForgeRequest } from './http'
 
 export const MAX_ANNOTATIONS = 30
 export const MAX_CHANGED_FILES = 3000
@@ -56,6 +56,38 @@ export interface AnnotationResult {
 }
 
 /** Ce que chaque forge implémente ; les textes y arrivent déjà neutralisés. */
+/** Droit sur un dépôt, ramené à trois niveaux communs aux forges. */
+export type RepoPermission = 'admin' | 'write' | 'read' | 'none'
+
+const LOGIN_SAFE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/
+
+/** Identifiant de compte sûr dans une URL de forge. */
+export function checkLogin(login: string): string {
+  if (!LOGIN_SAFE_RE.test(login)) throw new ForgeError('E_FORGE_INPUT')
+  return login
+}
+
+/** Droit Forgejo ou GitHub (« maintain », « triage »… compris). */
+export function toPermission(raw: unknown): RepoPermission {
+  const p = typeof raw === 'string' ? raw.toLowerCase() : ''
+  if (p === 'admin' || p === 'owner') return 'admin'
+  if (p === 'write' || p === 'maintain' || p === 'push') return 'write'
+  if (p === 'read' || p === 'triage' || p === 'pull') return 'read'
+  return 'none'
+}
+
+/** Forgejo et GitHub : droit d'un collaborateur ; compte inconnu ou refusé → aucun droit (refus par défaut). */
+export async function collaboratorPermission(url: string, req: ForgeRequest): Promise<RepoPermission> {
+  try {
+    const { data } = await forgeGetJson<{ permission?: unknown }>(url, req)
+    return toPermission(data?.permission)
+  }
+  catch (err) {
+    if (err instanceof ForgeError && (err.code === 'E_FORGE_NOT_FOUND' || err.code === 'E_FORGE_AUTH')) return 'none'
+    throw err
+  }
+}
+
 export interface ForgePublisherImpl {
   kind: 'forgejo' | 'github' | 'gitlab'
   setCommitStatus: (repo: string, s: CommitStatusInput) => Promise<void>
@@ -67,6 +99,8 @@ export interface ForgePublisherImpl {
   pullRequest: (repo: string, number: number) => Promise<PullRequestRef>
   openPullRequests: (repo: string, max: number) => Promise<PullRequestRef[]>
   comments: (repo: string, number: number, since: string | null) => Promise<ForgeComment[]>
+  /** Droit d'un compte sur le dépôt, lu dans la forge ('none' s'il n'y est pas). */
+  permission: (repo: string, login: string) => Promise<RepoPermission>
   /** Crée le webhook de l'appliance s'il n'existe pas (Forgejo, GitLab ; sans effet pour une application GitHub). */
   ensureWebhook: (repo: string, url: string, secret: string) => Promise<'created' | 'exists' | 'app'>
 }

@@ -146,6 +146,15 @@ nuit** quand des PR ont été analysées.
 /scanoria accept <résultat> --until AAAA-MM-JJ --reason "motif"
 ```
 
+- seuls **l'auteur de la PR** et les comptes qui ont au moins le **droit
+  d'écriture** sur le dépôt (lu dans la forge : droit de collaborateur sur
+  Forgejo et GitHub, niveau Developer ou plus sur GitLab) peuvent demander ; un
+  dépôt public ne permet donc pas à un inconnu de remplir la file
+  d'approbation. Un compte absent ou illisible n'a aucun droit (refus par
+  défaut) ;
+- au plus **10 commandes par heure, par PR et par identité** ; au premier
+  dépassement, une seule réponse l'indique, les suivantes sont ignorées sans
+  réponse ;
 - l'auteur du commentaire devient le **demandeur** (identité de la forge,
   jamais un compte de la console) : `requested_via = 'pr-comment'` ;
 - les auteurs du commit analysé sont lus dans la forge et **ne peuvent pas
