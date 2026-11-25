@@ -486,6 +486,10 @@ def run(manifest, timeout=None):
             # Module qui ne lit que le SBOM de l'analyse (contrat 14 de la 0.5) :
             # le banc d'essai porte son SBOM, sbom.cdx.json, à la racine.
             mounts.append((src, "/sbom", "ro"))
+        from . import rulesets
+        if rulesets.spec_of(manifest) is not None:
+            # 0.7 (contrat 34) : /rules toujours monté ; vide au banc d'essai (règles par défaut).
+            mounts.append((rulesets.stage([], os.path.join(work, "rules")), "/rules", "ro"))
         started = time.monotonic()
         from . import airelay
         if airelay.uses_relay(manifest):

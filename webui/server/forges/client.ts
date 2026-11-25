@@ -89,6 +89,7 @@ export function forgePublisher(access: ForgeAccess, opts: PublisherOptions): For
       return withForgeRetry(() => impl.commitAuthors(repo, sha))
     },
     pullRequest: (repo, number) => withForgeRetry(() => impl.pullRequest(repo, number)),
+    permission: (repo, login) => withForgeRetry(() => impl.permission(repo, login)),
     openPullRequests: (repo, max) => withForgeRetry(() => impl.openPullRequests(repo, max)),
     comments: (repo, number, since) => withForgeRetry(() => impl.comments(repo, number, since)),
     ensureWebhook: (repo, url, secret) => withForgeRetry(() => impl.ensureWebhook(repo, url, secret)),

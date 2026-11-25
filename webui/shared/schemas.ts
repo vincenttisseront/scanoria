@@ -58,6 +58,7 @@ export const REQUEST_TYPES = [
   'run-canaries',
   'start-trial',
   'prefetch-images',
+  'validate-ruleset',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -83,6 +84,8 @@ export const RESULT_CODES = [
   'E_KEY_INVALID',
   'E_CANARY_FAILED', 'E_TRIAL_INVALID', 'E_TRIAL_IMAGE', 'E_SELFSBOM_IMAGE', 'E_SELFSBOM_OUTPUT',
   'E_PREFETCH_FAILED', 'E_PREFETCH_UNKNOWN_IMAGE',
+  // 0.7 (A, G4, contrat 34) : jeux de règles.
+  'E_RULESET_INVALID', 'E_RULESET_MISSING', 'E_RULESET_NONE', 'E_RULESET_ENGINE_MISSING',
   'E_RELAY_UNAVAILABLE', 'E_RELAY_TOKEN',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
@@ -166,6 +169,15 @@ export const requestParamSchemas = {
       version: z.string().regex(MODULE_VERSION_RE),
       image_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
     })).max(500).optional(),
+  }),
+  // 0.7 (A, G4, I12) : un jeu de règles jugé par son moteur, confiné, sur des échantillons.
+  'validate-ruleset': z.strictObject({
+    engine: z.enum(['opengrep', 'semgrep', 'gitleaks', 'checkov', 'kics']),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    samples: z.array(z.strictObject({
+      name: z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/),
+      content: z.string().max(8192),
+    })).max(10).optional(),
   }),
   'install-modules': z.strictObject({
     modules: z.array(z.strictObject({

@@ -104,6 +104,7 @@ const sections = computed<NavigationMenuItem[][]>(() => {
       { label: t('components.nav'), icon: 'i-lucide-boxes', to: '/components', active: under('/components') },
       { label: t('gates.nav'), icon: 'i-lucide-gauge', to: '/gates', active: under('/gates') },
       { label: t('profiles.nav'), icon: 'i-lucide-layers', to: '/profiles', active: under('/profiles') },
+      { label: t('rulesets.nav'), icon: 'i-lucide-file-code-2', to: '/rulesets', active: under('/rulesets') },
       { label: t('licenses.nav'), icon: 'i-lucide-scale', to: '/system/licenses', active: under('/system/licenses') },
       { label: t('nav.short.health'), icon: 'i-lucide-activity', to: '/scans/health', active: under('/scans/health') },
     ]),

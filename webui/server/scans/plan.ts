@@ -14,6 +14,7 @@ import { CATEGORIES, GateRules, ProfileLocks, type Category } from '#shared/anal
 import { MODULE_ID_RE } from '#shared/schemas'
 import { resolveOptions } from '#shared/module-options'
 import type { InstalledModule } from '../utils/catalog'
+import { RULESET_ENGINES, type PlannedRuleset } from '../rulesets/store'
 import { applyPins, retainedAvailable, type ModulePin, type RetainedImage } from '../vigilance/pins'
 
 export const PLAN_VERSION = 1
@@ -34,6 +35,8 @@ const scanSpecSchema = z.object({
   /** 0.5 (contrat 14) et 0.6 (V3) : le module lit le SBOM de l'analyse ; graphe du plan (order.ts). */
   prefers_sbom: z.boolean().optional(),
   requires_sbom: z.boolean().optional(),
+  /** 0.7 (A, contrat 34) : jeux de règles G4 montés sous /rules ; « required » : sans jeu, le module n'est pas planifié. */
+  rulesets: z.object({ engine: z.enum(RULESET_ENGINES), required: z.boolean().optional() }).optional(),
 })
 export type ScanSpec = z.infer<typeof scanSpecSchema>
 
@@ -74,6 +77,8 @@ export interface PlannedModule {
   after?: string[]
   /** 0.6 (V5) : durée attendue (ms) qui a fixé la place du module dans le plan. */
   expected_ms?: number
+  /** 0.7 (A, contrat 34) : jeux de règles retenus (G4), figés par empreinte (G11). Absent d'un plan antérieur. */
+  rulesets?: PlannedRuleset[]
 }
 
 export interface CoverageGap {
@@ -82,7 +87,7 @@ export interface CoverageGap {
   /** Catégorie du profil sans module, ou module demandé indisponible. */
   category: string | null
   module: string | null
-  reason: 'no-module' | 'not-installed' | 'unhealthy' | 'disabled' | 'input' | 'license'
+  reason: 'no-module' | 'not-installed' | 'unhealthy' | 'disabled' | 'input' | 'license' | 'no-ruleset'
 }
 
 export interface ScanPlan {
@@ -175,6 +180,8 @@ export interface ResolveInput {
   timeoutOverrides?: Record<string, number>
   /** 0.6 (B, contrat 24) : versions figées du projet, par module. */
   pins?: Map<string, ModulePin>
+  /** 0.7 (A, contrat 34) : jeux de règles rattachés au profil (profile_rulesets), versions résolues. */
+  rulesets?: PlannedRuleset[]
 }
 
 /**
@@ -198,6 +205,10 @@ export function resolveProfile(input: ResolveInput): { modules: PlannedModule[],
     return null
   }
 
+  const rulesetsFor = (e: PlanCatalogEntry): PlannedRuleset[] => {
+    const engine = e.scan?.rulesets?.engine
+    return engine ? (input.rulesets ?? []).filter(r => r.engine === engine).map(({ slug, engine, version, sha256 }) => ({ slug, engine, version, sha256 })) : []
+  }
   const companions: InstalledModule[] = []
   for (const m of [...input.installed].sort((a, b) => a.id.localeCompare(b.id))) {
     if (m.type !== 'scanner' || exclude.has(m.id)) continue
@@ -215,6 +226,7 @@ export function resolveProfile(input: ResolveInput): { modules: PlannedModule[],
       ?? (!entry || !entry.scan ? 'not-installed' : null)
       ?? (!entry!.scan!.inputs.includes(want) ? 'input' : null)
       ?? (entry!.restrictions === 'private-code-forbidden' && !input.projectLicense ? 'license' : null)
+      ?? (entry!.scan!.rulesets?.required && !rulesetsFor(entry!).length ? 'no-ruleset' : null)
     if (problem) {
       if (explicit) gaps.push({ kind: 'profile-module', category: null, module: m.id, reason: problem })
       continue
@@ -234,6 +246,7 @@ export function resolveProfile(input: ResolveInput): { modules: PlannedModule[],
       history,
       outputs: e.outputs,
       reason: matching.length ? 'category' : 'included',
+      ...(rulesetsFor(e).length ? { rulesets: rulesetsFor(e) } : {}),
     })
     for (const c of matching) covered.add(c)
   }
@@ -310,6 +323,12 @@ const plannedModuleSchema = z.object({
   alternate: z.enum(['pin', 'trial']).optional(),
   after: z.array(z.string().regex(MODULE_ID_RE)).max(64).optional(),
   expected_ms: z.number().int().min(0).optional(),
+  rulesets: z.array(z.object({
+    slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
+    engine: z.enum(RULESET_ENGINES),
+    version: z.number().int().min(1),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  })).max(16).optional(),
 })
 
 export const scanPlanSchema = z.object({
@@ -338,7 +357,7 @@ export const scanPlanSchema = z.object({
     kind: z.enum(['profile-category', 'profile-module']),
     category: z.string().nullable(),
     module: z.string().nullable(),
-    reason: z.enum(['no-module', 'not-installed', 'unhealthy', 'disabled', 'input', 'license']),
+    reason: z.enum(['no-module', 'not-installed', 'unhealthy', 'disabled', 'input', 'license', 'no-ruleset']),
   })),
   timeout_s: z.number().int().min(0),
 })

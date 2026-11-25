@@ -9,6 +9,7 @@ import { getRunningVersion } from '../utils/appliance'
 import { PROJECT_OPS, projectSchemas } from '../projects/openapi'
 import { VIGILANCE_OPS, vigilanceSchemas } from '../vigilance/openapi'
 import { PROFILE_OPS, profileSchemas } from '../profiles/openapi'
+import { RULESET_OPS, rulesetSchemas } from '../rulesets/openapi'
 import { TRIAGE_OPS, triageSchemas } from '../findings/openapi-07'
 
 type Role = 'public' | 'viewer' | 'operator' | 'admin'
@@ -130,6 +131,7 @@ const OPS: Record<string, Record<string, Op>> = {
   ...PROJECT_OPS,
   ...VIGILANCE_OPS,
   ...PROFILE_OPS,
+  ...RULESET_OPS,
   ...TRIAGE_OPS,
   '/api/scans': {
     get: { summary: 'Scan queue (status=active, in worker order) or history (filters: project, status, verdict, trigger; paginated)', role: 'viewer' },
@@ -382,6 +384,7 @@ export default defineEventHandler(async () => {
         ...projectSchemas(),
         ...vigilanceSchemas(),
         ...profileSchemas(),
+        ...rulesetSchemas(),
         ...triageSchemas(),
         FindingStatus: {
           type: 'object', additionalProperties: false, required: ['status'],

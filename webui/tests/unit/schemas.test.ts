@@ -258,6 +258,18 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
     valid: [{}, { pins: [{ module_id: 'gitleaks', version: '8.30.1', image_digest: `sha256:${'a'.repeat(64)}` }] }],
     invalid: [{ pins: [{ module_id: 'gitleaks', version: '8.30.1', image_digest: 'sha256:abc' }] }, { pins: [{ module_id: '../x', version: '1', image_digest: `sha256:${'a'.repeat(64)}` }] }, { image: 'docker.io/x' }],
   },
+  'validate-ruleset': {
+    valid: [
+      { engine: 'opengrep', sha256: 'a'.repeat(64) },
+      { engine: 'kics', sha256: 'b'.repeat(64), samples: [{ name: 'main.tf', content: 'resource "x" "y" {}' }] },
+    ],
+    invalid: [
+      {}, { engine: 'bash', sha256: 'a'.repeat(64) }, { engine: 'opengrep', sha256: '../etc/passwd' },
+      { engine: 'opengrep', sha256: 'a'.repeat(64), samples: [{ name: '../x.py', content: '' }] },
+      { engine: 'opengrep', sha256: 'a'.repeat(64), samples: [{ name: 'x.py', content: 'x'.repeat(8193) }] },
+      { engine: 'opengrep', sha256: 'a'.repeat(64), content: 'rules: []' },
+    ],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {

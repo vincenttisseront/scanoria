@@ -40,6 +40,8 @@ import { loadDurations, orderModules } from './order'
 import { recordOrchestration } from './orchestration'
 import { planProfile, RepoConfigPending } from '../profiles/plan-profile'
 import { prepareRepoConfigs } from '../config/refresh'
+import { profileRulesets } from '../rulesets/store'
+import { stageRulesets } from '../rulesets/files'
 import { mergeCoverageGaps } from '../findings/coverage'
 
 export interface WorkerPaths {
@@ -306,6 +308,8 @@ export class ScanWorker {
           timeoutOverrides: await loadTimeoutOverrides(client),
           // 0.6 (B, contrat 24) : versions figées du projet (G6).
           pins: await loadPins(client, scan.project_id),
+          // 0.7 (A, contrat 34) : jeux de règles G4 du profil, versions résolues et figées dans le plan.
+          rulesets: (await profileRulesets(client, profile.id)).map(({ content: _c, ...r }) => r),
         })
     // 0.6 (V3, V5) : graphe SBOM et ordre par durée mesurée.
     const modules = orderModules(resolved.modules, catalog, await loadDurations(client, scan.project_id, resolved.modules.map(m => m.id)))
@@ -362,6 +366,8 @@ export class ScanWorker {
         ...(plan.source.commit ? { commit: plan.source.commit } : {}),
       }
     }
+    const lostRulesets = await stageRulesets(client, this.cfg.scansDir, modules)
+    if (lostRulesets.length) throw new ScanFailure(err('E_RULESET_MISSING', 'input', `ruleset version not found: ${lostRulesets.join(', ')}`))
     const job = {
       schema: 1 as const,
       id: randomUUID(),
@@ -372,7 +378,9 @@ export class ScanWorker {
       // 0.6 : graphe limité aux modules de la tâche (V3) ; une analyse d'essai ne lit pas le cache (V4, contrat 21).
       modules: modules.map(m => ({ id: m.id, version: m.version, options: m.options, ...jobAfter(m, modules),
         // 0.6 (B, contrats 24 et 25) : le runner ne lance cette empreinte que si le helper la retient.
-        ...(m.alternate && m.image_digest ? { image_digest: m.image_digest } : {}) })),
+        ...(m.alternate && m.image_digest ? { image_digest: m.image_digest } : {}),
+        // 0.7 (A, contrat 34) : jeux de règles du plan, contenus déposés dans jobs/rulesets/<sha256>.
+        ...(m.rulesets?.length ? { rulesets: m.rulesets } : {}) })),
       ...(scan.trigger === TRIAL_TRIGGER ? { trial: true } : {}),
       cache: scan.trigger !== TRIAL_TRIGGER,
       // 0.7 (D, contrat 33) : le runner les passe aux modules scan.incremental (G18).

@@ -26,6 +26,7 @@ import { setConsoleUrl } from '../../server/forges/context'
 import { MAX_REJECTS_PER_HOUR, readBounded, receiveWebhook } from '../../server/forges/webhook'
 import { publishScan } from '../../server/forges/publish'
 import { shortId } from '../../server/forges/summary'
+import { MAX_COMMANDS_PER_HOUR } from '../../server/forges/pr'
 import { forgeMode, forgeIntegration } from '../../server/forges/status'
 import { nightlyFullScans, pollPullRequests, resetPullRequestPolling } from '../../server/forges/poll'
 import { applyPullRequestBaseline, isPullRequestScan, pullRequestBaseline } from '../../server/gates/pr-baseline'
@@ -87,6 +88,7 @@ describe.skipIf(!DATABASE_URL)('forges, PR et webhooks (chantier D, PostgreSQL)'
     setForgeRetryDelays([1, 1])
     fake = await startFakePrForge(HOST)
     app = addRepo(fake, 'equipe/app')
+    app.permissions.relectrice = 'write'
     addRepo(fake, 'equipe/vieux', true)
     const res = await createForge(db.pool, { kind: 'forgejo', name: 'Forge', base_url: `https://${HOST}`, token: fake.token, discovery: true }, actor)
     forgeId = res.forge.id
@@ -275,6 +277,40 @@ describe.skipIf(!DATABASE_URL)('forges, PR et webhooks (chantier D, PostgreSQL)'
       expect((await hook('issue_comment', commentEvent(1, robot))).work).toBe('ignored')
       const self = addComment(fake, app, 1, fake.login, '/scanoria aide')
       expect((await hook('issue_comment', commentEvent(1, self))).work).toBe('ignored')
+    })
+
+    it('dépôt public : un compte sans droit d’écriture est refusé ; l’auteur de la PR peut demander', async () => {
+      const until = new Date(Date.now() + 20 * 86400_000).toISOString().slice(0, 10)
+      const cmd = `/scanoria accept ${shortId(fid)} --until ${until} --reason "valeur factice de test"`
+      app.permissions.passant = 'read'
+      const before = (await db.pool.query(`SELECT count(*)::int AS n FROM exceptions WHERE project_id = $1`, [projectId])).rows[0].n as number
+      for (const login of ['inconnu', 'passant']) {
+        const c = addComment(fake, app, 1, login, cmd)
+        expect((await hook('issue_comment', commentEvent(1, c))).work).toBe('refused')
+        expect((app.comments.get(1) ?? []).at(-1)!.body).toMatch(/Seuls l.auteur de la PR et les comptes qui ont le droit d.écriture/)
+      }
+      expect((await db.pool.query(`SELECT count(*)::int AS n FROM exceptions WHERE project_id = $1`, [projectId])).rows[0].n).toBe(before)
+      // dev-une, autrice de la PR n° 1, sans droit déclaré sur le dépôt.
+      const own = addComment(fake, app, 1, 'dev-une', cmd)
+      expect((await hook('issue_comment', commentEvent(1, own))).work).toBe('requested')
+      expect((await db.pool.query(`SELECT requester_label FROM exceptions WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1`, [projectId])).rows[0].requester_label).toBe('forgejo:dev-une')
+    })
+
+    it('au plus MAX_COMMANDS_PER_HOUR commandes par PR et par identité ; une seule réponse au dépassement', async () => {
+      app.permissions.bavard = 'write'
+      const outcomes: string[] = []
+      for (let i = 0; i < MAX_COMMANDS_PER_HOUR + 2; i++) {
+        const c = addComment(fake, app, 1, 'bavard', '/scanoria aide')
+        outcomes.push(String((await hook('issue_comment', commentEvent(1, c))).work))
+      }
+      expect(outcomes.slice(0, MAX_COMMANDS_PER_HOUR).every(o => o === 'help')).toBe(true)
+      expect(outcomes.slice(MAX_COMMANDS_PER_HOUR)).toEqual(['limited', 'limited'])
+      const mine = (app.comments.get(1) ?? []).filter(x => x.user.login === fake.login && /Trop de commandes Scanoria/.test(x.body))
+      expect(mine).toHaveLength(1)
+      expect(mine[0]!.body).toContain(`au plus ${MAX_COMMANDS_PER_HOUR} par heure`)
+      // Autre PR, même identité : compteur distinct.
+      const other = addComment(fake, app, 2, 'bavard', '/scanoria aide')
+      expect((await hook('issue_comment', commentEvent(2, other))).work).toBe('help')
     })
   })
 

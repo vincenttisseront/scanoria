@@ -404,6 +404,21 @@
             "type": "boolean",
             "description": "0.6 (V3) : le module préfère le SBOM de l'analyse, absent ou invalide ; il a lu le dépôt."
           },
+          "rulesets": {
+            "type": "array",
+            "maxItems": 16,
+            "description": "0.7 (G4, contrat 34) : jeux de règles montés sous /rules pour ce module.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["slug", "version", "sha256"],
+              "properties": {
+                "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+                "version": { "type": "integer", "minimum": 1 },
+                "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              }
+            }
+          },
           "ai_relay": {
             "type": "boolean",
             "description": "0.7 (contrat 32) : module relié au relais IA ; ses résultats sont marqués « IA », hors verdict jusqu'à confirmation."
