@@ -324,7 +324,8 @@ async function post(path: string, body: Record<string, unknown>, key: string): P
     const res = await api<FindingDetail>(`/api/findings/${detail.value.id}/${groupPath(path)}`, { method: 'POST', body })
     // F16 : le tri d'un groupe renvoie la liste des résultats triés ; le détail est relu.
     detail.value = groupPath(path) === path ? res : await api<FindingDetail>(`/api/findings/${detail.value.id}`)
-    toast.add({ title: t('findings.saved'), color: 'success' })
+    // « accepted » dépose une demande d'exception (F5, J15) : le statut ne change qu'à l'approbation.
+    toast.add({ title: key === 'accepted' ? t('findings.requestSent') : t('findings.saved'), color: 'success' })
     void reloadAll()
     return true
   }
@@ -341,7 +342,7 @@ const applyToGroup = ref(true)
 const groupPath = (path: string) => (path === 'status' && applyToGroup.value && (detail.value?.group?.members.length ?? 0) > 1 ? 'group-status' : path)
 const setStatus = (status: 'new' | 'confirmed') => post('status', { status }, status)
 
-// Modale de motif (faux positif) ou de motif + date de fin (acceptation).
+// Modale de motif (faux positif) ou de motif + date de fin (demande d'acceptation, approuvée par un administrateur).
 const reasonOpen = ref(false)
 const reasonMode = ref<'false-positive' | 'accepted'>('false-positive')
 const reasonForm = reactive({ reason: '', until: '' })

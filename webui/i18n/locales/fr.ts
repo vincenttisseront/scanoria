@@ -101,6 +101,7 @@ export default {
     // 0.7 (B) : circuit des exceptions (F5, J15).
     E_LOCKED: 'Refusé : un verrou de profil interdit cette exception (module, catégorie ou secrets exigés).',
     E_NOT_PENDING: 'Cette demande a déjà été décidée ou retirée.',
+    E_TRIAGE_NOT_ALLOWED: 'Refusé : un compte non humain, ou l’auteur du commit concerné, ne peut pas classer ce résultat en faux positif. Demandez une exception.',
     E_DECIDER_NOT_ALLOWED: 'Vous ne pouvez pas décider cette demande : la vôtre, un commit dont vous êtes l’auteur, ou un compte non humain.',
     E_EXPIRED: 'Cette demande est échue : elle ne peut plus être approuvée.',
   },
@@ -1408,7 +1409,7 @@ export default {
     actions: {
       confirm: 'Confirmer',
       falsePositive: 'Faux positif',
-      accept: 'Accepter temporairement',
+      accept: 'Demander une acceptation',
       reopen: 'Rouvrir',
       revoked: 'Marquer révoqué',
       secretFalsePositive: 'Pas un secret',
@@ -1417,14 +1418,15 @@ export default {
     },
     modal: {
       falsePositiveTitle: 'Classer en faux positif',
-      acceptTitle: 'Accepter temporairement',
-      acceptHelp: 'Le résultat ne bloque plus le quality gate jusqu’à la date de fin, puis redevient nouveau de lui-même.',
+      acceptTitle: 'Demander une acceptation temporaire',
+      acceptHelp: 'Une demande d’exception est envoyée pour approbation. Le résultat reste bloquant tant qu’un administrateur, ni vous ni l’auteur du commit, ne l’a pas approuvée ; il redevient nouveau de lui-même à la date de fin.',
       reason: 'Motif (obligatoire)',
       until: 'Date de fin (au plus un an)',
       revokedTitle: 'Marquer le secret comme révoqué',
       revokedBody: 'Confirmez que ce secret a été révoqué ou remplacé auprès de son émetteur. L’action est tracée avec votre nom.',
     },
     saved: 'Résultat mis à jour.',
+    requestSent: 'Demande d’exception envoyée : en attente d’approbation par un administrateur.',
     exceptions: {
       title: 'Exceptions',
       help: 'Une exception est motivée et datée (un an au plus) ; elle cesse de s’appliquer d’elle-même à sa date de fin. Un paquet malveillant ne peut jamais être exempté.',

@@ -138,13 +138,17 @@ describe.skipIf(!DATABASE_URL)('API des résultats (h3, PostgreSQL réel)', () =
     expect((await call(`/api/findings/${ids.vuln}/status`, 'operator', { method: 'POST', json: { status: 'accepted', reason: 'correctif prévu', until: isoDay(400) } })).status).toBe(400)
     expect((await call(`/api/findings/${ids.vuln}/status`, 'operator', { method: 'POST', json: { status: 'fixed' } })).status).toBe(400)
     expect((await call(`/api/findings/${ids.vuln}/status`, 'operator', { method: 'POST', json: { status: 'accepted', reason: 'date invalide', until: '2026-11-31' } })).status).toBe(400)
+    // Accepter dépose une demande d'exception (F5, J15) : le statut ne change qu'à l'approbation.
     const ok = await call(`/api/findings/${ids.vuln}/status`, 'operator', { method: 'POST', json: { status: 'accepted', reason: 'correctif prévu', until: isoDay(20) } })
-    expect(ok.status).toBe(200)
-    expect(ok.data).toMatchObject({ status: 'accepted', status_by: 'operator', status_reason: 'correctif prévu' })
+    expect(ok.status).toBe(202)
+    expect(ok.data).toMatchObject({ status: 'new', exception_request: { kind: 'finding', status: 'requested', requested_via: 'console', reason: 'correctif prévu', expires_on: isoDay(20) } })
+    expect((await call(`/api/findings/${ids.vuln}/status`, 'operator', { method: 'POST', json: { status: 'confirmed' } })).status).toBe(200)
     expect((await call(`/api/findings/${crypto.randomUUID()}/status`, 'operator', { method: 'POST', json: { status: 'confirmed' } })).status).toBe(404)
     expect((await call('/api/findings/x/status', 'operator', { method: 'POST', json: { status: 'confirmed' } })).status).toBe(404)
     const audit = await db.pool.query(`SELECT details FROM audit_log WHERE action = 'finding.status' AND outcome = 'success'`)
-    expect(audit.rows[0].details).toMatchObject({ from: 'new', to: 'accepted', until: isoDay(20) })
+    expect(audit.rows[0].details).toMatchObject({ from: 'new', to: 'confirmed' })
+    expect((await db.pool.query(`SELECT 1 FROM audit_log WHERE action = 'exception.request'`)).rowCount).toBe(1)
+    await db.pool.query(`DELETE FROM exceptions WHERE kind = 'finding'`)
   })
 
   it('H4 : refus 409 E_MALICIOUS, audité comme refusé', async () => {
