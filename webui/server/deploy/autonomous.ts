@@ -31,7 +31,7 @@ interface PrScan {
   forge_id: string | null
   repo_full_name: string | null
   number: number
-  head_sha: string
+  head_sha: string | null
 }
 
 /**
@@ -55,7 +55,7 @@ export async function autonomousPass(db: Queryable): Promise<number> {
       ORDER BY s.finished_at LIMIT 20`, [AUTOMERGE_ACTION])
   let enabled = 0
   for (const s of r.rows) {
-    let outcome: 'enabled' | 'unsupported' | 'not-requested' | 'closed' | 'error' = 'error'
+    let outcome: 'enabled' | 'unsupported' | 'not-requested' | 'closed' | 'stale' | 'error' = 'error'
     let code: string | null = null
     try {
       const forge = s.forge_id ? await getForge(db, s.forge_id) : null
@@ -66,7 +66,10 @@ export async function autonomousPass(db: Queryable): Promise<number> {
       const info = await deployer.pullRequestInfo(s.repo_full_name, s.number)
       if (!info.open) outcome = 'closed'
       else if (!authorRequestedAutoMerge(info.body)) outcome = 'not-requested'
-      else outcome = await deployer.enableAutoMerge(s.repo_full_name, s.number)
+      // Le verdict porte sur head_sha : une PR qui a reçu un autre commit depuis
+      // attend sa propre analyse, et la forge refuse si la tête change encore.
+      else if (!s.head_sha || info.headSha !== s.head_sha) outcome = 'stale'
+      else outcome = await deployer.enableAutoMerge(s.repo_full_name, s.number, s.head_sha)
     }
     catch (err) {
       code = err instanceof ForgeError ? err.code : 'E_DEPLOY_INTERNAL'

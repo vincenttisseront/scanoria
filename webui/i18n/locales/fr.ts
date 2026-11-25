@@ -2907,7 +2907,7 @@ export default {
     refused: { 'verdict-not-passed': 'verdict non favorable', 'target-disabled': 'cible désactivée', 'project-suspended': 'projet suspendu' },
     report: { pending: 'Rapport en cours de signature', signed: 'Rapport signé', error: 'Rapport non signé' },
     attestation: { pending: 'Signature en cours', signed: 'Signée', pushed: 'Poussée au registre', error: 'En erreur', notPushed: 'Non poussée : droit d’écriture manquant', download: 'Télécharger' },
-    autoMergeResult: { 'enabled': 'Fusion automatique activée', 'unsupported': 'Fusion automatique non disponible', 'not-requested': 'Fusion automatique non demandée', 'closed': 'PR fermée', 'error': 'Fusion automatique en erreur' },
+    autoMergeResult: { 'enabled': 'Fusion automatique activée', 'unsupported': 'Fusion automatique non disponible', 'not-requested': 'Fusion automatique non demandée', 'closed': 'PR fermée', 'stale': 'Nouveau commit depuis l\'analyse : fusion automatique non activée', 'error': 'Fusion automatique en erreur' },
     form: {
       title: 'Ajouter une cible de déploiement',
       body: 'La cible joue seule après chaque verdict favorable du déclencheur choisi. Un verdict défavorable ou non concluant ne déclenche jamais rien.',

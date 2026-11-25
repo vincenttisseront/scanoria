@@ -8,7 +8,10 @@
 //   déclencheur de pipeline GitLab) et lecture de son état ;
 // - J12 : branche, commit des seuls fichiers désignés, PR de promotion ;
 // - J12, J16 : activation de la fusion automatique NATIVE de la forge
-//   (« fusionner quand les contrôles passent »), jamais une fusion directe.
+//   (« fusionner quand les contrôles passent »), liée à la tête analysée :
+//   la forge refuse si la PR a reçu un autre commit, et fusionne seulement
+//   quand ses contrôles requis sont au vert (tout de suite s'ils le sont déjà).
+//   L'appliance n'appelle jamais une fusion sans condition.
 // Tout texte publié passe par sanitizeForForge ; délais, tailles et
 // redirections sont ceux de http.ts.
 
@@ -50,6 +53,16 @@ export interface OpenedPullRequest {
   url: string | null
 }
 
+export interface PullRequestInfo {
+  body: string
+  open: boolean
+  nodeId: string | null
+  /** Commit de tête actuel de la PR, ou null si la forge ne le rend pas. */
+  headSha: string | null
+}
+
+const headOf = (v: unknown): string | null => (typeof v === 'string' && /^[0-9a-f]{40,64}$/.test(v) ? v : null)
+
 export interface ForgeDeployer {
   kind: ForgeAccess['kind']
   dispatchWorkflow: (repo: string, workflow: string, ref: string, inputs: Record<string, string>, triggerToken?: string | null) => Promise<DispatchResult>
@@ -58,13 +71,19 @@ export interface ForgeDeployer {
   runStatus: (repo: string, runId: string) => Promise<RunStatus>
   readFile: (repo: string, ref: string, path: string, maxBytes: number) => Promise<RepoFile | null>
   branchHead: (repo: string, branch: string) => Promise<string>
-  /** Crée `branch` depuis `base` avec les fichiers modifiés (un seul commit). */
-  commitFiles: (repo: string, base: string, branch: string, message: string, files: FileChange[]) => Promise<void>
+  /**
+   * Crée `branch` depuis `base` avec les fichiers modifiés (un commit sur
+   * Forgejo et GitLab, un par fichier sur GitHub) ; rend le commit de tête.
+   */
+  commitFiles: (repo: string, base: string, branch: string, message: string, files: FileChange[]) => Promise<string>
   openPullRequest: (repo: string, pr: { head: string, base: string, title: string, body: string }) => Promise<OpenedPullRequest>
   /** Description et état d'une PR (J16 : demande de l'auteur dans la description). */
-  pullRequestInfo: (repo: string, number: number) => Promise<{ body: string, open: boolean, nodeId: string | null }>
-  /** Fusion automatique native de la forge ; « unsupported » si la forge ne la permet pas. */
-  enableAutoMerge: (repo: string, number: number) => Promise<'enabled' | 'unsupported'>
+  pullRequestInfo: (repo: string, number: number) => Promise<PullRequestInfo>
+  /**
+   * Fusion automatique native de la forge, liée au commit `headSha` (celui
+   * qui a été analysé) ; « unsupported » si la forge ne la permet pas.
+   */
+  enableAutoMerge: (repo: string, number: number, headSha: string) => Promise<'enabled' | 'unsupported'>
 }
 
 export const WORKFLOW_RE = /^[A-Za-z0-9._-]{1,100}\.ya?ml$/
@@ -158,7 +177,7 @@ function forgejoDeployer(access: ForgeAccess): ForgeDeployer {
       return checkCommit(data?.commit?.id)
     },
     async commitFiles(repo, base, branch, message, files) {
-      await forgeSendJson(`${repoUrl(repo)}/contents`, req, {
+      const { data } = await forgeSendJson<{ commit?: { sha?: unknown } }>(`${repoUrl(repo)}/contents`, req, {
         method: 'POST',
         json: {
           branch: checkRef(base),
@@ -167,6 +186,7 @@ function forgejoDeployer(access: ForgeAccess): ForgeDeployer {
           files: files.map(f => ({ operation: 'update', path: checkPath(f.path), content: b64(f.content), ...(f.sha ? { sha: f.sha } : {}) })),
         },
       })
+      return checkCommit(data?.commit?.sha)
     },
     async openPullRequest(repo, pr) {
       const { data } = await forgeSendJson<{ number?: unknown, html_url?: unknown }>(`${repoUrl(repo)}/pulls`, req, {
@@ -175,14 +195,15 @@ function forgejoDeployer(access: ForgeAccess): ForgeDeployer {
       return { number: checkNumber(data?.number), url: httpsUrl(data?.html_url) }
     },
     async pullRequestInfo(repo, number) {
-      const { data } = await forgeGetJson<{ body?: unknown, state?: unknown }>(`${repoUrl(repo)}/pulls/${checkNumber(number)}`, req)
-      return { body: typeof data?.body === 'string' ? data.body : '', open: data?.state === 'open', nodeId: null }
+      const { data } = await forgeGetJson<{ body?: unknown, state?: unknown, head?: { sha?: unknown } }>(`${repoUrl(repo)}/pulls/${checkNumber(number)}`, req)
+      return { body: typeof data?.body === 'string' ? data.body : '', open: data?.state === 'open', nodeId: null, headSha: headOf(data?.head?.sha) }
     },
-    async enableAutoMerge(repo, number) {
+    async enableAutoMerge(repo, number, headSha) {
       // Forgejo : « fusionner quand les contrôles passent » ; c'est la forge qui
-      // fusionne, une fois les contrôles requis au vert.
+      // fusionne, une fois les contrôles requis au vert, et seulement si la tête
+      // est toujours head_commit_id (sinon elle refuse).
       await forgeSendJson(`${repoUrl(repo)}/pulls/${checkNumber(number)}/merge`, req, {
-        method: 'POST', json: { Do: 'squash', merge_when_checks_succeed: true },
+        method: 'POST', json: { Do: 'squash', merge_when_checks_succeed: true, head_commit_id: checkCommit(headSha) },
       })
       return 'enabled'
     },
@@ -233,11 +254,14 @@ function githubDeployer(access: ForgeAccess): ForgeDeployer {
     async commitFiles(repo, base, branch, message, files) {
       const sha = await this.branchHead(repo, base)
       await forgeSendJson(`${repoUrl(repo)}/git/refs`, req, { method: 'POST', json: { ref: `refs/heads/${checkRef(branch)}`, sha } })
+      let head = sha
       for (const f of files) {
-        await forgeSendJson(`${repoUrl(repo)}/contents/${encodePath(checkPath(f.path))}`, req, {
+        const { data } = await forgeSendJson<{ commit?: { sha?: unknown } }>(`${repoUrl(repo)}/contents/${encodePath(checkPath(f.path))}`, req, {
           method: 'PUT', json: { message: statusDescription(message), content: b64(f.content), branch, ...(f.sha ? { sha: f.sha } : {}) },
         })
+        head = checkCommit(data?.commit?.sha)
       }
+      return head
     },
     async openPullRequest(repo, pr) {
       const { data } = await forgeSendJson<{ number?: unknown, html_url?: unknown }>(`${repoUrl(repo)}/pulls`, req, {
@@ -246,11 +270,11 @@ function githubDeployer(access: ForgeAccess): ForgeDeployer {
       return { number: checkNumber(data?.number), url: httpsUrl(data?.html_url) }
     },
     async pullRequestInfo(repo, number) {
-      const { data } = await forgeGetJson<{ body?: unknown, state?: unknown, node_id?: unknown }>(`${repoUrl(repo)}/pulls/${checkNumber(number)}`, req)
+      const { data } = await forgeGetJson<{ body?: unknown, state?: unknown, node_id?: unknown, head?: { sha?: unknown } }>(`${repoUrl(repo)}/pulls/${checkNumber(number)}`, req)
       const nodeId = typeof data?.node_id === 'string' && /^[A-Za-z0-9_=-]{1,100}$/.test(data.node_id) ? data.node_id : null
-      return { body: typeof data?.body === 'string' ? data.body : '', open: data?.state === 'open', nodeId }
+      return { body: typeof data?.body === 'string' ? data.body : '', open: data?.state === 'open', nodeId, headSha: headOf(data?.head?.sha) }
     },
-    async enableAutoMerge(repo, number) {
+    async enableAutoMerge(repo, number, headSha) {
       const info = await this.pullRequestInfo(repo, number)
       if (!info.nodeId) return 'unsupported'
       const graphql = access.base_url === 'https://github.com' || access.base_url === 'https://api.github.com'
@@ -259,8 +283,8 @@ function githubDeployer(access: ForgeAccess): ForgeDeployer {
       const { data } = await forgeSendJson<{ errors?: unknown[] }>(graphql, req, {
         method: 'POST',
         json: {
-          query: 'mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId } }',
-          variables: { id: info.nodeId },
+          query: 'mutation($id: ID!, $head: GitObjectID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH, expectedHeadOid: $head}) { clientMutationId } }',
+          variables: { id: info.nodeId, head: checkCommit(headSha) },
         },
       })
       // Fusion automatique désactivée dans les réglages du dépôt : rien n'est fusionné.
@@ -308,7 +332,7 @@ function gitlabDeployer(access: ForgeAccess): ForgeDeployer {
       return checkCommit(data?.commit?.id)
     },
     async commitFiles(repo, base, branch, message, files) {
-      await forgeSendJson(`${proj(repo)}/repository/commits`, req, {
+      const { data } = await forgeSendJson<{ id?: unknown }>(`${proj(repo)}/repository/commits`, req, {
         method: 'POST',
         json: {
           branch: checkRef(branch),
@@ -317,6 +341,7 @@ function gitlabDeployer(access: ForgeAccess): ForgeDeployer {
           actions: files.map(f => ({ action: 'update', file_path: checkPath(f.path), content: f.content })),
         },
       })
+      return checkCommit(data?.id)
     },
     async openPullRequest(repo, pr) {
       const { data } = await forgeSendJson<{ iid?: unknown, web_url?: unknown }>(`${proj(repo)}/merge_requests`, req, {
@@ -325,12 +350,13 @@ function gitlabDeployer(access: ForgeAccess): ForgeDeployer {
       return { number: checkNumber(data?.iid), url: httpsUrl(data?.web_url) }
     },
     async pullRequestInfo(repo, number) {
-      const { data } = await forgeGetJson<{ description?: unknown, state?: unknown }>(`${proj(repo)}/merge_requests/${checkNumber(number)}`, req)
-      return { body: typeof data?.description === 'string' ? data.description : '', open: data?.state === 'opened', nodeId: null }
+      const { data } = await forgeGetJson<{ description?: unknown, state?: unknown, sha?: unknown }>(`${proj(repo)}/merge_requests/${checkNumber(number)}`, req)
+      return { body: typeof data?.description === 'string' ? data.description : '', open: data?.state === 'opened', nodeId: null, headSha: headOf(data?.sha) }
     },
-    async enableAutoMerge(repo, number) {
+    async enableAutoMerge(repo, number, headSha) {
+      // `sha` : GitLab refuse si la tête de la branche source n'est plus celle-ci.
       await forgeSendJson(`${proj(repo)}/merge_requests/${checkNumber(number)}/merge`, req, {
-        method: 'PUT', json: { merge_when_pipeline_succeeds: true, auto_merge: true, squash: true },
+        method: 'PUT', json: { merge_when_pipeline_succeeds: true, auto_merge: true, squash: true, sha: checkCommit(headSha) },
       })
       return 'enabled'
     },
@@ -359,6 +385,6 @@ export function forgeDeployer(access: ForgeAccess, opts: DeployerOptions): Forge
     commitFiles: (repo, base, branch, message, files) => impl.commitFiles.call(impl, repo, base, branch, message, files),
     openPullRequest: (repo, pr) => impl.openPullRequest(repo, { ...pr, body: clean(pr.body) }),
     pullRequestInfo: (repo, number) => withForgeRetry(() => impl.pullRequestInfo.call(impl, repo, number)),
-    enableAutoMerge: (repo, number) => impl.enableAutoMerge.call(impl, repo, number),
+    enableAutoMerge: (repo, number, headSha) => impl.enableAutoMerge.call(impl, repo, number, headSha),
   }
 }

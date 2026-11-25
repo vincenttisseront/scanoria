@@ -170,7 +170,7 @@ async function advancePromotion(db: Queryable, run: Run, scan: ScanInfo, url: st
 
 // --- 4 : GitOps ----------------------------------------------------------------------------
 
-async function advanceGitops(db: Queryable, run: Run, scan: ScanInfo, digests: Map<string, string>, allowAutoMerge: boolean): Promise<void> {
+async function advanceGitops(db: Queryable, run: Run, scan: ScanInfo, digests: Map<string, string>): Promise<void> {
   const cfg = parseConfig('gitops-pr', run.config) as GitopsConfig | null
   if (!cfg) return finishDeployment(db, run.id, 'failed', { error: 'E_DEPLOY_CONFIG' })
   const missing = cfg.files.find(f => !digests.has(f.image))
@@ -194,7 +194,7 @@ async function advanceGitops(db: Queryable, run: Run, scan: ScanInfo, digests: M
   if (!await claimDeployment(db, run.id)) return
   const branch = promotionBranch(run.environment, scan.id)
   const label = scan.tag ?? scan.commit_sha.slice(0, 12)
-  await forge.commitFiles(cfg.repo, cfg.base, branch, `Promotion ${run.environment} : ${label} (Scanoria)`, changes)
+  const head = await forge.commitFiles(cfg.repo, cfg.base, branch, `Promotion ${run.environment} : ${escapeInline(label, 255)} (Scanoria)`, changes)
   const url = await consoleUrl()
   const body = [
     `Promotion **${escapeInline(run.environment, 40)}** proposée par Scanoria après un verdict favorable.`,
@@ -206,12 +206,12 @@ async function advanceGitops(db: Queryable, run: Run, scan: ScanInfo, digests: M
     '',
     'Retour arrière : revert de cette PR. Scanoria ne fusionne jamais une PR.',
   ].filter(x => x !== null).join('\n')
-  const pr = await forge.openPullRequest(cfg.repo, { head: branch, base: cfg.base, title: `Promotion ${run.environment} : ${label}`, body })
+  const pr = await forge.openPullRequest(cfg.repo, { head: branch, base: cfg.base, title: `Promotion ${run.environment} : ${escapeInline(label, 255)}`, body })
   await setExternal(db, run.id, String(pr.number), pr.url)
   let autoMerge: string = 'off'
-  if (run.auto_merge && allowAutoMerge) {
+  if (run.auto_merge) {
     // Fusion automatique NATIVE de la forge, autorisée par un administrateur pour cette cible.
-    autoMerge = await forge.enableAutoMerge(cfg.repo, pr.number).catch(() => 'unsupported')
+    autoMerge = await forge.enableAutoMerge(cfg.repo, pr.number, head).catch(() => 'unsupported')
   }
   await finishDeployment(db, run.id, 'succeeded', { externalId: String(pr.number), externalUrl: pr.url })
   await audit(db, 'deploy.gitops.pr', run, scan, { repo: cfg.repo, number: pr.number, files: changes.map(c => c.path), auto_merge: autoMerge })
@@ -347,7 +347,7 @@ export async function advanceScan(db: Queryable, scanId: string): Promise<void> 
     for (const run of mine) {
       try {
         if (kind === 'registry-promotion') await advancePromotion(db, run, scan, url)
-        else if (kind === 'gitops-pr') await advanceGitops(db, run, scan, digests, true)
+        else if (kind === 'gitops-pr') await advanceGitops(db, run, scan, digests)
         else await advanceCd(db, run, scan, digests)
       }
       catch (err) {

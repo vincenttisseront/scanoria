@@ -39,7 +39,7 @@ interface Call { method: string, path: string, body: unknown }
 function fakeForgejo() {
   const calls: Call[] = []
   const files = new Map<string, string>()
-  const state = { runStatus: 'running', runConclusion: '', prBody: '', prOpen: true, dispatchFails: false }
+  const state = { runStatus: 'running', runConclusion: '', prBody: '', prOpen: true, dispatchFails: false, heads: new Map<number, string>() }
   const json = (status: number, data: unknown) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } })
   const handler = async (url: string, init: RequestInit): Promise<Response> => {
     const u = new URL(url)
@@ -54,7 +54,7 @@ function fakeForgejo() {
       const c = files.get(decodeURIComponent(m[1]!))
       return c === undefined ? json(404, {}) : json(200, { type: 'file', content: Buffer.from(c).toString('base64'), sha: 'a'.repeat(40), size: c.length })
     }
-    if (p === 'equipe/deploiement/contents' && method === 'POST') return json(201, {})
+    if (p === 'equipe/deploiement/contents' && method === 'POST') return json(201, { commit: { sha: 'c'.repeat(40) } })
     if (p === 'equipe/deploiement/pulls' && method === 'POST') return json(201, { number: 7, html_url: `https://${FORGE}/equipe/deploiement/pulls/7` })
     if (/^equipe\/app\/actions\/workflows\/deploy\.yml\/dispatches$/.test(p)) {
       if (state.dispatchFails) return json(422, {})
@@ -62,7 +62,7 @@ function fakeForgejo() {
     }
     if (p === 'equipe/app/actions/runs/42') return json(200, { status: state.runStatus, conclusion: state.runConclusion, html_url: `https://${FORGE}/equipe/app/actions/runs/42` })
     m = /^equipe\/app\/pulls\/(\d+)$/.exec(p)
-    if (m && method === 'GET') return json(200, { body: state.prBody, state: state.prOpen ? 'open' : 'closed' })
+    if (m && method === 'GET') return json(200, { body: state.prBody, state: state.prOpen ? 'open' : 'closed', head: { sha: state.heads.get(Number(m[1])) ?? null } })
     if (/^equipe\/app\/pulls\/\d+\/merge$/.test(p)) return json(200, {})
     return json(404, {})
   }
@@ -90,6 +90,7 @@ describe.skipIf(!DATABASE_URL)('déploiement après verdict favorable (chantier 
       [projectId, p.trigger ?? 'release', p.ref ?? 'refs/tags/v1.2.0', sha, p.verdict,
         p.pr ? JSON.stringify({ number: p.pr, base_sha: 'b'.repeat(40), head_sha: sha }) : null])
     const id = r.rows[0]!.id
+    if (p.pr) forge.state.heads.set(p.pr, sha)
     const tag = p.tag === undefined ? 'v1.2.0' : p.tag
     if (tag && !p.pr) {
       await db.pool.query(`INSERT INTO release_candidates (project_id, tag, commit_sha, source, scan_id) VALUES ($1, $2, $3, 'pull', $4)
@@ -312,7 +313,7 @@ describe.skipIf(!DATABASE_URL)('déploiement après verdict favorable (chantier 
     await deployPass(db.pool)
     const merge = forge.calls.filter(c => c.path.endsWith('/pulls/7/merge'))
     expect(merge).toHaveLength(1)
-    expect(merge[0]!.body).toMatchObject({ merge_when_checks_succeed: true })
+    expect(merge[0]!.body).toMatchObject({ merge_when_checks_succeed: true, head_commit_id: 'c'.repeat(40) })
     expect((await runs(s)).find(x => x.kind === 'registry-promotion')?.external_id).toBe(digest)
     await updateTarget(db.pool, (await getTarget(db.pool, t.id))!, { auto_merge: false }, admin())
   })
@@ -393,10 +394,22 @@ describe.skipIf(!DATABASE_URL)('déploiement après verdict favorable (chantier 
       const s = await scan({ verdict: 'passed', trigger: 'webhook', ref: 'refs/pull/12/head', pr: 12 })
       await deployPass(db.pool)
       await deployPass(db.pool)
-      expect(forge.calls.filter(c => c.path.endsWith('/pulls/12/merge'))).toHaveLength(1)
+      const merges = forge.calls.filter(c => c.path.endsWith('/pulls/12/merge'))
+      expect(merges).toHaveLength(1)
+      expect(merges[0]!.body).toMatchObject({ head_commit_id: forge.state.heads.get(12) })
       const a = await db.pool.query<{ details: { result: string } }>('SELECT details FROM audit_log WHERE action = $1 AND target_id = $2', [AUTOMERGE_ACTION, s])
       expect(a.rows.map(x => x.details.result)).toEqual(['enabled'])
       expect(await runs(s)).toHaveLength(0)
+    })
+
+    it('nouveau commit poussé depuis l\'analyse : aucune fusion, résultat « stale »', async () => {
+      forge.state.prBody = '/scanoria auto-merge'
+      const s = await scan({ verdict: 'passed', trigger: 'webhook', ref: 'refs/pull/16/head', pr: 16 })
+      forge.state.heads.set(16, 'f'.repeat(40))
+      await deployPass(db.pool)
+      expect(forge.calls.some(c => c.path.endsWith('/pulls/16/merge'))).toBe(false)
+      const a = await db.pool.query<{ details: { result: string } }>('SELECT details FROM audit_log WHERE action = $1 AND target_id = $2', [AUTOMERGE_ACTION, s])
+      expect(a.rows.map(x => x.details.result)).toEqual(['stale'])
     })
 
     it('sans marqueur, PR fermée ou verdict défavorable : rien', async () => {

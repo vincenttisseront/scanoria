@@ -2907,7 +2907,7 @@ export default {
     refused: { 'verdict-not-passed': 'verdict not passed', 'target-disabled': 'target disabled', 'project-suspended': 'project suspended' },
     report: { pending: 'Report being signed', signed: 'Report signed', error: 'Report not signed' },
     attestation: { pending: 'Being signed', signed: 'Signed', pushed: 'Pushed to the registry', error: 'Error', notPushed: 'Not pushed: no write access', download: 'Download' },
-    autoMergeResult: { 'enabled': 'Auto-merge enabled', 'unsupported': 'Auto-merge not available', 'not-requested': 'Auto-merge not requested', 'closed': 'PR closed', 'error': 'Auto-merge error' },
+    autoMergeResult: { 'enabled': 'Auto-merge enabled', 'unsupported': 'Auto-merge not available', 'not-requested': 'Auto-merge not requested', 'closed': 'PR closed', 'stale': 'New commit since the analysis: auto-merge not enabled', 'error': 'Auto-merge error' },
     form: {
       title: 'Add a deployment target',
       body: 'The target runs by itself after each passed verdict of the chosen trigger. A failed or inconclusive verdict never triggers anything.',
