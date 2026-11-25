@@ -202,7 +202,11 @@ jobs:
           # Une étiquette OCI n'admet pas « + » (version 1.0+build).
           tag=${version//+/_}
           repo="ghcr.io/${OWNER,,}/scanoria-$MODULE"
-          printf '%s' "$TOKEN" | podman login ghcr.io -u "$ACTOR" --password-stdin
+          # Identifiants écrits dans le fichier Docker : l'attestation (push-to-registry)
+          # les relit à l'étape suivante ; ils sont effacés à la dernière étape.
+          mkdir -p "$HOME/.docker"
+          printf '%s' "$TOKEN" | podman login --authfile "$HOME/.docker/config.json" ghcr.io -u "$ACTOR" --password-stdin
+          export REGISTRY_AUTH_FILE="$HOME/.docker/config.json"
           # Une étiquette publiée n'est jamais remplacée : une modification de l'image
           # passe par une nouvelle version dans module.yaml.
           if skopeo inspect --raw "docker://$repo:$tag" > /dev/null 2> "$RUNNER_TEMP/inspect.err"; then
@@ -216,7 +220,6 @@ jobs:
           podman load -i "$RUNNER_TEMP/image.tar"
           podman tag "localhost/scanoria-$MODULE:$tag" "$repo:$tag"
           podman push --digestfile "$RUNNER_TEMP/digest" "$repo:$tag"
-          podman logout ghcr.io
           digest=$(cat "$RUNNER_TEMP/digest")
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "empreinte inattendue : $digest" >&2; exit 1; }
           echo "repo=$repo" >> "$GITHUB_OUTPUT"
@@ -233,3 +236,6 @@ jobs:
           subject-name: ${{ steps.push.outputs.repo }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+      - name: Déconnexion de ghcr.io
+        if: always()
+        run: rm -f "$HOME/.docker/config.json"

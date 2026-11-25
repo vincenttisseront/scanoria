@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module agentic-radar (0.7, K7) : inventaire des workflows d'agents du dépôt
+# (LangGraph, CrewAI, n8n, OpenAI Agents, AutoGen) : agents, outils, serveurs
+# MCP et graphe, avec les vulnérabilités connues des outils (table livrée par
+# l'amont : exécution de code, injection d'invite…). Analyse statique seule :
+# aucun modèle n'est appelé (les commandes amont qui exigent OpenAI ne sont
+# jamais utilisées, et le convertisseur neutralise l'appel facultatif de
+# l'analyseur OpenAI Agents), aucun réseau.
+#
+# Amont : Agentic Radar 0.14.2 de SPLX (Apache-2.0, relevé sur PyPI et sur le
+# dépôt splx-ai/agentic-radar le 2026-11-25, tag v0.14.2). L'amont ne publie
+# aucune image : elle est construite par la CI de Scanoria (image/Containerfile,
+# docs/MODULES.md § 8), d'où image_pending jusqu'à sa première publication.
+#
+# L'inventaire est porté par le SARIF (runs[0].properties
+# « scanoria/agent-inventory ») : la console l'enregistre pour l'analyse
+# (agent_inventories), l'affiche et le donne à la cartographie I22.
+id: agentic-radar
+name: Agentic Radar
+description:
+  fr: Inventorie les workflows d'agents IA du dépôt (outils, serveurs MCP, graphe) et signale les outils à risque, sans appeler aucun modèle.
+  en: Inventories the AI agent workflows of the repository (tools, MCP servers, graph) and flags risky tools, without calling any model.
+type: scanner
+categories: [sast]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/splx-ai/agentic-radar/blob/v0.14.2/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: Dépendances Python du verrou image/requirements.lock sous licences MIT, BSD et Apache-2.0 (openai est installé par l'amont mais jamais appelé).
+upstream:
+  homepage: https://github.com/splx-ai/agentic-radar
+  source: https://pypi.org/project/agentic-radar/0.14.2/
+image: ghcr.io/vincenttisseront/scanoria-agentic-radar@sha256:03f09561fe6db36623cda676e598b6fe257fcbb592dbeb68e9bb5ae2db0ad771
+version: "0.14.2"
+resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 600 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/radar_sarif.py", "/src", "/out/agentic-radar.sarif"]
+  tool: agentic-radar
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+  # V6 : code Python (LangGraph, CrewAI, OpenAI Agents, AutoGen) ou workflows n8n (JSON).
+  applies_to:
+    paths:
+      - "*.py"
+      - "*.json"
+  timeout_s: 600
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/agentic-radar.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # Workflow LangGraph inerte qui donne un outil shell à l'agent.
+    - { rule: agentic-radar/arbitrary-code-execution-ace, category: sast, min: 1 }
+health: { command: ["python3", "-I", "-c", "import agentic_radar; print(agentic_radar.__version__)"] }
+upgrade: { policy: on-demand }

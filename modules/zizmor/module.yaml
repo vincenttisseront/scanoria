@@ -26,7 +26,7 @@ license:
 upstream:
   homepage: https://docs.zizmor.sh
   source: https://github.com/zizmorcore/zizmor
-image_pending: true
+image: ghcr.io/vincenttisseront/scanoria-zizmor@sha256:01325595ecd2da0185cf6e7b1ad35edb9fab442d325e7e240f8f7d3887aad54c
 version: "1.33.1"
 resources: { min_ram_mb: 256, min_cpu: 1, disk_mb: 200 }
 hostname: null

@@ -584,3 +584,79 @@ amont (`cosign verify-blob`…). Il doit sortir en 0.
 Un nouveau paquet GHCR est **privé** à sa première publication : il doit être
 rendu public (réglage du paquet, par le propriétaire du dépôt) pour que les
 appliances le récupèrent sans jeton.
+
+## 9. Analyse du code IA et des agents (0.7, K5–K7)
+
+Trois scanners examinent ce qu'un dépôt confie à des agents ou à des modèles.
+Leur image est construite par la CI de Scanoria (§ 8) et ils tournent sans
+réseau, comme tout scanner. Leur convertisseur vit dans
+`src/rootfs/usr/lib/scanoria/scan-tools/<id>/` (`scan.tool`, monté en lecture
+seule sur `/scanoria`).
+
+| Module | Version | Lancé si le dépôt contient | Ce qu'il relève |
+|---|---|---|---|
+| `agentic-radar` (K7) | 0.14.2 | `*.py`, `*.json` | workflows LangGraph, CrewAI, n8n, OpenAI Agents, AutoGen : agents, outils, serveurs MCP, graphe ; vulnérabilités connues des outils (exécution de code…) |
+| `mcp-scanner` (K5) | 4.8.7 | `*.json`, `*.py`, `*.js`, `*.ts`… | outils, invites et serveurs MCP déclarés (listes JSON, `mcpServers`, décorateurs Python, `.tool(…)` JS/TS) : empoisonnement d'outil, injection d'invite, exfiltration (règles YARA) |
+| `skill-scanner` (K6) | 2.3.2 | `SKILL.md` | dossiers de skills d'agents : injection d'invite, exfiltration, exécution de commandes (analyse statique, comportementale et YARA-X) |
+
+Choix de confinement :
+
+- **Aucun service tiers.** Les variables `OPENAI_*`, `AZURE_OPENAI_*`,
+  `VIRUSTOTAL_*`, `MCP_SCANNER_*` et celles des services Cisco sont retirées
+  avant de lancer l'outil ; ni l'API Cisco AI Defense, ni VirusTotal, ni
+  OpenAI ne sont appelés. L'analyseur OpenAI Agents d'Agentic Radar, qui
+  voudrait interroger un modèle pour décrire les vulnérabilités, est
+  neutralisé : la table amont des vulnérabilités suffit.
+- **Pas d'OSV.dev pour K6** (`--use-osv` jamais passé) : les dépendances des
+  skills sont couvertes hors ligne par les modules SCA (OSV-Scanner, Trivy,
+  Grype) de la même analyse.
+- **Pas d'exécution** : les trois outils lisent le code (ast, YARA), aucun ne
+  l'importe ni ne le lance. Fichiers en lien symbolique, dossiers exclus
+  (`node_modules`, `.git`, `vendor`…) et fichiers trop gros sont ignorés.
+- **Secrets** : d'une configuration `mcpServers`, seuls les **noms** des
+  variables d'environnement sont lus, jamais leurs valeurs ; d'un agent,
+  seule la **longueur** de l'invite système est gardée.
+- **Chemins** : le SARIF ne porte que des chemins relatifs au dépôt ; un
+  chemin amont qui en sort est écarté.
+
+L'inventaire d'Agentic Radar voyage dans le SARIF
+(`runs[0].properties["scanoria/agent-inventory"]`), est revalidé et borné par
+la console (`webui/server/ai/agent-inventory.ts`), enregistré dans
+`agent_inventories` (migration 016) et affiché sur la page de l'analyse ; il
+servira de métadonnées à la cartographie de la surface d'attaque (I22).
+
+Leurs juges LLM facultatifs (K5, K6) et Vulnhuntr (K3) passent par le relais
+de `scanoria-ai` (`scan.network: ai-relay`) : ce sont des modules distincts,
+dont les résultats sont marqués « IA » et restent hors verdict tant qu'une
+personne ne les a pas confirmés (CLAUDE.md § 3.5). Sans connecteur IA, ou
+pour un projet « aucun envoi à l'IA », ils sont `skipped` et les modules hors
+ligne restent seuls.
+
+| Module | Version | Lancé si le dépôt contient | Ce qu'il fait |
+|---|---|---|---|
+| `vulnhuntr` (K3) | 0.1.0+ead88c5 | `*.py` | suit, avec le modèle, l'entrée utilisateur jusqu'aux points dangereux (LFI, RCE, SSRF, AFO, SQLI, XSS, IDOR) ; seuil de confiance réglable (`min_confidence`, 7 par défaut) |
+| `mcp-scanner-llm` (K5) | 4.8.7 | comme `mcp-scanner` | une définition par outil, invite ou serveur MCP, jugée par l'analyseur LLM de l'amont |
+| `skill-scanner-llm` (K6) | 2.3.2 | `SKILL.md` | juge LLM de l'amont sur chaque skill ; seuls ses constats sont gardés |
+
+- **Vulnhuntr** n'a ni image ni paquet PyPI amont (le paquet PyPI du même nom
+  est d'un autre auteur) : son paquet Python est livré non modifié dans
+  `scan-tools/vulnhuntr/vendor/` (empreintes dans `SHA256SUMS`), ses
+  dépendances dans l'image (Python 3.10, imposé par jedi 0.18 et parso 0.8).
+  Le dépôt n'est jamais lu directement : seuls ses fichiers Python réguliers
+  et son README sont copiés dans `/tmp`. Vulnhuntr n'a pas de sortie
+  structurée : son journal JSON (structlog) est converti en SARIF.
+- **Pannes** : un modèle ou un relais injoignable, une réponse invalide ou un
+  skill non jugé (`LLM_ANALYSIS_FAILED`) donnent le code 3, une panne
+  d'infrastructure (G12), jamais « aucun constat ». L'analyseur LLM de MCP
+  Scanner signale ses pannes par un constat `ANALYZER INFRASTRUCTURE`, traité
+  de même.
+- **Environnement** : seules les variables du relais (`OPENAI_BASE_URL`,
+  `OPENAI_API_KEY`, `SCANORIA_AI_MODEL`) sont passées aux outils, traduites
+  dans leurs noms propres (`SKILL_SCANNER_LLM_*`, `OPENAI_MODEL`) ; les
+  variables d'Anthropic, d'Azure, d'AWS, de VirusTotal et des services Cisco
+  sont retirées. `LITELLM_LOCAL_MODEL_COST_MAP` évite tout téléchargement par
+  litellm.
+
+Tests : `tests/b36-ia.sh` (convertisseurs sur sorties enregistrées, entrées
+hostiles, sans conteneur) et `tests/b36-live.sh` (image construite, banc
+d'essai confiné, job CI `ia-modules-live`).

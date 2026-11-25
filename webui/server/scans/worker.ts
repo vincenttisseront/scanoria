@@ -38,6 +38,8 @@ import { TRIAL_TRIGGER, concludeTrial, isTrialScan, recordTrialModule } from '..
 import { needsPrefetch, requestPrefetch } from './execution'
 import { loadDurations, orderModules } from './order'
 import { recordOrchestration } from './orchestration'
+import { planProfile, RepoConfigPending } from '../profiles/plan-profile'
+import { prepareRepoConfigs } from '../config/refresh'
 import { profileRulesets } from '../rulesets/store'
 import { stageRulesets } from '../rulesets/files'
 import { mergeCoverageGaps } from '../findings/coverage'
@@ -123,6 +125,8 @@ export class ScanWorker {
     await this.sweepIncoming(now)
     await this.collect(now)
     await this.recoverOrphans()
+    // 0.7 (J8) : .scanoria.yml des analyses en file, lu hors du verrou de dépôt.
+    await prepareRepoConfigs(this.pool, { now, log: this.log }).catch(e => this.log(`repo config: ${(e as Error).message}`))
     await this.dispatch(now)
   }
 
@@ -215,7 +219,8 @@ export class ScanWorker {
               isMissing ? (m.alternate ? 'infra' : 'input') : null])
         }
         const runnable = plan.modules.filter(m => !missing.some(x => x.id === m.id))
-        const coverage = JSON.stringify({ gaps: plan.gaps })
+        // 0.7 (J8) : état de .scanoria.yml et chemins ignorés, notés en couverture (G15).
+        const coverage = JSON.stringify(planned.repoConfig ? { gaps: plan.gaps, repo_config: planned.repoConfig } : { gaps: plan.gaps })
         if (runnable.length === 0) {
           await client.query(
             `UPDATE scans SET plan = $2, coverage = COALESCE(coverage, '{}'::jsonb) || $3::jsonb, status = 'ingesting',
@@ -267,7 +272,7 @@ export class ScanWorker {
   }
 
   /** Plan figé de l'analyse : repris tel quel (rejeu, relance), sinon résolu depuis le profil. */
-  private async planFor(client: pg.PoolClient, scan: QueuedRow): Promise<{ plan: ScanPlan, missing: PlannedModule[] }> {
+  private async planFor(client: pg.PoolClient, scan: QueuedRow): Promise<{ plan: ScanPlan, missing: PlannedModule[], repoConfig?: unknown }> {
     const state = await readModulesState(this.paths.modulesStateFile)
     if (!state.available) throw new Deferred(err('E_MODULES_STATE', 'infra', 'installed modules state is unavailable'))
     const existing = scan.plan ? parsePlan(scan.plan) : null
@@ -280,8 +285,11 @@ export class ScanWorker {
     const pr = await client.query<{ source_kind: 'git' | 'archive', spdx_license: string | null }>(
       'SELECT source_kind, spdx_license FROM projects WHERE id = $1', [scan.project_id])
     const project = pr.rows[0]!
-    const prof = await client.query<{ id: string, slug: string, categories: string[], include_modules: string[], exclude_modules: string[] }>(
-      'SELECT id, slug, categories, include_modules, exclude_modules FROM profiles WHERE id = $1', [scan.profile_id])
+    // 0.7 (G8, G9, J8, contrat 29) : profil effectif (héritage, verrous, configuration du dépôt), figé dans le plan.
+    const { profile, config: repoConfig } = await planProfile(client, scan).catch((e: unknown) => {
+      if (e instanceof RepoConfigPending) throw new Deferred(err('E_REPO_CONFIG_PENDING', 'infra', e.message))
+      throw e
+    })
     const gate = await client.query<{ id: string, slug: string, rules: unknown }>('SELECT id, slug, rules FROM gates WHERE id = $1', [scan.gate_id])
     const rules = GateRules.safeParse(gate.rows[0]!.rules)
     if (!rules.success) throw new ScanFailure(err('E_SCAN_GATE', 'input', 'quality gate rules are invalid'))
@@ -292,7 +300,7 @@ export class ScanWorker {
     const resolved = recorrelate
       ? recorrelationPlan({ installed: state.modules, catalog })
       : resolveProfile({
-          profile: prof.rows[0]!,
+          profile,
           sourceKind: project.source_kind,
           projectLicense: project.spdx_license,
           installed: state.modules,
@@ -301,7 +309,7 @@ export class ScanWorker {
           // 0.6 (B, contrat 24) : versions figées du projet (G6).
           pins: await loadPins(client, scan.project_id),
           // 0.7 (A, contrat 34) : jeux de règles G4 du profil, versions résolues et figées dans le plan.
-          rulesets: (await profileRulesets(client, scan.profile_id)).map(({ content: _c, ...r }) => r),
+          rulesets: (await profileRulesets(client, profile.id)).map(({ content: _c, ...r }) => r),
         })
     // 0.6 (V3, V5) : graphe SBOM et ordre par durée mesurée.
     const modules = orderModules(resolved.modules, catalog, await loadDurations(client, scan.project_id, resolved.modules.map(m => m.id)))
@@ -315,14 +323,14 @@ export class ScanWorker {
         ...(incrementalFiles(scan) && !recorrelate ? { changed_files: incrementalFiles(scan) } : {}),
         ...(prBase(scan) && !recorrelate ? { pr_base: prBase(scan) } : {}),
       },
-      profile: prof.rows[0]!,
+      profile,
       gate: { id: gate.rows[0]!.id, slug: gate.rows[0]!.slug, rules: rules.data },
       modules,
       gaps,
       timeout_s: planTimeout(modules),
     }
     // Version figée absente de la machine : « missing », classe infra (contrat 24).
-    return { plan, missing: replayAvailability(plan, state.modules, retained).missing.filter(m => m.alternate) }
+    return { plan, missing: replayAvailability(plan, state.modules, retained).missing.filter(m => m.alternate), repoConfig }
   }
 
   /** Images retenues publiées par le helper ; null si l'état est illisible (le runner tranche alors). */

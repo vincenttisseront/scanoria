@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module vulnhuntr (0.7, K3) : analyse par IA du code Python. Vulnhuntr suit
+# les chaînes d'appel de l'entrée utilisateur jusqu'à la sortie (LFI, RCE,
+# SSRF, AFO, SQLI, XSS, IDOR) en demandant à un modèle le contexte dont il a
+# besoin. Il lit le code (jedi, parso) et n'exécute rien.
+#
+# Modèle : toujours le relais de scanoria-ai (scan.network: ai-relay,
+# contrat 31), jamais Anthropic, OpenAI ni un Ollama direct : le conteneur
+# reste sans réseau, et le relais masque les secrets, applique « aucun envoi
+# à l'IA » et journalise. Le support amont des modèles locaux est dit
+# expérimental : le banc d'essai est obligatoire (I23) et le module est
+# désactivé s'il ne trouve plus les failles connues. Ses résultats sont
+# marqués « IA » et restent hors verdict tant qu'une personne ne les a pas
+# confirmés (contrat 32).
+#
+# Amont : Vulnhuntr de Protect AI, AGPL-3.0 (relevé sur le dépôt
+# protectai/vulnhuntr le 2026-11-25, commit ead88c5, dernier de la branche
+# main). Ni image ni paquet PyPI amont (le paquet PyPI « vulnhuntr » est
+# d'un autre auteur) : sources livrées non modifiées avec l'outil de
+# l'appliance (scan-tools/vulnhuntr/vendor), dépendances dans l'image
+# construite par la CI de Scanoria (image/Containerfile, docs/MODULES.md § 8).
+id: vulnhuntr
+name: Vulnhuntr
+description:
+  fr: Cherche par IA, dans le code Python, les failles exploitables à distance en suivant le chemin de l'entrée utilisateur jusqu'à la sortie.
+  en: Uses AI to find remotely exploitable flaws in Python code by following user input to its sinks.
+type: scanner
+categories: [sast]
+license:
+  spdx: AGPL-3.0-only
+  url: https://github.com/protectai/vulnhuntr/blob/ead88c5adba4279dae5c56d65124c530a9a1c5ae/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: Dépendances Python du verrou image/requirements.lock sous licences MIT, BSD et Apache-2.0 (anthropic est importé par l'amont mais jamais appelé).
+upstream:
+  homepage: https://github.com/protectai/vulnhuntr
+  source: https://github.com/protectai/vulnhuntr/tree/ead88c5adba4279dae5c56d65124c530a9a1c5ae
+image: ghcr.io/vincenttisseront/scanoria-vulnhuntr@sha256:cd908e2b66b88ef22052b79998c816d52762f0ee2b43288108e60e5df805a828
+version: "0.1.0+ead88c5"
+resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 800 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties:
+    min_confidence:
+      type: integer
+      default: 7
+      minimum: 1
+      maximum: 10
+      title: Confiance minimale
+      description: Seuls les constats dont la confiance (0 à 10) atteint ce seuil sont retenus ; 7 est la recommandation amont.
+options_i18n:
+  min_confidence:
+    fr: { title: Confiance minimale, description: Seuls les constats dont la confiance (0 à 10) atteint ce seuil sont retenus ; 7 est la recommandation amont. }
+    en: { title: Minimum confidence, description: Only findings whose confidence (0 to 10) reaches this threshold are kept; 7 is the upstream recommendation. }
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/vulnhuntr_sarif.py", "/src", "/out/vulnhuntr.sarif", "{opt.min_confidence}"]
+  tool: vulnhuntr
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+  # V6 : code Python seulement.
+  applies_to:
+    paths:
+      - "*.py"
+  timeout_s: 1800
+  network: ai-relay
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/vulnhuntr.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # Application Flask inerte : URL de la requête passée à requests.get, hôte passé à un shell.
+    - { rule: vulnhuntr/ssrf, category: sast, min: 1 }
+    - { rule: vulnhuntr/rce, category: sast, min: 1 }
+health: { command: ["python3", "-I", "-c", "import jedi, openai, parso, pydantic_xml, structlog; print('0.1.0+ead88c5')"] }
+upgrade: { policy: on-demand }

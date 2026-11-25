@@ -53,7 +53,7 @@ describe.skipIf(!DATABASE_URL)('commit de base des analyses de PR (K2, K4, Postg
     return { job, plan: parsePlan(row.plan) }
   }
 
-  const pr = (base: unknown) => ({ number: 7, base_sha: base, base_ref: 'main', head_sha: HEAD, head_ref: 'fonction', author: 'dev-une' })
+  const pr = (base: string) => ({ number: 7, base_sha: base, base_ref: 'main', head_sha: HEAD, head_ref: 'fonction', author: 'dev-une' })
 
   beforeAll(async () => {
     db = await createTestDatabase()

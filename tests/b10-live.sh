@@ -47,8 +47,9 @@ if [[ ${#ids[@]} -eq 0 ]]; then
 		# Les scanners reliés à un service (sonar-scanner) ont leur propre batterie (b17-live),
 		# ceux de la catégorie sbom (Syft, Grype, dtrack-upload) la leur (b19-live).
 		# Un module en attente d'image (image_pending, 0.7) est éprouvé par la batterie -live qui
-		# construit son image localement (b36-live pour les modules d'analyse IA).
-		[[ "$(yq "$f" | jq -r '.type == "scanner" and (.image_pending != true) and (.scan.network | startswith("service:") | not) and (.categories | index("sbom") | not)')" == true ]] \
+		# construit son image localement ; les modules d'analyse IA (scan.network ai-relay) ont
+		# la leur (b36-live, avec un faux relais), même une fois leur image épinglée.
+		[[ "$(yq "$f" | jq -r '.type == "scanner" and (.image_pending != true) and (.scan.network != "ai-relay") and (.scan.network | startswith("service:") | not) and (.categories | index("sbom") | not)')" == true ]] \
 			&& ids+=("$(basename "$(dirname "$f")")")
 	done
 fi

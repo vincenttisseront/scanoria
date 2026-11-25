@@ -75,9 +75,8 @@ EOF
 		[[ "$(jq -r '.outputs.sarif == null' "$TMP/m.json")" == true ]] && rec="$ROOT/modules/$id/tests/recorded.cdx.json"
 		check "$id : sortie native enregistrée conforme aux attentes du banc d'essai" \
 			python3 "$MC" expect "$f" "$rec"
-		# Exceptions hors DAST : le réseau interne d'un service (contrat 12 de la 0.4, b17) et le
-		# relais IA (contrat 31 de la 0.7), joint sans réseau par le socket du pont (b35).
-		check "$id : réseau coupé pendant l'analyse" jq -e '.scan.network == "none" or .scan.network == "ai-relay" or (.scan.network | startswith("service:"))' "$TMP/m.json"
+		# Seule exception hors DAST : le réseau interne d'un service (contrat 12 de la 0.4, b17).
+		check "$id : réseau coupé pendant l'analyse (hors relais IA)" jq -e '.scan.network == "none" or (.scan.network | startswith("service:")) or .scan.network == "ai-relay"' "$TMP/m.json"
 		check "$id : licence vérifiée en amont (date)" jq -e '.license.verified_at | test("^2026-")' "$TMP/m.json"
 	fi
 done

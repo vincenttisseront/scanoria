@@ -48,6 +48,9 @@ async function load() {
 onMounted(load)
 
 const project = computed(() => detail.value?.project ?? null)
+// 0.7 (G8, J5) : « aucun envoi à l'IA » imposé par un profil ; reprise de l'existant.
+const aiLocked = ref(false)
+const importOpen = ref(false)
 const canEdit = computed(() => session.can('operator') && !!project.value && !project.value.archived_at)
 const isAdmin = computed(() => canEdit.value && session.can('admin'))
 const scheduleItems = computed(() => (['on-commit', 'daily', 'none'] as const).map(s => ({ label: label('schedule', s), value: s })))
@@ -325,9 +328,9 @@ async function remove() {
           </UFormField>
           <USwitch
             v-model="form.ai_opt_out"
-            :disabled="!canEdit"
+            :disabled="!canEdit || aiLocked"
             :label="t('projects.detail.aiOptOut')"
-            :description="t('projects.detail.aiOptOutHelp')"
+            :description="aiLocked ? t('projects.detail.aiOptOutLocked') : t('projects.detail.aiOptOutHelp')"
           />
           <div
             v-if="canEdit"
@@ -341,6 +344,34 @@ async function remove() {
           </div>
         </form>
       </UCard>
+
+      <ProfilesProjectProfiles
+        v-model:ai-locked="aiLocked"
+        :project-id="project.id"
+        :can-edit="canEdit"
+        @changed="load"
+      />
+
+      <UCard v-if="isAdmin">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="text-sm text-muted">
+            {{ t('imports.cardHelp') }}
+          </p>
+          <UButton
+            icon="i-lucide-file-input"
+            color="neutral"
+            variant="subtle"
+            :label="t('imports.open')"
+            data-testid="import-open"
+            @click="importOpen = true"
+          />
+        </div>
+      </UCard>
+      <ProfilesImportExisting
+        v-model:open="importOpen"
+        :project-id="project.id"
+        :is-git="project.source_kind === 'git'"
+      />
 
       <VigilanceProjectPins
         :project-id="project.id"

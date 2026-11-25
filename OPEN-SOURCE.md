@@ -77,6 +77,8 @@ partie des dépendances npm de production de `webui/package.json` :
 | Tailwind CSS | MIT |
 | zod | MIT |
 | node-postgres (`pg`) | MIT |
+| yaml (lecture sûre de `.scanoria.yml` et de la configuration exportée) | ISC |
+| smol-toml (reprise des fichiers TOML de gitleaks et OSV-Scanner) | BSD-3-Clause |
 | Icônes Lucide (`@iconify-json/lucide`) | ISC |
 
 Ce qui est réellement livré est la sortie Nitro : le code de la console,
@@ -112,6 +114,15 @@ installé.
 |---|---|---|
 | ModelScan (Protect AI) | 0.8.8 | Apache-2.0 ; `modelscan/tools/` (picklescan) : MIT |
 | tomlkit | 0.13.3 | MIT |
+
+De même, le module `vulnhuntr` (0.7, K3) n'a ni image ni paquet publiés par
+Protect AI : son paquet Python est livré **non modifié** sous
+`/usr/lib/scanoria/scan-tools/vulnhuntr/vendor/`, avec son texte de licence,
+et ne sert que dans le conteneur du module.
+
+| Composant | Version | Licence |
+|---|---|---|
+| Vulnhuntr (Protect AI) | 0.1.0, commit ead88c5 | AGPL-3.0 |
 
 ### Données de vulnérabilités
 

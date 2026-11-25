@@ -27,6 +27,7 @@ import {
 import { collapseCorrelated } from '../findings/correlation'
 import { excludeUnconfirmedAi } from '../findings/ai-findings'
 import { intelJoin } from '../intel/lookup'
+import { applyGateFloor, planGateFloor } from '../profiles/locks'
 import { decideComponent, loadPolicy } from '../licenses/policy'
 import { pullRequestBaseline } from './pr-baseline'
 
@@ -589,7 +590,8 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
   )
   const row = scan.rows[0]
   if (!row) throw new ScanNotFoundError()
-  const rules = rulesFromPlan(row.plan) ?? GateRules.parse(row.gate_rules)
+  // 0.7 (G8) : plancher des verrous figé dans le plan ; sans lui (plan d'avant la 0.7), règles inchangées (G11).
+  const rules = applyGateFloor(rulesFromPlan(row.plan) ?? GateRules.parse(row.gate_rules), planGateFloor(row.plan))
 
   const [modules, findings, exceptions] = await Promise.all([
     db.query<GateModule>('SELECT module_id, status, feeds FROM scan_modules WHERE scan_id = $1', [scanId]),

@@ -10,7 +10,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
-import { CATEGORIES, GateRules, type Category } from '#shared/analysis'
+import { CATEGORIES, GateRules, ProfileLocks, type Category } from '#shared/analysis'
 import { MODULE_ID_RE } from '#shared/schemas'
 import { resolveOptions } from '#shared/module-options'
 import type { InstalledModule } from '../utils/catalog'
@@ -104,7 +104,7 @@ export interface ScanPlan {
     /** 0.7 (K2, K4) : commit de base d'une PR. */
     pr_base?: string
   }
-  profile: { id: string, slug: string, categories: string[], include_modules: string[], exclude_modules: string[] }
+  profile: { id: string, slug: string, categories: string[], include_modules: string[], exclude_modules: string[] } & Partial<Pick<import('../profiles/plan-profile').PlanProfile, 'level' | 'chain' | 'locks' | 'slot' | 'source'>>
   gate: { id: string, slug: string, rules: GateRules }
   modules: PlannedModule[]
   gaps: CoverageGap[]
@@ -348,6 +348,12 @@ export const scanPlanSchema = z.object({
   profile: z.object({
     id: z.string(), slug: z.string(), categories: z.array(z.string()),
     include_modules: z.array(z.string()), exclude_modules: z.array(z.string()),
+    // 0.7 (C, G8, G9, contrat 29) : profil effectif figé ; absents d'un plan plus ancien.
+    level: z.enum(['enterprise', 'team', 'project']).optional(),
+    chain: z.array(z.string()).max(3).optional(),
+    locks: ProfileLocks.optional(),
+    slot: z.enum(['pr', 'nightly', 'release', 'default']).optional(),
+    source: z.enum(['project', 'explicit', 'config']).optional(),
   }),
   gate: z.object({ id: z.string(), slug: z.string(), rules: GateRules }),
   modules: z.array(plannedModuleSchema).max(64),

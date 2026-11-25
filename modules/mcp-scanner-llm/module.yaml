@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module mcp-scanner-llm (0.7, K5, juge LLM) : les mêmes outils, invites et
+# serveurs MCP que le module mcp-scanner, jugés par l'analyseur LLM de Cisco
+# MCP Scanner au lieu de ses règles YARA (intentions cachées que des règles ne
+# voient pas). Le modèle n'est joint que par le relais de scanoria-ai
+# (scan.network: ai-relay, contrat 31) : conteneur sans réseau, secrets
+# masqués, « aucun envoi à l'IA » respecté, appels journalisés ; jamais l'API
+# Cisco AI Defense ni VirusTotal. Sans connecteur IA, le module est
+# « skipped » et le module mcp-scanner (hors ligne) reste seul. Ses résultats
+# sont marqués « IA » et restent hors verdict tant qu'une personne ne les a
+# pas confirmés (contrat 32).
+#
+# Amont : Cisco AI MCP Scanner 4.8.7 (Apache-2.0, relevé le 2026-11-25, tag
+# 4.8.7), même verrou que mcp-scanner ; image construite par la CI de
+# Scanoria sous son propre nom (docs/MODULES.md § 8).
+id: mcp-scanner-llm
+name: Cisco MCP Scanner (juge IA)
+description:
+  fr: Fait juger par l'IA de l'appliance les outils et serveurs MCP du dépôt (empoisonnement, injection d'invite, exfiltration) ; résultats à confirmer.
+  en: Has the appliance AI judge the MCP tools and servers of the repository (poisoning, prompt injection, exfiltration); findings to be confirmed.
+type: scanner
+categories: [sast]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/cisco-ai-defense/mcp-scanner/blob/4.8.7/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: Mêmes dépendances que le module mcp-scanner (MIT, BSD, Apache-2.0, ISC, MPL-2.0, PSF) ; litellm (MIT) ne joint que le relais.
+upstream:
+  homepage: https://github.com/cisco-ai-defense/mcp-scanner
+  source: https://pypi.org/project/cisco-ai-mcp-scanner/4.8.7/
+image: ghcr.io/vincenttisseront/scanoria-mcp-scanner-llm@sha256:8cd51327aaedf50fba9bcabd1aa875a22367f299372b78cd9783543c350215a7
+version: "4.8.7"
+resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 1200 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/mcp_sarif.py", "--llm", "/src", "/out/mcp-scanner-llm.sarif"]
+  tool: mcp-scanner
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+  applies_to:
+    paths:
+      - "*.json"
+      - "*.py"
+      - "*.{js,mjs,cjs,ts,mts,cts}"
+  timeout_s: 1800
+  network: ai-relay
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/mcp-scanner-llm.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # Mêmes définitions inertes que mcp-scanner : descriptions qui demandent de collecter et d'envoyer des secrets.
+    - { rule: mcp-scanner-llm/prompt-injection, category: sast, min: 1 }
+health: { command: ["python3", "-I", "-c", "import importlib.metadata as m, mcpscanner, litellm; print(m.version('cisco-ai-mcp-scanner'))"] }
+upgrade: { policy: on-demand }

