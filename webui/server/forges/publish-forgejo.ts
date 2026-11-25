@@ -8,7 +8,7 @@
 import { ForgeError, forgeGetJson, forgeSendJson, type ForgeRequest } from './http'
 import { checkCommit, checkFullName, encodePath, type ForgeAccess } from './types'
 import {
-  checkNumber, emailOf, loginOf, toPullRequest, uniqueAuthors,
+  checkLogin, checkNumber, emailOf, loginOf, toPermission, toPullRequest, uniqueAuthors,
   type ForgeComment, type ForgePublisherImpl, type PullRequestRef,
 } from './pr-types'
 
@@ -88,6 +88,18 @@ export function forgejoPublisher(access: ForgeAccess): ForgePublisherImpl {
     async openPullRequests(repo, max) {
       const raw = await pages<unknown>(p => `${repoUrl(repo)}/pulls?state=open&limit=${PAGE}&page=${p}`, max)
       return raw.map(toPullRequest).filter((p): p is PullRequestRef => !!p)
+    },
+
+    async permission(repo, login) {
+      try {
+        const { data } = await forgeGetJson<{ permission?: unknown }>(`${repoUrl(repo)}/collaborators/${encodeURIComponent(checkLogin(login))}/permission`, req)
+        return toPermission(data?.permission)
+      }
+      catch (err) {
+        // Compte inconnu ou hors du dépôt : aucun droit (refus par défaut).
+        if (err instanceof ForgeError && (err.code === 'E_FORGE_NOT_FOUND' || err.code === 'E_FORGE_AUTH')) return 'none'
+        throw err
+      }
     },
 
     async comments(repo, number, since) {

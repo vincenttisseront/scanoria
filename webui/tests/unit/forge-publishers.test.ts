@@ -10,7 +10,7 @@ import { setForgeRetryDelays, setForgeTransport } from '../../server/forges/http
 import { githubPublisher } from '../../server/forges/publish-github'
 import { gitlabPublisher } from '../../server/forges/publish-gitlab'
 import { gitlabClient, gitlabToRepo } from '../../server/forges/gitlab'
-import type { Annotation, PullRequestRef } from '../../server/forges/pr-types'
+import { toPermission, type Annotation, type PullRequestRef } from '../../server/forges/pr-types'
 
 const A = 'a'.repeat(40)
 const B = 'b'.repeat(40)
@@ -233,5 +233,35 @@ describe('client de découverte GitLab', () => {
     expect(calls.map(c => new URL(c.url).pathname + new URL(c.url).search)).toEqual(['/api/v4/version', '/api/v4/projects?per_page=1'])
     on('GET', /\/projects\?visibility=public/, 200, [proj('public/outil', { visibility: 'public' })])
     expect((await anon.listRepos())[0]).toMatchObject({ full_name: 'public/outil', private: false })
+  })
+})
+
+describe('droit d’un compte sur le dépôt (/scanoria accept)', () => {
+  it('GitHub : droit lu, compte absent ou refusé → aucun droit, identifiant contrôlé', async () => {
+    const gh = githubPublisher({ kind: 'github', base_url: 'https://api.github.com', token: TOKEN })
+    on('GET', /\/collaborators\/relectrice\/permission$/, 200, { permission: 'write', role_name: 'maintain' })
+    on('GET', /\/collaborators\/admin-une\/permission$/, 200, { permission: 'admin' })
+    on('GET', /\/collaborators\/inconnu\/permission$/, 404, {})
+    on('GET', /\/collaborators\/cache\/permission$/, 403, {})
+    expect(await gh.permission('equipe/app', 'relectrice')).toBe('write')
+    expect(await gh.permission('equipe/app', 'admin-une')).toBe('admin')
+    expect(await gh.permission('equipe/app', 'inconnu')).toBe('none')
+    expect(await gh.permission('equipe/app', 'cache')).toBe('none')
+    await expect(gh.permission('equipe/app', '../x')).rejects.toMatchObject({ code: 'E_FORGE_INPUT' })
+  })
+
+  it('GitLab : niveau d’accès du membre (Developer et plus = écriture)', async () => {
+    const gl = gitlabPublisher({ kind: 'gitlab', base_url: 'https://gitlab.exemple.test', token: TOKEN })
+    on('GET', /\/members\/all\?query=dev/, 200, [{ username: 'dev-une', access_level: 30 }, { username: 'dev', access_level: 20 }])
+    on('GET', /\/members\/all\?query=chef/, 200, [{ username: 'chef', access_level: 40 }])
+    on('GET', /\/members\/all\?query=absent/, 200, [])
+    expect(await gl.permission('equipe/app', 'dev')).toBe('read')
+    expect(await gl.permission('equipe/app', 'chef')).toBe('admin')
+    expect(await gl.permission('equipe/app', 'absent')).toBe('none')
+  })
+
+  it('toPermission : niveaux ramenés à trois', () => {
+    expect(['admin', 'owner', 'maintain', 'push', 'write', 'triage', 'pull', 'read', 'x', null].map(toPermission))
+      .toEqual(['admin', 'admin', 'write', 'write', 'write', 'read', 'read', 'read', 'none', 'none'])
   })
 })
