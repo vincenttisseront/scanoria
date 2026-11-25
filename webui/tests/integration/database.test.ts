@@ -238,6 +238,10 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
       await expect(q.query(`INSERT INTO oidc_issuers (kind, issuer, audience) VALUES ('github', 'http://ci.exemple.test', 'scanoria')`)).rejects.toThrow(/oidc_issuers_issuer_check/)
       const issuer = (await q.query<{ id: string }>(`INSERT INTO oidc_issuers (kind, issuer, audience) VALUES ('forgejo', 'https://forge.exemple.test/api/actions', 'scanoria') RETURNING id`)).rows[0]!.id
       await q.query(`INSERT INTO oidc_bindings (issuer_id, project_id, repository) VALUES ($1, $2, 'equipe/depot')`, [issuer, project.id])
+      // 019 : identifiant immuable du dépôt, numérique seulement.
+      await q.query(`INSERT INTO oidc_bindings (issuer_id, project_id, repository, repository_id) VALUES ($1, $2, 'equipe/epingle', '123456')`, [issuer, project.id])
+      await expect(q.query(`INSERT INTO oidc_bindings (issuer_id, project_id, repository, repository_id) VALUES ($1, $2, 'equipe/piege', 'equipe/depot')`, [issuer, project.id])).rejects.toThrow(/oidc_bindings_repository_id_check/)
+      await expect(q.query(`UPDATE oidc_bindings SET repository_id = '' WHERE repository = 'equipe/depot'`)).rejects.toThrow(/oidc_bindings_repository_id_check/)
       await expect(q.query(`INSERT INTO integration_requests (project_id, kind, state) VALUES ($1, 'branch-protection', 'applied')`, [project.id])).rejects.toThrow(/integration_protection_decided/)
       await q.query(`INSERT INTO integration_requests (project_id, kind, state) VALUES ($1, 'ci-pr', 'open')`, [project.id])
       await expect(q.query(`INSERT INTO integration_requests (project_id, kind, state) VALUES ($1, 'ci-pr', 'proposed')`, [project.id])).rejects.toThrow(/integration_requests_active/)
@@ -306,7 +310,7 @@ describe.skipIf(!DATABASE_URL)('base de la console (PostgreSQL réel)', () => {
       ])
       const mig = await db.pool.query('SELECT version, name, checksum FROM schema_migrations ORDER BY version')
       const files = loadMigrationsFromDir(MIGRATIONS_DIR)
-      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql', '012_offline.sql', '013_triage_forges.sql', '014_profiles.sql', '015_forges.sql', '016_agent_inventories.sql', '017_validate_ruleset.sql', '018_release.sql'])
+      expect(files.map(f => f.name)).toEqual(['001_initial.sql', '002_modules.sql', '003_analyses.sql', '004_complements.sql', '005_upload_unique.sql', '006_modules_ia.sql', '007_reset_service_admin.sql', '008_refresh_feeds.sql', '009_sbom.sql', '010_ai_license.sql', '011_recorrelate_cascade.sql', '012_offline.sql', '013_triage_forges.sql', '014_profiles.sql', '015_forges.sql', '016_agent_inventories.sql', '017_validate_ruleset.sql', '018_release.sql', '019_oidc_repository_id.sql'])
       expect(mig.rows).toEqual(files.map((f, i) => ({ version: i + 1, name: f.name, checksum: f.checksum })))
     })
 
