@@ -37,7 +37,7 @@ license:
 upstream:
   homepage: https://github.com/fraim-dev/fraim
   source: https://pypi.org/project/fraim/0.8.0/
-image_pending: true
+image: ghcr.io/vincenttisseront/scanoria-fraim@sha256:464775a179616d756802cca44cb6df71b017cd0c0446bbb7cdf066e974d35ed8
 version: "0.8.0"
 resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 1500 }
 hostname: null
