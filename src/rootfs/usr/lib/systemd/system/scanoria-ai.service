@@ -21,6 +21,11 @@ ConditionPathExists=/opt/scanoria/current/webui/services/ai.mjs
 Type=simple
 User=scanoria-ai
 Group=scanoria-ai
+# Les versions installées sont root:scanoria 0750 (selfupdate) : sans le groupe
+# scanoria, node ne lit pas ai.mjs (« Cannot find module », boucle de
+# redémarrage constatée en 0.5.0). Les répertoires d'état de ce groupe restent
+# fermés (InaccessiblePaths ci-dessous).
+SupplementaryGroups=scanoria
 RuntimeDirectory=scanoria-ai
 RuntimeDirectoryMode=0700
 Environment=NODE_ENV=production
@@ -49,7 +54,7 @@ ProtectClock=yes
 ProtectHostname=yes
 ProtectProc=invisible
 ProcSubset=pid
-InaccessiblePaths=-/var/lib/scanoria -/etc/scanoria
+InaccessiblePaths=-/var/lib/scanoria -/etc/scanoria -/run/scanoria
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=yes
 RestrictRealtime=yes

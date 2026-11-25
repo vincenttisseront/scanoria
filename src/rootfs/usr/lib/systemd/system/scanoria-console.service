@@ -33,6 +33,8 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=/var/lib/scanoria/requests
 ReadWritePaths=/var/lib/scanoria/uploads /var/lib/scanoria/console /var/lib/scanoria/bootstrap
+# Versions figées par projet (0.6, G6) : pins.json écrit par la console.
+ReadWritePaths=/var/lib/scanoria/pins
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes

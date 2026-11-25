@@ -122,6 +122,13 @@ done
 grep -q '^ReadWritePaths=/var/lib/scanoria/requests$' "$RF/usr/lib/systemd/system/scanoria-console.service" \
 	&& grep -q '^ReadWritePaths=/var/lib/scanoria/scans/jobs$' "$W" \
 	&& ok "dépôt des demandes et des tâches : répertoire parent ouvert en écriture" || ko "ReadWritePaths des demandes ou des tâches"
+grep -q '^ReadWritePaths=/var/lib/scanoria/pins$' "$RF/usr/lib/systemd/system/scanoria-console.service" \
+	&& ok "console : versions figées (pins.json) en écriture" || ko "console : /var/lib/scanoria/pins absent des ReadWritePaths (EROFS)"
+AI="$RF/usr/lib/systemd/system/scanoria-ai.service"
+grep -q '^SupplementaryGroups=scanoria$' "$AI" \
+	&& grep -q '^InaccessiblePaths=.*-/var/lib/scanoria .*-/etc/scanoria .*-/run/scanoria' "$AI" \
+	&& ok "scanoria-ai : lit la version installée (groupe scanoria), état fermé" \
+	|| ko "scanoria-ai : groupe scanoria ou InaccessiblePaths manquant (Cannot find module ai.mjs)"
 
 # --- 3. Pare-feu --------------------------------------------------------------------------
 T="$TMP/root"
