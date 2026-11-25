@@ -183,6 +183,7 @@ RELAY_RUNTIME_DIR="$RT" RELAY_LIVE_DIR="$LIVE" RELAY_TOKEN_DIR="$TOK_DIR" RELAY_
 	node "$WORK/ia-relay-harness.mjs" 2>> "$LIVE/relay.err" &
 RELAY_PID=$!
 for _ in $(seq 100); do [[ -S "$RT/relay.sock" ]] && break; sleep 0.1; done
+touch "$LIVE/calls.jsonl" "$LIVE/ollama.jsonl"
 if [[ -S "$RT/relay.sock" ]]; then ok "relais en écoute sur le socket du runner"; else ko "relais absent"; cat "$LIVE/relay.err"; exit 1; fi
 
 # Registre des modules installés : manifeste du dépôt, image construite ici.
@@ -218,7 +219,10 @@ for id in vulnhuntr mcp-scanner-llm skill-scanner-llm; do
 	mod="$ROOT/modules/$id"
 	build_image "$id" || { echo "::endgroup::"; continue; }
 	expect "$id : réseau du manifeste = relais IA" "$(jq -r .scan.network "$WORK/$id.json")" ai-relay
-	register "$id" "$tag"
+	# Le runner n'accepte qu'une image épinglée par empreinte : référence locale par empreinte.
+	ref="${tag%:*}@$(podman image inspect --format '{{.Digest}}' "$tag")"
+	if podman image exists "$ref"; then ok "$id : image locale joignable par empreinte"; else ko "$id : image locale sans empreinte ($ref)"; fi
+	register "$id" "$ref"
 	version=$(jq -r .version "$WORK/$id.json")
 	src="$WORK/$id-src"
 	cp -R "$mod/testbed" "$src"
