@@ -26,6 +26,8 @@ export default defineEventHandler(async (event) => {
       && ((body.role !== undefined && body.role !== 'admin') || body.is_active === false)
     if (losesAdmin && (await countActiveAdmins(client, id)) === 0) throw apiError(409, 'E_LAST_ADMIN')
     if (id === auth.user.id && body.is_active === false) throw apiError(409, 'E_SELF')
+    // J15 (0.7) : un compte ne change pas sa propre nature (un « agent » ne se déclare pas humain).
+    if (id === auth.user.id && body.kind !== undefined && body.kind !== before.kind) throw apiError(409, 'E_SELF')
     const after = await updateUser(client, id, body)
     const roleChanged = body.role !== undefined && body.role !== before.role
     if (roleChanged || body.is_active === false) await revokeUserSessions(client, id)

@@ -16,7 +16,7 @@ import { loadConfig, setConfig } from '../../server/utils/config'
 import { createUser } from '../../server/utils/users'
 import { finalizeScanFindings, ingestModuleOutputs, readOutput } from '../../server/findings/ingest'
 import { findingsSummary, getFinding, listFindings, setFindingStatus, setSecretState, TriageError } from '../../server/findings/triage'
-import { createException, ExceptionError, isoDay, listExceptions, revokeException } from '../../server/findings/exceptions'
+import { decideException, ExceptionError, isoDay, listExceptions, requestException, revokeException } from '../../server/findings/exceptions'
 import { listSeverityMaps, updateSeverityMap } from '../../server/findings/severity'
 import { readModuleHints } from '../../server/findings/manifest'
 import { gapsFromDetection, mergeCoverageGaps } from '../../server/findings/coverage'
@@ -28,7 +28,14 @@ describe.skipIf(!DATABASE_URL)('résultats unifiés (PostgreSQL réel)', () => {
   let root: string
   let projectId: string
   let userId: number
+  let adminId: number
   let scanNo = 0
+
+  /** 0.7 : une exception est demandée (ops), puis approuvée par un autre administrateur. */
+  async function createException(db0: TestDatabase['pool'], e: { project_id: string, kind: string, target: Record<string, unknown>, reason: string, expires_on: string }, requester: number) {
+    const req = await requestException(db0, { ...e, requested_via: 'console', requester_label: 'ops', requester_is_human: true, requester_user_id: requester, commit_authors: [] })
+    return decideException(db0, req.id, { decision: 'approved', reason: 'approuvée pour le test', deciderUserId: adminId, ip: null })
+  }
   const jobs = new Map<string, string>()
 
   async function newScan(opts: { ref?: string, modules?: string[], commit?: string } = {}): Promise<string> {
@@ -83,6 +90,7 @@ describe.skipIf(!DATABASE_URL)('résultats unifiés (PostgreSQL réel)', () => {
     await writeFile(join(root, 'catalog-index.json'), JSON.stringify(index))
     setConfig(loadConfig({ NUXT_DATABASE_URL: db.url, NUXT_CATALOG_INDEX_FILE: join(root, 'catalog-index.json') }))
     userId = Number((await createUser(db.pool, { username: 'ops', role: 'operator', password: 'ops-long-password' })).id)
+    adminId = Number((await createUser(db.pool, { username: 'chef', role: 'admin', password: 'chef-long-password' })).id)
     const p = await db.pool.query<{ id: string }>(
       `INSERT INTO projects (slug, name, source_kind, repo_url, profile_id, gate_id, detection)
        VALUES ('demo', 'Démo', 'git', 'https://forge.exemple.test/demo.git', (SELECT id FROM profiles WHERE slug = 'rapide'),

@@ -22,7 +22,7 @@ interface SimilarResponse {
   items: Item[]
 }
 
-const props = withDefaults(defineProps<{ findingId: string, pollMs?: number }>(), { pollMs: 3000 })
+const props = withDefaults(defineProps<{ findingId: string, projectId?: string, pollMs?: number }>(), { pollMs: 3000, projectId: undefined })
 const emit = defineEmits<{ triaged: [], open: [id: string] }>()
 const { t } = useI18n()
 const { api, errorMessage } = useApi()
@@ -75,6 +75,19 @@ onBeforeUnmount(() => {
   if (timer) clearTimeout(timer)
 })
 
+/**
+ * 0.7 (B) : I7 → F4. Quand les résultats cochés partagent outil et règle, une
+ * règle de tri en masse PRÉ-REMPLIE est proposée (page des règles, simulation
+ * obligatoire) ; rien n'est enregistré ici.
+ */
+const ruleProposal = computed(() => {
+  const chosen = data.value?.items.filter(i => selected.value.includes(i.id)) ?? []
+  if (chosen.length < 2 || !props.projectId) return null
+  const first = chosen[0]!
+  if (!chosen.every(i => i.tool === first.tool && i.rule_id === first.rule_id)) return null
+  const q = new URLSearchParams({ project_id: props.projectId, tool: first.tool, rule: first.rule_id, action: 'false-positive' })
+  return `/findings/rules?${q.toString()}`
+})
 function toggle(id: string, on: boolean | 'indeterminate') {
   selected.value = on === true ? [...new Set([...selected.value, id])] : selected.value.filter(x => x !== id)
 }
@@ -212,6 +225,15 @@ async function apply() {
         :label="t('ai.similar.triage', { count: selected.length })"
         data-testid="ai-similar-triage"
         @click="open = true"
+      />
+      <UButton
+        v-if="canTriage && ruleProposal"
+        size="sm"
+        variant="ghost"
+        icon="i-lucide-list-filter"
+        :to="ruleProposal"
+        :label="t('triage.rules.fromSimilar')"
+        data-testid="ai-similar-rule"
       />
       <p class="text-xs text-muted">
         {{ t('ai.similar.help') }}
