@@ -10,7 +10,67 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.7.0 — non publiée
+## 0.7.1 — non publiée
+
+Correctif de la mise à jour vers la 0.7 : avec le connecteur IA activé, la
+mise à jour d'une appliance échouait, puis son retour arrière aussi.
+
+### Corrigé
+- **Connecteur IA** : `scanoria-ai` ne pouvait pas lire la version installée
+  et redémarrait en boucle dès l'activation du connecteur. Il reçoit le
+  groupe `scanoria`, et les répertoires d'état restent fermés pour lui.
+- **Mises à jour** : une IA indisponible ne bloque plus une mise à jour ni
+  son retour arrière. Le contrôle `ai.alive` de `scanoria-selftest` devient
+  un avertissement. Le contrôle de santé qui suit une mise à jour rejoue
+  `selftest --quick` pendant 180 s au plus, et nomme les contrôles en échec.
+- **Worker** : il publie son signe de vie dès le démarrage.
+- **Modules « service »** : l'ISO installe désormais `aardvark-dns` et
+  `netavark`. Sans eux, un scanner relié au réseau d'un service ne résolvait
+  pas son nom, et l'installation de `dtrack-upload` échouait à son banc
+  d'essai. `scanoria-selftest` signale leur absence (`podman.dns`, en
+  avertissement).
+- **Pare-feu** : il accepte la résolution de noms (port 53) depuis les ponts
+  des réseaux Podman. Sans cette règle, `aardvark-dns` restait injoignable et
+  `dtrack-upload` échouait à son banc d'essai, même avec le paquet installé.
+  La règle est chargée par la mise à jour.
+- **Modules d'analyse par IA** : quand l'installation échoue faute de modèle
+  de conversation retenu, le message le dit clairement, au lieu de demander
+  d'activer le connecteur.
+- **Versions figées par projet** (G6) : la console écrit de nouveau
+  `pins.json`.
+- Base : la migration 018 (préparation de la 0.8) est appliquée. Elle ne
+  change rien au fonctionnement de la 0.7.
+- Préparation de la 0.8 : le simulateur de quality gate (F9), les seuils
+  suggérés par IA (I19) et le VEX (H7) sont déjà présents dans cette
+  version. Ils seront présentés avec la 0.8.
+
+### Intervention manuelle avant la mise à jour
+C'est la version installée qui conduit la mise à jour. Sur une appliance en
+0.5.x, 0.6.x ou 0.7.0 dont le connecteur IA est activé, il faut donc faire
+une seule fois, en root, avant de mettre à jour :
+
+```
+mkdir -p /etc/systemd/system/scanoria-ai.service.d
+printf '[Service]\nSupplementaryGroups=scanoria\nInaccessiblePaths=-/run/scanoria\n' > /etc/systemd/system/scanoria-ai.service.d/10-groupe.conf
+systemctl daemon-reload && systemctl restart scanoria-ai
+scanoria-selftest --quick          # doit finir par PASS ou WARN
+rm -f /var/lib/scanoria/updates/alert.json
+```
+
+Autre possibilité : désactiver le connecteur IA, mettre à jour, puis le
+réactiver. Une fois la 0.7.1 installée, le fichier ajouté ne sert plus et
+peut être supprimé.
+
+Une mise à jour n'installe aucun paquet système. Sur une appliance installée
+depuis une ISO antérieure à la 0.7.1, si `scanoria-selftest` signale
+`podman.dns`, il faut donc, en root, lancer `apt install aardvark-dns`. Il
+faut ensuite redémarrer les modules « service » déjà installés pour que leurs
+noms soient enregistrés (`systemctl restart scanoria-mod-<id>.service`, ou
+redémarrer l'appliance), puis réinstaller depuis le catalogue le module en
+échec (par exemple `dtrack-upload`). Hors ligne, on installe le paquet `aardvark-dns` de la
+distribution de l'appliance avec `apt install ./aardvark-dns_*.deb`.
+
+## 0.7.0 — 2026-11-25
 
 SAST, IaC et intégration aux forges : l'appliance analyse le code et les
 workflows avec de nouveaux outils, publie son verdict dans les PR, et toute

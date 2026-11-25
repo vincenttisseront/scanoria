@@ -22,6 +22,7 @@ import applianceCases from '../../ai/testbed/diagnose-appliance.json'
 import nlSearchCases from '../../ai/testbed/nl-search.json'
 import ruleCases from '../../ai/testbed/generate-rule.json'
 import draftExceptionCases from '../../ai/testbed/draft-exception.json'
+import releaseNotesCases from '../../ai/testbed/release-notes.json'
 import suggestGateCases from '../../ai/testbed/suggest-gate.json'
 import embedPairs from '../../ai/testbed/embed-finding.json'
 import { EmbedSuite } from './tasks/similar'
@@ -43,7 +44,8 @@ export type TestbedSuite = z.infer<typeof TestbedSuite>
 export type TestbedCase = z.infer<typeof TestbedCase>
 
 export const SUITES: Record<string, TestbedSuite> = Object.fromEntries(
-  [findingCases, verdictCases, triageCases, summaryCases, secretCases, diagnoseCases, translateCases, reachCases, licenseCases, applianceCases, draftExceptionCases, nlSearchCases, ruleCases, suggestGateCases].map((s) => {
+  [findingCases, verdictCases, triageCases, summaryCases, secretCases, diagnoseCases, translateCases, reachCases, licenseCases, applianceCases, draftExceptionCases, nlSearchCases, ruleCases,
+    suggestGateCases, releaseNotesCases].map((s) => {
     const suite = TestbedSuite.parse(s)
     return [suite.kind, suite]
   }),

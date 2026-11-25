@@ -70,7 +70,8 @@
             "start-trial",
             "prefetch-images",
             "validate-ruleset",
-            "sign-attestation"
+            "sign-attestation",
+            "sign-release-report"
           ]
         }
       ]
@@ -179,7 +180,14 @@
         "E_ATTEST_SCAN",
         "E_ATTEST_VERDICT",
         "E_ATTEST_KEY",
-        "E_ATTEST_REPORT"
+        "E_ATTEST_REPORT",
+        "E_SIGN_TOO_LARGE",
+        "E_SIGN_ENCODING",
+        "E_SIGN_DIGEST",
+        "E_SIGN_CANONICAL",
+        "E_SIGN_SCHEMA",
+        "E_SIGN_SCAN",
+        "E_SIGN_KEY"
       ]
     },
     "message": {

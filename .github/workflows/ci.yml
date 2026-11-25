@@ -662,6 +662,35 @@ jobs:
       - name: tests/b36-live.sh
         run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b36-live.sh
 
+  release-live:
+    # Gate de release de la 0.8 (chantier A) contre un vrai Forgejo en conteneur :
+    # tag → interrogation → analyse de release → rapport signé par le vrai helper →
+    # statut scanoria/release-gate → fichiers joints vérifiés par scanoria-verify,
+    # comparaison F2 et tag déplacé (tests/b37-live.sh).
+    name: release-live (vrai Forgejo, gate de release et rapport signé, b37-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+      - name: Dépendances (podman, PostgreSQL 16, jq, python3, console)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq podman netavark aardvark-dns postgresql-16 curl openssl python3
+          sudo podman --version
+          cd webui && npm ci --ignore-scripts && npm run postinstall
+      # Machine jetable : Forgejo en conteneur, PostgreSQL réel, /etc/hosts modifié.
+      - name: tests/b37-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b37-live.sh
+
   deploy-live:
     # Déploiement après verdict favorable de la 0.8 (chantier D) contre un vrai
     # Forgejo (API, Actions, registre OCI) et le vrai helper root : attestation
@@ -694,7 +723,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live, forges-live, relay-live, sast-live, ia-modules-live, deploy-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live, forges-live, relay-live, sast-live, ia-modules-live, release-live, deploy-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

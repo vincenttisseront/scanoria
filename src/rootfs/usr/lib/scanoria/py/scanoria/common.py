@@ -73,6 +73,7 @@ REQUEST_TYPES = (
     "prefetch-images",
     "validate-ruleset",
     "sign-attestation",
+    "sign-release-report",
 )
 REJECT_CODES = frozenset((
     "E_INVALID_NAME", "E_NOT_REGULAR_FILE", "E_BAD_OWNER", "E_TOO_LARGE", "E_INVALID_JSON",
@@ -102,6 +103,9 @@ ERROR_CODES = frozenset((
     "E_ATTEST_ENCODING", "E_ATTEST_CANONICAL", "E_ATTEST_DIGEST", "E_ATTEST_STATEMENT",
     "E_ATTEST_SUBJECT", "E_ATTEST_SCAN", "E_ATTEST_VERDICT", "E_ATTEST_KEY",
     "E_ATTEST_REPORT",
+    # 0.8 (A, contrat 37) : signature par la clé de l'appliance, communs avec D.
+    "E_SIGN_TOO_LARGE", "E_SIGN_ENCODING", "E_SIGN_DIGEST", "E_SIGN_CANONICAL",
+    "E_SIGN_SCHEMA", "E_SIGN_SCAN", "E_SIGN_KEY",
 ))
 ALL_CODES = frozenset(("OK",)) | REJECT_CODES | ERROR_CODES
 

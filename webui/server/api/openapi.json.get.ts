@@ -11,6 +11,7 @@ import { VIGILANCE_OPS, vigilanceSchemas } from '../vigilance/openapi'
 import { PROFILE_OPS, profileSchemas } from '../profiles/openapi'
 import { RULESET_OPS, rulesetSchemas } from '../rulesets/openapi'
 import { TRIAGE_OPS, triageSchemas } from '../findings/openapi-07'
+import { RELEASE_OPS, releaseSchemas } from '../release/openapi'
 import { GATE_VEX_OPS, gateVexSchemas } from '../gates/openapi-08'
 
 type Role = 'public' | 'viewer' | 'operator' | 'admin'
@@ -148,6 +149,7 @@ const OPS: Record<string, Record<string, Op>> = {
   ...PROFILE_OPS,
   ...RULESET_OPS,
   ...TRIAGE_OPS,
+  ...RELEASE_OPS,
   ...GATE_VEX_OPS,
   '/api/scans': {
     get: { summary: 'Scan queue (status=active, in worker order) or history (filters: project, status, verdict, trigger; paginated)', role: 'viewer' },
@@ -417,6 +419,7 @@ export default defineEventHandler(async () => {
         ...profileSchemas(),
         ...rulesetSchemas(),
         ...triageSchemas(),
+        ...releaseSchemas(),
         ...gateVexSchemas(),
         FindingStatus: {
           type: 'object', additionalProperties: false, required: ['status'],

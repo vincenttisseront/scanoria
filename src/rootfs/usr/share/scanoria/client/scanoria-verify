@@ -1,0 +1,204 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# scanoria-verify : vérifie un rapport de release signé par une appliance
+# Scanoria (CLAUDE.md § 7.3). sh POSIX, avec openssl (3.0 ou plus récent),
+# sed, grep, tail, head, cut ; curl seulement pour --fetch-key.
+# Téléchargeable depuis la console :
+#   curl -fsSo scanoria-verify https://<appliance>/api/releases/client
+#
+#   scanoria-verify rapport.json --key appliance.pem [--key-fingerprint <hex>]
+#       [--commit <sha>] [--require-passed] [--quiet]
+#   scanoria-verify rapport.json --fetch-key https://<appliance>/api/system/appliance-key \
+#       --key-fingerprint <hex> [--cacert <ac.pem>] [--commit <sha>] [--require-passed]
+#   scanoria-verify attestation …   (sous-commande du chantier D : scanoria-verify-attestation)
+#
+# Le rapport est l'enveloppe téléchargée depuis la console (page Release, ou
+# scanoria-scan --report) : les octets signés (forme canonique du rapport, en
+# base64), leur empreinte SHA-256, la signature Ed25519 et l'empreinte de la
+# clé. Vérifications, dans l'ordre : forme de l'enveloppe, empreinte des
+# octets, clé attendue (empreinte = SHA-256 des 32 octets bruts), signature,
+# schéma du rapport, puis commit analysé.
+#
+# Une clé publique n'est jamais récupérée en silence : --fetch-key affiche
+# l'empreinte obtenue et exige --key-fingerprint, comparée avant tout usage.
+#
+# Codes de sortie :
+#   0  rapport valide (et commit identique si --commit)
+#   1  rapport invalide : enveloppe altérée, empreinte, clé ou signature
+#   2  rapport valide mais commit différent de --commit
+#   3  erreur d'utilisation ou de lecture (fichier, clé, réseau, openssl absent)
+#   4  rapport valide mais verdict autre que « passed » (avec --require-passed)
+set -u
+case ${SCANORIA_LANG:-${LC_ALL:-${LANG:-}}} in
+  en*) L=en ;;
+  *) L=fr ;;
+esac
+say() {
+  if [ "$L" = en ]; then printf '%s\n' "$2"; else printf '%s\n' "$1"; fi
+}
+QUIET=0
+info() {
+  [ "$QUIET" = 1 ] || say "$@"
+}
+die() {
+  code=$1
+  shift
+  say "scanoria-verify: $1" "scanoria-verify: $2" >&2
+  exit "$code"
+}
+usage() {
+  cat <<'EOF'
+scanoria-verify REPORT.json (--key PEM | --fetch-key URL --key-fingerprint HEX)
+                [--key-fingerprint HEX] [--commit SHA] [--require-passed] [--cacert FILE] [--quiet]
+scanoria-verify attestation ...
+Exit codes: 0 valid, 1 invalid, 2 commit differs, 3 usage/read error, 4 verdict not passed.
+EOF
+}
+
+if [ "${1:-}" = attestation ]; then
+  shift
+  here=$(dirname -- "$0")
+  [ -x "$here/scanoria-verify-attestation" ] || die 3 "sous-commande « attestation » indisponible (scanoria-verify-attestation absent)" "\"attestation\" subcommand unavailable (scanoria-verify-attestation missing)"
+  exec "$here/scanoria-verify-attestation" "$@"
+fi
+
+REPORT=
+KEY=
+FETCH=
+EXPECT_FP=
+COMMIT=
+CACERT=
+REQUIRE_PASSED=0
+need_value() {
+  [ $# -ge 2 ] && [ -n "$2" ] || die 3 "valeur manquante pour $1" "missing value for $1"
+}
+while [ $# -gt 0 ]; do
+  case $1 in
+    --key) need_value "$@"; KEY=$2; shift 2 ;;
+    --fetch-key) need_value "$@"; FETCH=$2; shift 2 ;;
+    --key-fingerprint) need_value "$@"; EXPECT_FP=$2; shift 2 ;;
+    --commit) need_value "$@"; COMMIT=$2; shift 2 ;;
+    --cacert) need_value "$@"; CACERT=$2; shift 2 ;;
+    --require-passed) REQUIRE_PASSED=1; shift ;;
+    --quiet|-q) QUIET=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) usage >&2; die 3 "option inconnue : $1" "unknown option: $1" ;;
+    *)
+      [ -z "$REPORT" ] || die 3 "un seul rapport à la fois" "one report at a time"
+      REPORT=$1
+      shift ;;
+  esac
+done
+
+[ -n "$REPORT" ] || { usage >&2; die 3 "rapport manquant" "missing report"; }
+[ -f "$REPORT" ] && [ -r "$REPORT" ] || die 3 "rapport illisible : $REPORT" "unreadable report: $REPORT"
+if [ -n "$KEY" ] && [ -n "$FETCH" ]; then die 3 "--key et --fetch-key sont incompatibles" "--key and --fetch-key cannot be combined"; fi
+[ -n "$KEY" ] || [ -n "$FETCH" ] || die 3 "clé publique requise : --key, ou --fetch-key avec --key-fingerprint" "public key required: --key, or --fetch-key with --key-fingerprint"
+if [ -n "$EXPECT_FP" ]; then
+  printf '%s' "$EXPECT_FP" | grep -Eq '^[0-9a-f]{64}$' || die 3 "--key-fingerprint attend 64 caractères hexadécimaux en minuscules" "--key-fingerprint expects 64 lowercase hexadecimal characters"
+fi
+[ -z "$FETCH" ] || [ -n "$EXPECT_FP" ] || die 3 "--fetch-key exige --key-fingerprint (une clé n'est jamais acceptée sans son empreinte)" "--fetch-key requires --key-fingerprint (a key is never accepted without its fingerprint)"
+if [ -n "$COMMIT" ]; then
+  printf '%s' "$COMMIT" | grep -Eq '^[0-9a-f]{7,64}$' || die 3 "--commit attend une empreinte de commit (7 à 64 caractères hexadécimaux)" "--commit expects a commit hash (7 to 64 hexadecimal characters)"
+fi
+command -v openssl >/dev/null 2>&1 || die 3 "openssl est requis" "openssl is required"
+
+TMP=$(mktemp -d 2>/dev/null) || die 3 "mktemp a échoué" "mktemp failed"
+trap 'rm -rf "$TMP"' EXIT
+trap 'exit 3' HUP INT TERM
+umask 077
+
+# Champ texte de l'enveloppe (une seule occurrence exigée, caractères permis seulement).
+field() {
+  # field <nom> <classe de caractères>
+  n=$(grep -o "\"$1\":\"[$2]*\"" "$REPORT" | wc -l | tr -d ' ')
+  [ "$n" = 1 ] || return 1
+  grep -o "\"$1\":\"[$2]*\"" "$REPORT" | sed "s/^\"$1\":\"//; s/\"\$//"
+}
+bad() {
+  say "scanoria-verify: RAPPORT INVALIDE : $1" "scanoria-verify: INVALID REPORT: $2" >&2
+  exit 1
+}
+
+size=$(wc -c < "$REPORT" | tr -d ' ')
+[ "$size" -le 8388608 ] || bad "fichier trop gros" "file too large"
+[ "$(wc -l < "$REPORT" | tr -d ' ')" -le 1 ] || bad "enveloppe sur plusieurs lignes" "envelope spans several lines"
+schema=$(field schema 'a-z0-9/.-') || bad "schéma d'enveloppe absent" "envelope schema missing"
+[ "$schema" = scanoria-signed-release-report/1 ] || bad "schéma d'enveloppe inattendu : $schema" "unexpected envelope schema: $schema"
+payload=$(field payload 'A-Za-z0-9+/=') || bad "contenu signé absent" "signed content missing"
+digest=$(field payload_sha256 '0-9a-f') || bad "empreinte absente" "digest missing"
+sig=$(field signature 'A-Za-z0-9+/=') || bad "signature absente" "signature missing"
+keyfp=$(field key_fingerprint '0-9a-f') || bad "empreinte de clé absente" "key fingerprint missing"
+printf '%s' "$digest" | grep -Eq '^[0-9a-f]{64}$' || bad "empreinte mal formée" "malformed digest"
+printf '%s' "$keyfp" | grep -Eq '^[0-9a-f]{64}$' || bad "empreinte de clé mal formée" "malformed key fingerprint"
+printf '%s' "$sig" | grep -Eq '^[A-Za-z0-9+/]{86}==$' || bad "signature mal formée" "malformed signature"
+
+# Octets signés : base64 décodé, puis réencodé à l'identique (aucune variante tolérée).
+printf '%s' "$payload" | openssl base64 -d -A > "$TMP/payload" 2>/dev/null || bad "contenu signé illisible" "unreadable signed content"
+[ "$(openssl base64 -A -in "$TMP/payload")" = "$payload" ] || bad "contenu signé mal encodé" "badly encoded signed content"
+actual=$(openssl dgst -sha256 -r "$TMP/payload" | cut -c1-64)
+[ "$actual" = "$digest" ] || bad "l'empreinte ne correspond pas au contenu signé" "the digest does not match the signed content"
+
+# Clé publique : fichier PEM, ou récupérée puis comparée à l'empreinte attendue.
+if [ -n "$FETCH" ]; then
+  case $FETCH in
+    https://*) ;;
+    *) die 3 "--fetch-key attend une adresse https://" "--fetch-key expects an https:// address" ;;
+  esac
+  command -v curl >/dev/null 2>&1 || die 3 "curl est requis pour --fetch-key" "curl is required for --fetch-key"
+  set -- -fsS --max-time 30 -o "$TMP/key.json"
+  if [ -n "$CACERT" ]; then
+    [ -r "$CACERT" ] || die 3 "AC illisible : $CACERT" "unreadable CA: $CACERT"
+    set -- "$@" --cacert "$CACERT"
+  fi
+  curl "$@" "$FETCH" 2>"$TMP/err" || die 3 "clé injoignable : $(head -c 200 "$TMP/err")" "key unreachable: $(head -c 200 "$TMP/err")"
+  pub=$(grep -o '"public_key":"[A-Za-z0-9+/]\{43\}="' "$TMP/key.json" | head -n 1 | sed 's/^"public_key":"//; s/"$//')
+  [ -n "$pub" ] || die 3 "réponse inattendue pour la clé" "unexpected key response"
+  # SubjectPublicKeyInfo Ed25519 : en-tête DER fixe suivi des 32 octets bruts.
+  printf '\060\052\060\005\006\003\053\145\160\003\041\000' > "$TMP/key.der"
+  printf '%s' "$pub" | openssl base64 -d -A >> "$TMP/key.der" 2>/dev/null || die 3 "clé illisible" "unreadable key"
+  openssl pkey -pubin -inform DER -in "$TMP/key.der" -out "$TMP/key.pem" 2>/dev/null || die 3 "clé illisible" "unreadable key"
+  KEY=$TMP/key.pem
+else
+  [ -r "$KEY" ] || die 3 "clé illisible : $KEY" "unreadable key: $KEY"
+fi
+openssl pkey -pubin -in "$KEY" -outform DER -out "$TMP/pub.der" 2>/dev/null || die 3 "clé publique illisible (PEM attendu)" "unreadable public key (PEM expected)"
+[ "$(wc -c < "$TMP/pub.der" | tr -d ' ')" = 44 ] && [ "$(head -c 12 "$TMP/pub.der" | openssl dgst -sha256 -r | cut -c1-64)" = "$(printf '\060\052\060\005\006\003\053\145\160\003\041\000' | openssl dgst -sha256 -r | cut -c1-64)" ] \
+  || die 3 "la clé n'est pas une clé publique Ed25519" "the key is not an Ed25519 public key"
+fp=$(tail -c 32 "$TMP/pub.der" | openssl dgst -sha256 -r | cut -c1-64)
+if [ -n "$FETCH" ]; then info "scanoria-verify: clé obtenue, empreinte $fp" "scanoria-verify: key fetched, fingerprint $fp"; fi
+if [ -n "$EXPECT_FP" ] && [ "$fp" != "$EXPECT_FP" ]; then
+  bad "la clé obtenue n'a pas l'empreinte attendue ($fp)" "the key does not have the expected fingerprint ($fp)"
+fi
+[ "$fp" = "$keyfp" ] || bad "rapport signé par une autre clé ($keyfp)" "report signed by another key ($keyfp)"
+
+printf '%s' "$sig" | openssl base64 -d -A > "$TMP/sig" 2>/dev/null || bad "signature illisible" "unreadable signature"
+out=$(openssl pkeyutl -verify -pubin -inkey "$KEY" -rawin -in "$TMP/payload" -sigfile "$TMP/sig" 2>&1) || bad "signature invalide" "invalid signature"
+printf '%s' "$out" | grep -q 'Signature Verified Successfully' || bad "signature invalide" "invalid signature"
+
+# Rapport signé : forme canonique sur une ligne ; clés uniques au premier niveau.
+[ "$(grep -c '"schema":"scanoria-release-report/1"' "$TMP/payload")" = 1 ] || bad "schéma de rapport inattendu" "unexpected report schema"
+n=$(grep -o '"commit_sha":"[0-9a-f]*"' "$TMP/payload" | wc -l | tr -d ' ')
+[ "$n" = 1 ] || bad "commit analysé absent ou ambigu" "analysed commit missing or ambiguous"
+analysed=$(grep -o '"commit_sha":"[0-9a-f]*"' "$TMP/payload" | sed 's/^"commit_sha":"//; s/"$//')
+printf '%s' "$analysed" | grep -Eq '^[0-9a-f]{40,64}$' || bad "commit analysé mal formé" "malformed analysed commit"
+verdict=$(grep -o '"value":"\(passed\|failed\|inconclusive\)"' "$TMP/payload" | tail -n 1 | sed 's/^"value":"//; s/"$//')
+tag=$(grep -o '"tag":"[^"\\]*"' "$TMP/payload" | tail -n 1 | sed 's/^"tag":"//; s/"$//')
+
+info "scanoria-verify: signature valide (clé $fp)" "scanoria-verify: valid signature (key $fp)"
+info "scanoria-verify: release ${tag:-?}, commit $analysed, verdict ${verdict:-?}" "scanoria-verify: release ${tag:-?}, commit $analysed, verdict ${verdict:-?}"
+if [ -n "$COMMIT" ]; then
+  case $analysed in
+    "$COMMIT"*) ;;
+    *)
+      say "scanoria-verify: COMMIT DIFFÉRENT : le rapport porte sur $analysed, pas sur $COMMIT" "scanoria-verify: COMMIT DIFFERS: the report covers $analysed, not $COMMIT" >&2
+      exit 2 ;;
+  esac
+fi
+if [ "$REQUIRE_PASSED" = 1 ] && [ "$verdict" != passed ]; then
+  say "scanoria-verify: verdict « ${verdict:-?} » : release refusée" "scanoria-verify: verdict \"${verdict:-?}\": release refused" >&2
+  exit 4
+fi
+exit 0

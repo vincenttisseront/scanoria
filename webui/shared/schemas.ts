@@ -60,6 +60,7 @@ export const REQUEST_TYPES = [
   'prefetch-images',
   'validate-ruleset',
   'sign-attestation',
+  'sign-release-report',
 ] as const
 export type RequestType = (typeof REQUEST_TYPES)[number]
 
@@ -90,6 +91,8 @@ export const RESULT_CODES = [
   'E_RELAY_UNAVAILABLE', 'E_RELAY_TOKEN',
   'E_ATTEST_ENCODING', 'E_ATTEST_CANONICAL', 'E_ATTEST_DIGEST', 'E_ATTEST_STATEMENT',
   'E_ATTEST_SUBJECT', 'E_ATTEST_SCAN', 'E_ATTEST_VERDICT', 'E_ATTEST_KEY', 'E_ATTEST_REPORT',
+  // 0.8 (A, contrat 37) : signature par la clé de l'appliance (communs avec D).
+  'E_SIGN_TOO_LARGE', 'E_SIGN_ENCODING', 'E_SIGN_DIGEST', 'E_SIGN_CANONICAL', 'E_SIGN_SCHEMA', 'E_SIGN_SCAN', 'E_SIGN_KEY',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 
@@ -259,6 +262,13 @@ export const requestParamSchemas = {
     kind: z.literal('attestation'),
     sha256: z.string().regex(/^[0-9a-f]{64}$/),
     content_b64: z.string().min(4).max(87_384).regex(/^[A-Za-z0-9+/]+={0,2}$/),
+  }),
+  // 0.8 (A, contrat 37) : rapport de release canonique à signer, porté en entier (4 Mio au plus).
+  'sign-release-report': z.strictObject({
+    scan_id: uuidSchema,
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    kind: z.literal('release-report'),
+    content_b64: z.string().min(4).max(5592408).regex(/^[A-Za-z0-9+/]+={0,2}$/),
   }),
 } satisfies Record<RequestType, z.ZodType>
 

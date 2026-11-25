@@ -19,6 +19,12 @@ import {
 } from '#shared/schemas'
 
 export const MAX_REQUEST_BYTES = 128 * 1024
+/** 0.8 (contrat 37) : seuls les types de signature portent un contenu de 4 Mio (base64 compris). */
+export const LARGE_REQUEST_BYTES: Partial<Record<RequestType, number>> = { 'sign-release-report': 6 * 1024 * 1024 }
+
+export function maxRequestBytes(type: RequestType | null | undefined): number {
+  return (type && LARGE_REQUEST_BYTES[type]) || MAX_REQUEST_BYTES
+}
 
 export interface Requester {
   userId: number
@@ -59,6 +65,11 @@ export function sanitizeParams(type: RequestType, params: Record<string, unknown
       chain_provided: typeof params.chain_pem === 'string',
     }
   }
+  if (type === 'sign-release-report') {
+    // Jamais le contenu en base : il est déjà dans release_reports (empreinte et taille seulement).
+    const { content_b64, ...rest } = params
+    return { ...rest, content_bytes: typeof content_b64 === 'string' ? Math.floor(content_b64.length * 3 / 4) : 0 }
+  }
   return { ...params }
 }
 
@@ -98,9 +109,9 @@ export function validateParams<T extends RequestType>(type: T, params: unknown):
 }
 
 /** Écrit atomiquement le fichier de demande : tmp/<nom>.part puis incoming/<nom>. */
-export async function writeRequestFile(requestsDir: string, fileName: string, content: string): Promise<void> {
+export async function writeRequestFile(requestsDir: string, fileName: string, content: string, maxBytes = MAX_REQUEST_BYTES): Promise<void> {
   if (!REQUEST_FILE_RE.test(fileName)) throw new Error('invalid request file name')
-  if (Buffer.byteLength(content, 'utf8') > MAX_REQUEST_BYTES) throw new RequestTooLargeError()
+  if (Buffer.byteLength(content, 'utf8') > maxBytes) throw new RequestTooLargeError()
   const partPath = join(requestsDir, 'tmp', `${fileName}.part`)
   const finalPath = join(requestsDir, 'incoming', fileName)
   const handle = await open(partPath, 'wx', 0o600)
@@ -147,7 +158,7 @@ export async function submitRequest<T extends RequestType>(
   const params = validateParams(type, rawParams)
   const envelope = buildEnvelope(type, params, requester, now)
   const content = `${JSON.stringify(envelope)}\n`
-  if (Buffer.byteLength(content, 'utf8') > MAX_REQUEST_BYTES) throw new RequestTooLargeError()
+  if (Buffer.byteLength(content, 'utf8') > maxRequestBytes(type)) throw new RequestTooLargeError()
   const fileName = requestFileName(envelope.created_at, envelope.id)
   await db.query(
     `INSERT INTO helper_requests (id, type, origin, file_name, requested_by, params, status, created_at)
@@ -162,7 +173,7 @@ export async function submitRequest<T extends RequestType>(
     ],
   )
   try {
-    await writeRequestFile(requestsDir, fileName, content)
+    await writeRequestFile(requestsDir, fileName, content, maxRequestBytes(type))
   }
   catch (err) {
     await db.query(

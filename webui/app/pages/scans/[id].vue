@@ -223,6 +223,12 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
                 :to="`/scans/${scan.replay_of}`"
                 class="text-primary"
               >({{ t('scans.replayOf') }})</NuxtLink>
+              <NuxtLink
+                v-if="scan.trigger === 'release'"
+                :to="`/releases/${scan.id}`"
+                class="text-primary"
+                data-testid="scan-release-link"
+              >({{ t('releases.open') }})</NuxtLink>
             </dd>
           </div>
           <div>

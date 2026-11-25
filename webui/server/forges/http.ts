@@ -316,10 +316,15 @@ export interface ForgeSendOptions {
   json?: unknown
   /** Statuts attendus en plus de 2xx (ex. 404 pour « déjà supprimé »). */
   allowStatus?: number[]
+  /** 0.8 (A) : corps binaire (fichier d'une release), à la place de json, borné par MAX_UPLOAD_BYTES. */
+  bytes?: { data: Buffer, contentType: string }
 }
 
 /** Corps envoyé au plus : un commentaire ou une revue, jamais un fichier. */
 export const MAX_SEND_BYTES = 512 * 1024
+/** 0.8 (A) : fichier joint à une release (rapport signé, SARIF fusionné, SBOM). */
+export const MAX_UPLOAD_BYTES = 32 * 1024 * 1024
+const CONTENT_TYPE_RE = /^[a-z0-9.+-]+\/[a-z0-9.+-]+(; ?[a-z]+=[A-Za-z0-9._-]{1,70})?$/
 
 /**
  * Écriture authentifiée (statut de commit, commentaire, revue, webhook) : mêmes
@@ -329,15 +334,18 @@ export const MAX_SEND_BYTES = 512 * 1024
 export async function forgeSend(url: string, req: ForgeRequest, opts: ForgeSendOptions): Promise<ForgeResponse> {
   const target = new URL(url)
   if (target.protocol !== 'https:' || target.username || target.password) throw new ForgeError('E_FORGE_URL')
-  const payload = opts.json === undefined ? undefined : Buffer.from(JSON.stringify(opts.json), 'utf8')
-  if (payload && payload.length > MAX_SEND_BYTES) throw new ForgeError('E_FORGE_INPUT')
+  if (opts.bytes && (opts.json !== undefined || opts.bytes.data.length > MAX_UPLOAD_BYTES || !CONTENT_TYPE_RE.test(opts.bytes.contentType))) {
+    throw new ForgeError('E_FORGE_INPUT')
+  }
+  const payload = opts.bytes ? opts.bytes.data : opts.json === undefined ? undefined : Buffer.from(JSON.stringify(opts.json), 'utf8')
+  if (payload && !opts.bytes && payload.length > MAX_SEND_BYTES) throw new ForgeError('E_FORGE_INPUT')
   const headers: Record<string, string> = {
     'accept': req.accept ?? 'application/json',
     'user-agent': 'scanoria-console',
     ...req.headers,
   }
   if (payload) {
-    headers['content-type'] = 'application/json'
+    headers['content-type'] = opts.bytes ? opts.bytes.contentType : 'application/json'
     headers['content-length'] = String(payload.length)
   }
   if (req.token) headers.authorization = `${req.authScheme} ${req.token}`

@@ -282,6 +282,20 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
       { scan_id: '0b7c2f0e-9a4d-4c1e-8f3a-2d5b6c7d8e9f', kind: 'attestation', sha256: 'c'.repeat(64), content_b64: 'A'.repeat(87_388) },
     ],
   },
+  'sign-release-report': {
+    valid: [
+      { scan_id: ID, sha256: 'a'.repeat(64), kind: 'release-report', content_b64: 'eyJ9' },
+      { scan_id: ID, sha256: 'b'.repeat(64), kind: 'release-report', content_b64: 'e30=' },
+    ],
+    invalid: [
+      {}, { scan_id: ID, sha256: 'a'.repeat(64), kind: 'release-report' },
+      { scan_id: ID, sha256: 'a'.repeat(64), kind: 'attestation', content_b64: 'e30=' },
+      { scan_id: ID, sha256: 'A'.repeat(64), kind: 'release-report', content_b64: 'e30=' },
+      { scan_id: '../x', sha256: 'a'.repeat(64), kind: 'release-report', content_b64: 'e30=' },
+      { scan_id: ID, sha256: 'a'.repeat(64), kind: 'release-report', content_b64: 'e30=\n' },
+      { scan_id: ID, sha256: 'a'.repeat(64), kind: 'release-report', content_b64: 'e30=', signature: 'x' },
+    ],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {
