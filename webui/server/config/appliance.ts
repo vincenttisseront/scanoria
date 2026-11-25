@@ -22,6 +22,13 @@ import { findLoosening, mergeAll, parseLocks } from '../profiles/locks'
 import { builtinIds, createProject } from '../projects/service'
 import { parseSafeYaml, type ConfigIssue } from './yaml'
 
+/** Adresse de dépôt : https://…, ssh://utilisateur@hôte[:port]/chemin ou utilisateur@hôte:chemin (motifs sans retour arrière). */
+function isRepoUrl(v: string): boolean {
+  if (v.startsWith('https://')) return /^https:\/\/[^?#@\s]+$/.test(v)
+  if (v.startsWith('ssh://')) return /^ssh:\/\/[\w.-]+@[A-Za-z0-9.-]+(?::\d{1,5})?\/[^?#\s]+$/.test(v)
+  return /^[\w.-]+@[A-Za-z0-9.-]+:[^?#\s]+$/.test(v)
+}
+
 export const APPLIANCE_CONFIG_VERSION = 1
 export const APPLIANCE_CONFIG_MAX_BYTES = 8 * 1024 * 1024
 
@@ -76,7 +83,7 @@ const projectSchema = z.strictObject({
   forge: z.string().min(1).max(100).nullable().default(null),
   repo_full_name: z.string().regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)+$/).nullable().default(null),
   /** URL sans identifiant (jamais user:motdepasse@) ; SSH « git@hôte:chemin » admis. */
-  repo_url: z.string().max(512).regex(/^(https:\/\/[^?#@\s]+|ssh:\/\/[A-Za-z0-9._-]+@[^?#\s:]+(:[0-9]+)?\/[^?#\s]+|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^?#\s]+)$/).nullable().default(null),
+  repo_url: z.string().max(512).refine(isRepoUrl).nullable().default(null),
   default_branch: z.string().min(1).max(255).nullable().default(null),
   tracked_branches: z.array(z.string().min(1).max(255)).max(50).default([]),
   schedule: z.enum(['none', 'daily', 'on-commit']).default('on-commit'),

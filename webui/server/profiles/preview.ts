@@ -140,9 +140,9 @@ export async function previewProfile(db: Queryable, input: ProfilePreviewInput, 
     coverage = wanted
       ? {
           project_id: input.project_id, detected: true,
-          covered: wanted.filter(c => got.has(c)).sort(),
-          uncovered: wanted.filter(c => !got.has(c)).sort(),
-          unused: effective.categories.filter(c => !wanted.includes(c)).sort(),
+          covered: wanted.filter(c => got.has(c)).sort((a, b) => a.localeCompare(b)),
+          uncovered: wanted.filter(c => !got.has(c)).sort((a, b) => a.localeCompare(b)),
+          unused: effective.categories.filter(c => !wanted.includes(c)).sort((a, b) => a.localeCompare(b)),
         }
       : { project_id: input.project_id, detected: false, covered: [], uncovered: [], unused: [] }
   }

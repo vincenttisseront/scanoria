@@ -202,10 +202,7 @@ describe.skipIf(!DATABASE_URL)('configuration en code (PostgreSQL réel)', () =>
     })
 
     it('aperçu des écarts, empreinte exigée, application auditée', async () => {
-      const changed = exported
-        .replace('slug: equipe\n', 'slug: equipe\n')
-        .concat('')
-      const doc = changed.replace(/(slug: equipe\n(?:.*\n)*?\s+description: )null/, '$1Équipe web')
+      const doc = exported.replace(/(slug: equipe\n(?:.*\n)*?\s+description: )null/, '$1Équipe web')
       const withNew = doc.replace('profiles:\n', 'profiles:\n  - slug: importe\n    level: enterprise\n    parent: null\n    categories: [sca]\n    include_modules: []\n    exclude_modules: []\n    description: null\n    locks: {}\n    rulesets: []\n')
       const p = await h.call('/api/config/import/preview', { method: 'POST', client: admin, json: { yaml: withNew } })
       expect(p.status, JSON.stringify(p.data)).toBe(200)

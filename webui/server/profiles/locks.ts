@@ -60,7 +60,9 @@ export function stricter<K extends keyof GateRules>(key: K, a: GateRules[K], b: 
   return compareStrictness(key, a, b) <= 0 ? a : b
 }
 
-const uniqueSorted = <T extends string>(xs: T[]) => [...new Set(xs)].sort()
+/** Ordre des points de code (identique à sort() sans argument), stable entre locales. */
+const byCodePoint = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+const uniqueSorted = <T extends string>(xs: T[]) => [...new Set(xs)].sort(byCodePoint)
 
 /** Fusionne deux verrous (parent puis enfant) : exigences additionnées, plancher le plus strict. */
 export function mergeLocks(parent: ProfileLocks, child: ProfileLocks): ProfileLocks {

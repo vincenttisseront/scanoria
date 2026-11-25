@@ -104,7 +104,8 @@ fi
 cases=$(find "$C" -name '*.yml' | wc -l)
 echo "b33 : $cases fichiers piégés"
 cd "$ROOT/webui"
-B33_CORPUS="$C" npx --no-install vitest run --project server tests/unit/config-hostile.test.ts --reporter=verbose 2>&1 | tee "$TMP/vitest.log" | grep -E '^\s+(✓|×)|Tests ' || true
+# Sortie sans couleurs (la CI force les couleurs) : codes ANSI retirés avant le décompte.
+B33_CORPUS="$C" NO_COLOR=1 FORCE_COLOR=0 npx --no-install vitest run --project server tests/unit/config-hostile.test.ts --reporter=verbose 2>&1 | sed -E 's/\x1b\[[0-9;]*m//g' | tee "$TMP/vitest.log" | grep -E '^\s+(✓|×)|Tests ' || true
 if ! grep -qE 'Tests +[0-9]+ passed' "$TMP/vitest.log" || grep -qE '[0-9]+ failed' "$TMP/vitest.log"; then
 	cat "$TMP/vitest.log" >&2
 	echo "b33 : ÉCHEC"

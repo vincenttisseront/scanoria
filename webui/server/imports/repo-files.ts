@@ -309,8 +309,10 @@ function sonarProperties(text: string, until: string): ParsedImport {
     }
     cont = ''
     if (!l || l.startsWith('#') || l.startsWith('!')) continue
-    const m = /^([^=:\s]+)\s*[=:]\s*(.*)$/.exec(l)
-    if (m) props.set(m[1]!, m[2]!)
+    // clé = valeur (ou clé : valeur), découpée au premier séparateur, sans expression régulière.
+    const sep = l.search(/[=:]/)
+    const k = sep > 0 ? l.slice(0, sep).trim() : ''
+    if (k && !/\s/.test(k)) props.set(k, l.slice(sep + 1).trim())
   }
   // sonar.coverage.exclusions ne touche que la couverture de tests : sans effet sur les résultats, non repris.
   const key = 'sonar.exclusions'
@@ -356,10 +358,11 @@ function yamlList(file: string, text: string, key: string | string[], tool: stri
 
 /** .bandit : INI (« [bandit] skips = B101,B602 ») ou YAML (« skips: [B101] »). */
 function banditConfig(text: string, until: string): ParsedImport {
-  const ini = /^\s*skips\s*[=:]\s*(.+)$/m.exec(text)
-  if (ini && !/^\s*\[/.test(ini[1]!)) {
+  const line = lines(text).map(l => l.trim()).find(l => /^skips[ \t]*[=:]/.test(l))
+  const value = line ? line.slice(line.search(/[=:]/) + 1).trim() : ''
+  if (value && !value.startsWith('[')) {
     const out: ParsedImport = { requests: [], unsupported: [] }
-    for (const r of ini[1]!.split(',').map(s => s.trim()).filter(Boolean).slice(0, 200)) {
+    for (const r of value.split(',').map(s => s.trim()).filter(Boolean).slice(0, 200)) {
       if (/^B\d{3}$/.test(r)) out.requests.push(ruleReq(r, 'bandit', '.bandit', until, 'skips'))
       else out.unsupported.push({ source: '.bandit', entry: r.slice(0, 64) })
     }
