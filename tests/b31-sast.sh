@@ -321,8 +321,8 @@ expect "gitleaks : un seul jeu (GITLEAKS_CONFIG)" "$(jq -r '."gl-two"' <<< "$RS"
 	'E_RULESET_INVALID {"GITLEAKS_CONFIG":"/rules/g1/gitleaks.toml"}'
 expect "KICS : identifiant .., clé inconnue, liste vide ou trop longue, doublon, JSON invalide" \
 	"$(jq -r '[."kics-badid", ."kics-extra", ."kics-empty", ."kics-many", ."kics-dup", ."kics-notjson"] | unique | join(",")' <<< "$RS")" E_RULESET_INVALID
-expect "montage : KICS dépliés en requêtes, fichiers 0644" "$(jq -c .staged <<< "$RS")" \
-	'["k/interne-1/metadata.json:644","k/interne-1/query.rego:644","o/rules.yaml:644"]'
+expect "montage : KICS dépliés en requêtes, fichiers 0600 donnés au conteneur" "$(jq -c .staged <<< "$RS")" \
+	'["k/interne-1/metadata.json:600","k/interne-1/query.rego:600","o/rules.yaml:600"]'
 
 R=$(python3 -I - "$PYLIB" <<-'EOF'
 	import json, sys

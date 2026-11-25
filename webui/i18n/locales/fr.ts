@@ -2302,6 +2302,7 @@ export default {
   },
   rulesets: {
     nav: 'Jeux de règles',
+    columns: { actions: 'Actions', details: 'Détails' },
     title: 'Jeux de règles',
     help: 'Règles Opengrep ou Semgrep, configuration gitleaks, politiques Checkov et requêtes KICS, versionnées et partagées entre profils (G4). Chaque version est validée par son moteur dans le conteneur confiné du module, jamais sur l’appliance elle-même.',
     readOnly: 'Lecture seule : seuls les administrateurs modifient les jeux de règles.',

@@ -101,7 +101,7 @@ async function readFileInput(ev: Event) {
     return
   }
   form.content = await file.text()
-  if (!form.slug) form.slug = file.name.toLowerCase().replace(/\.[a-z0-9]+$/, '').replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63)
+  if (!form.slug) form.slug = file.name.toLowerCase().replace(/\.[a-z0-9]+$/, '').replace(/[^a-z0-9-]+/g, '-').split('-').filter(Boolean).join('-').slice(0, 63)
   if (!form.name) form.name = file.name.slice(0, 200)
 }
 
@@ -345,18 +345,23 @@ async function create() {
               class="w-full"
             />
           </UFormField>
-          <UFormField
+          <div
             v-if="form.mode === 'import'"
-            :label="t('rulesets.create.file')"
+            class="space-y-1"
           >
+            <label
+              for="ruleset-file"
+              class="block text-sm font-medium"
+            >{{ t('rulesets.create.file') }}</label>
             <input
+              id="ruleset-file"
               type="file"
               accept=".yaml,.yml,.toml,.json,.txt"
               class="text-sm"
               data-testid="ruleset-file"
               @change="readFileInput"
             >
-          </UFormField>
+          </div>
           <UFormField
             :label="t('rulesets.create.content')"
             :help="t(`rulesets.formats.${form.engine}`)"

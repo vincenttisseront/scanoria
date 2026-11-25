@@ -26,6 +26,6 @@ export default defineEventHandler(async (event) => {
     items: content === null
       ? []
       : [{ slug: 'scanoria-base', engine: 'opengrep', license: 'AGPL-3.0-or-later', sha256: sha256Hex(content), content,
-          rules: (content.match(/^\s*-\s+id:\s*\S+/gm) ?? []).length }],
+          rules: (content.match(/^[ \t]*-[ \t]+id:[ \t]*\S/gm) ?? []).length }],
   }
 })

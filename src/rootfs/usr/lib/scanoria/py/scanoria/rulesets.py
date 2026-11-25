@@ -37,8 +37,8 @@ SLUG_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,62}\Z")
 SHA_RE = re.compile(r"[0-9a-f]{64}\Z")
 KICS_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z")
 # gitleaks : [extend] path = "…" ou url = "…" lirait un autre fichier ; useDefault seul est permis.
-GITLEAKS_EXTEND_RE = re.compile(r"(?m)^\s*\[\s*extend\s*\]\s*$")
-GITLEAKS_INCLUDE_RE = re.compile(r"(?m)^\s*(path|url)\s*=")
+GITLEAKS_EXTEND_RE = re.compile(r"(?m)^[ \t]*\[[ \t]*extend[ \t]*\][ \t]*$")
+GITLEAKS_INCLUDE_RE = re.compile(r"(?m)^[ \t]*(path|url)[ \t]*=")
 RESERVED = ("scanoria-base",)
 
 E_INVALID = "E_RULESET_INVALID"
@@ -118,13 +118,13 @@ def check_content(engine, data):
     if engine == "gitleaks" and GITLEAKS_EXTEND_RE.search(text):
         # La section [extend] ne peut que reprendre la configuration par défaut.
         sect = text[GITLEAKS_EXTEND_RE.search(text).end():]
-        nxt = re.search(r"(?m)^\s*\[", sect)
+        nxt = re.search(r"(?m)^[ \t]*\[", sect)
         if GITLEAKS_INCLUDE_RE.search(sect[:nxt.start()] if nxt else sect):
             raise Fail(E_INVALID, "gitleaks [extend] may only use useDefault, never path or url")
-    if engine in ("opengrep", "semgrep") and not re.search(r"(?m)^rules\s*:", text):
+    if engine in ("opengrep", "semgrep") and not re.search(r"(?m)^rules[ \t]*:", text):
         raise Fail(E_INVALID, "%s ruleset needs a top-level rules: key" % engine)
-    if engine == "checkov" and not (re.search(r"(?m)^\s*-?\s*metadata\s*:", text)
-                                    and re.search(r"(?m)^\s*definition\s*:", text)):
+    if engine == "checkov" and not (re.search(r"(?m)^[ \t]*(?:-[ \t]*)?metadata[ \t]*:", text)
+                                    and re.search(r"(?m)^[ \t]*definition[ \t]*:", text)):
         raise Fail(E_INVALID, "checkov policy needs metadata: and definition:")
     if engine == "kics":
         kics_queries(data)
@@ -164,29 +164,27 @@ def load(item, manifest, base):
 
 
 def _write(path, data):
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "wb") as f:
         f.write(data)
 
 
 def stage(rulesets, dest):
-    """Pose les jeux sous dest/<slug>/ (dest neuf), lisibles par le conteneur."""
-    os.mkdir(dest, 0o755)
+    """Pose les jeux sous dest/<slug>/ (dest neuf), donnés à l'utilisateur du conteneur seul."""
+    from . import testbed
+    os.mkdir(dest, 0o700)
     for r in rulesets:
         d = os.path.join(dest, r["slug"])
-        os.mkdir(d, 0o755)
+        os.mkdir(d, 0o700)
         if r["engine"] == "kics":
             for qid, meta, rego in kics_queries(r["data"]):
                 q = os.path.join(d, qid)
-                os.mkdir(q, 0o755)
+                os.mkdir(q, 0o700)
                 _write(os.path.join(q, "metadata.json"), meta.encode("utf-8"))
                 _write(os.path.join(q, "query.rego"), rego.encode("utf-8"))
         else:
             _write(os.path.join(d, FILE_OF[r["engine"]]), r["data"])
-    for root, dirs, files in os.walk(dest):
-        os.chmod(root, 0o755)
-        for f in files:
-            os.chmod(os.path.join(root, f), 0o644)
+    testbed._give_to_container(dest)
     return dest
 
 
@@ -300,10 +298,9 @@ def act_validate_ruleset(c):
     os.mkdir(work, 0o700)
     try:
         src, out = os.path.join(work, "src"), os.path.join(work, "out")
-        os.mkdir(src, 0o755)
+        os.mkdir(src, 0o700)
         for s in samples:
             _write(os.path.join(src, s["name"]), s["content"].encode("utf-8"))
-            os.chmod(os.path.join(src, s["name"]), 0o644)
         # Comme au banc d'essai : les exemples sont à l'utilisateur du conteneur
         # (le masque du helper rendrait src illisible pour lui).
         testbed._give_to_container(src)

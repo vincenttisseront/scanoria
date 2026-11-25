@@ -41,8 +41,8 @@ export class RulesetError extends Error {
 
 export const sha256Hex = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex')
 
-const GITLEAKS_EXTEND_RE = /^\s*\[\s*extend\s*\]\s*$/m
-const GITLEAKS_INCLUDE_RE = /^\s*(path|url)\s*=/m
+const GITLEAKS_EXTEND_RE = /^[ \t]*\[[ \t]*extend[ \t]*\][ \t]*$/m
+const GITLEAKS_INCLUDE_RE = /^[ \t]*(path|url)[ \t]*=/m
 const KICS_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/
 
 /**
@@ -57,16 +57,16 @@ export function staticIssues(engine: RulesetEngine, content: string): string[] {
   if (content.includes('\u0000')) issues.push('nul-byte')
   if (content.includes('�')) issues.push('not-utf8')
   if (engine === 'opengrep' || engine === 'semgrep') {
-    if (!/^rules\s*:/m.test(content)) issues.push('missing-rules-key')
+    if (!/^rules[ \t]*:/m.test(content)) issues.push('missing-rules-key')
   }
   else if (engine === 'checkov') {
-    if (!/^\s*-?\s*metadata\s*:/m.test(content) || !/^\s*definition\s*:/m.test(content)) issues.push('missing-policy-keys')
+    if (!/^[ \t]*(?:-[ \t]*)?metadata[ \t]*:/m.test(content) || !/^[ \t]*definition[ \t]*:/m.test(content)) issues.push('missing-policy-keys')
   }
   else if (engine === 'gitleaks') {
     const m = GITLEAKS_EXTEND_RE.exec(content)
     if (m) {
       const rest = content.slice(m.index + m[0].length)
-      const next = /^\s*\[/m.exec(rest)
+      const next = /^[ \t]*\[/m.exec(rest)
       if (GITLEAKS_INCLUDE_RE.test(next ? rest.slice(0, next.index) : rest)) issues.push('gitleaks-extend-include')
     }
   }

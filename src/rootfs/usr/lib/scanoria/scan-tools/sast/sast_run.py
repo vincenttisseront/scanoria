@@ -31,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 TOOL_VERSION = "1.0.0"
 SRC = "/src"
@@ -227,7 +228,7 @@ def grep_configs(engine, builtin):
     return files
 
 
-GREP_WORK = "/tmp/sast-rules"
+GREP_WORK = os.path.join(tempfile.gettempdir(), "sast-rules")
 
 
 def stage_configs(configs, work=None):
@@ -334,7 +335,7 @@ def checkov_external_dirs(work):
     return dirs, ids
 
 
-CHECKOV_WORK = "/tmp/checkov-rules"
+CHECKOV_WORK = os.path.join(tempfile.gettempdir(), "checkov-rules")
 
 
 def run_checkov(args):
@@ -488,7 +489,8 @@ SCORECARD_LOCAL_CHECKS = ("Binary-Artifacts", "Dangerous-Workflow", "Dependency-
                           "Pinned-Dependencies", "Security-Policy", "Token-Permissions")
 THRESHOLD_RULE = "scorecard/score-below-threshold"
 SEV_LEVEL = {"critical": "error", "high": "error", "medium": "warning", "low": "note", "info": "note"}
-DETAIL_PATH_RE = re.compile(r"^(?:Warn|Info|Debug): .*?([A-Za-z0-9._/@+-]+\.[A-Za-z0-9]+):(\d+)")
+DETAIL_PREFIXES = ("Warn: ", "Info: ", "Debug: ")
+DETAIL_PATH_RE = re.compile(r"([A-Za-z0-9._/@+-]{1,300}):(\d{1,7})")
 
 
 def parse_min_score(args):
@@ -507,11 +509,17 @@ def parse_min_score(args):
 def check_location(details):
     """Premier fichier cité par un détail « Warn: … chemin:ligne », s'il y en a un."""
     for d in details or []:
-        m = DETAIL_PATH_RE.match(d) if isinstance(d, str) else None
-        if m:
-            rel = rel_uri(m.group(1))
+        if not isinstance(d, str) or not d.startswith(DETAIL_PREFIXES):
+            continue
+        for m in DETAIL_PATH_RE.finditer(d[:2000]):
+            path = m.group(1)
+            ext = path.rsplit("/", 1)[-1].rpartition(".")
+            if not ext[1] or not ext[0] or not ext[2].isalnum():
+                continue
+            rel = rel_uri(path)
             if rel:
                 return rel, int(m.group(2)) or 1
+            break
     return None
 
 

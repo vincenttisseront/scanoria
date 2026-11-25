@@ -405,6 +405,19 @@ async function setArchived(archived: boolean) {
           v-else
           class="w-full text-sm"
         >
+          <thead class="sr-only">
+            <tr>
+              <th scope="col">
+                {{ t('rulesets.profiles.profile') }}
+              </th>
+              <th scope="col">
+                {{ t('rulesets.profiles.version') }}
+              </th>
+              <th scope="col">
+                {{ t('rulesets.columns.actions') }}
+              </th>
+            </tr>
+          </thead>
           <tbody>
             <tr
               v-for="(a, i) in draft"
@@ -467,6 +480,19 @@ async function setArchived(archived: boolean) {
           </h2>
         </template>
         <table class="w-full text-sm">
+          <thead class="sr-only">
+            <tr>
+              <th scope="col">
+                {{ t('rulesets.detail.version') }}
+              </th>
+              <th scope="col">
+                {{ t('rulesets.columns.details') }}
+              </th>
+              <th scope="col">
+                {{ t('rulesets.columns.actions') }}
+              </th>
+            </tr>
+          </thead>
           <tbody>
             <tr
               v-for="v in versions"

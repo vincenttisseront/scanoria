@@ -2302,6 +2302,7 @@ export default {
   },
   rulesets: {
     nav: 'Rulesets',
+    columns: { actions: 'Actions', details: 'Details' },
     title: 'Rulesets',
     help: 'Opengrep or Semgrep rules, gitleaks configuration, Checkov policies and KICS queries, versioned and shared between profiles (G4). Each version is validated by its engine inside the module’s confined container, never on the appliance itself.',
     readOnly: 'Read only: only administrators change rulesets.',
