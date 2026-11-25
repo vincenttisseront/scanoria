@@ -367,11 +367,6 @@ export function parsePlan(value: unknown): ScanPlan | null {
 }
 
 /**
- * 0.7 (D, contrat 33) : fichiers modifiés d'une analyse incrémentale de PR,
- * figés dans le plan (G11). Absents, trop nombreux ou analyse non
- * incrémentale : rien (analyse complète).
- */
-/**
  * 0.7 (K2, K4) : commit de base d'une analyse de PR (pull_request.base_sha),
  * transmis au runner pour les modules scan.pr_diff ; hors PR ou mal formé : rien.
  */
@@ -380,6 +375,11 @@ export function prBase(scan: { pull_request?: unknown }): string | undefined {
   return typeof base === 'string' && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(base) ? base : undefined
 }
 
+/**
+ * 0.7 (D, contrat 33) : fichiers modifiés d'une analyse incrémentale de PR,
+ * figés dans le plan (G11). Absents, trop nombreux ou analyse non
+ * incrémentale : rien (analyse complète).
+ */
 export function incrementalFiles(scan: { incremental?: boolean | null, pull_request?: unknown }): string[] | undefined {
   if (!scan.incremental) return undefined
   const files = (scan.pull_request as { changed_files?: unknown } | null)?.changed_files

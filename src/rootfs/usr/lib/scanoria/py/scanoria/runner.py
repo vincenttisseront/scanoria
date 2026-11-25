@@ -1038,6 +1038,8 @@ PR_DIFF_MOUNT = "/pr.diff"
 PR_DIFF_REASONS = {
     "too-large": "the pull request diff exceeds %d MiB: module not run" % (fetch.PR_DIFF_MAX_BYTES >> 20),
     "base-missing": "the base commit of the pull request could not be fetched: module not run",
+    "no-merge-base": "no common ancestor found between the pull request and its base: module not run",
+    "failed": "the pull request diff could not be computed: module not run",
 }
 
 

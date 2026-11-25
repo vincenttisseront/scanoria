@@ -1,3 +1,4 @@
+# Banc d'essai Scanoria : code volontairement vulnérable, jamais exécuté.
 import sqlite3
 
 

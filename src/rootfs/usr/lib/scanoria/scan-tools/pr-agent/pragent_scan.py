@@ -39,7 +39,8 @@ MAX_TITLE = 300
 MAX_PATH = 1024
 MAX_JSON_BYTES = 8 << 20
 CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
-DIFF_PATH_RE = re.compile(r"^\+\+\+ b/(.+)$", re.M)
+DIFF_PATH_RE = re.compile(r'^\+\+\+ (?:b/(.+)|"b/((?:[^"\\]|\\.)+)")$', re.M)
+C_ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\"}
 RULES = {
     "pr-agent/key-issue": ("Point à revoir dans la PR (PR-Agent)", "medium"),
     "pr-agent/security-concern": ("Préoccupation de sécurité dans la PR (PR-Agent)", "high"),
@@ -66,11 +67,36 @@ def clean_path(p, known):
         p = p[2:]
     if not p or p.startswith("/") or "\\" in p or any(s in ("", ".", "..") for s in p.split("/")):
         return None
-    return p if not known or p in known else None
+    return p if p in known else None
+
+
+def unquote(p):
+    """Chemin cité par git (« "b/…" », séquences C et octets en octal) → texte."""
+    out, i = bytearray(), 0
+    while i < len(p):
+        c = p[i]
+        if c == "\\" and i + 1 < len(p):
+            n = p[i + 1]
+            if re.fullmatch(r"[0-7]{3}", p[i + 1:i + 4]):
+                out.append(int(p[i + 1:i + 4], 8) & 0xFF)
+                i += 4
+                continue
+            out += C_ESCAPES.get(n, n).encode()
+            i += 2
+            continue
+        out += c.encode()
+        i += 1
+    return out.decode("utf-8", "replace")
 
 
 def diff_files(diff):
-    return {m.group(1).strip() for m in DIFF_PATH_RE.finditer(diff)}
+    """Fichiers de la PR d'après les en-têtes « +++ b/… » (cités ou non) du diff."""
+    found = set()
+    for m in DIFF_PATH_RE.finditer(diff):
+        p = m.group(1) if m.group(1) is not None else unquote(m.group(2))
+        if p.strip():
+            found.add(p.strip())
+    return found
 
 
 def load(path):

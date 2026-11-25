@@ -1,15 +1,15 @@
 [
   ["code", {"message": {"text": "User input is concatenated into an SQL query"}, "level": "error",
-    "locations": [{"physicalLocation": {"artifactLocation": {"uri": "/src/app.py"}, "region": {"startLine": 5, "endLine": 6}}}],
+    "locations": [{"physicalLocation": {"artifactLocation": {"uri": "/src/app.py"}, "region": {"startLine": 6, "endLine": 7}}}],
     "properties": {"type": "SQL Injection", "confidence": 9, "exploitable": true,
       "explanation": {"text": "name reaches db.execute without parameters"}}}],
   ["iac", {"message": {"text": "Bucket ACL grants public read and write"}, "level": "error",
-    "locations": [{"physicalLocation": {"artifactLocation": {"uri": "main.tf"}, "region": {"startLine": 3, "endLine": 3}}}],
+    "locations": [{"physicalLocation": {"artifactLocation": {"uri": "main.tf"}, "region": {"startLine": 4, "endLine": 4}}}],
     "properties": {"type": "Public Storage", "confidence": 8}}],
   ["risk_flagger", {"message": {"text": "New database query from user input"}, "level": "warning",
-    "locations": [{"physicalLocation": {"artifactLocation": {"uri": "app.py"}, "region": {"startLine": 5, "endLine": 5}}}],
+    "locations": [{"physicalLocation": {"artifactLocation": {"uri": "app.py"}, "region": {"startLine": 6, "endLine": 6}}}],
     "properties": {"risk_type": "Database Changes", "risk_severity": "medium", "explanation": "A query on users is added", "confidence": 8}}],
   ["code", {"message": {"text": "Path outside of the sources"}, "level": "error",
-    "locations": [{"physicalLocation": {"artifactLocation": {"uri": "/etc/passwd"}, "region": {"startLine": 1, "endLine": 1}}}],
+    "locations": [{"physicalLocation": {"artifactLocation": {"uri": "/etc/passwd"}, "region": {"startLine": 2, "endLine": 2}}}],
     "properties": {"type": "Escape", "confidence": 9}}]
 ]

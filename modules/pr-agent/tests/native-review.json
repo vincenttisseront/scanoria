@@ -8,8 +8,8 @@
         "relevant_file": "app.py\n",
         "issue_header": "Injection SQL\n",
         "issue_content": "La requ\u00eate concat\u00e8ne l'entr\u00e9e utilisateur.\n",
-        "start_line": 5,
-        "end_line": 6
+        "start_line": 6,
+        "end_line": 7
       }
     ],
     "security_concerns": "SQL injection: user input concatenated into a query.\n"

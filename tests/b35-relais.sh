@@ -517,14 +517,19 @@ G="$TMP/git"; mkdir -p "$G/forge" "$G/tt"
 	git config user.email essai@exemple.test && git config user.name essai
 	echo un > base.txt && printf '*.txt diff=piege\n' > .gitattributes && git add -A && git commit -qm base
 	git checkout -q -b pr && echo deux >> base.txt && echo 'print(1)' > app.py && git add -A && git commit -qm pr
+	# Base qui a avancé depuis l'ouverture de la PR (divergence) ; historique sans lien.
+	git checkout -q -b avance main && echo 'propre à main' > main.txt && git add -A && git commit -qm avance
+	git checkout -q --orphan orphelin && git rm -rqf . && echo seul > seul.txt && git add -A && git commit -qm orphelin
 ) > /dev/null
 BASE=$(git -C "$G/forge/depot" rev-parse main); HEAD_C=$(git -C "$G/forge/depot" rev-parse pr)
+AVANCE=$(git -C "$G/forge/depot" rev-parse avance); ORPHELIN=$(git -C "$G/forge/depot" rev-parse orphelin)
 cat > "$TMP/fetch-harness.py" <<'EOF'
 import json, os, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 from scanoria import fetch
 tt, mirror, src, prd, url, ref, want, base, limit = sys.argv[2:11]
-script = fetch.FETCH_SCRIPT.replace("-le %d" % fetch.PR_DIFF_MAX_BYTES, "-le " + limit)
+script = (fetch.FETCH_SCRIPT.replace("-gt %d" % fetch.PR_DIFF_MAX_BYTES, "-gt " + limit)
+          .replace("head -c %d" % (fetch.PR_DIFF_MAX_BYTES + 1), "head -c %d" % (int(limit) + 1)))
 for i, cpath in enumerate(("/tmp/", "/mirror", "/src", "/git", "/pr/")):
     script = script.replace(cpath, "\x00%d\x00" % i)
 for i, real in enumerate((tt + "/", mirror, src, src + "-git", prd + "/")):
@@ -553,6 +558,11 @@ grep -q '^+++ b/app.py$' "$G/p/pr.diff" && grep -q '^+deux$' "$G/p/pr.diff" && o
 [[ ! -e "$G/tt/piege-diff" && ! -e "$G/tt/piege-textconv" ]] && ok "diff de PR : pilote de diff du dépôt jamais lancé" || ko "diff de PR : pilote de diff lancé"
 R=$(prfetch "$BASE" 10)
 expect "diff de PR trop gros : non transmis" "$(jq -r .out <<< "$R" | grep -c '^scanoria=pr-diff-too-large$') $([[ -e "$G/p/pr.diff" || -e "$G/p/pr.diff.tmp" ]] && echo laissé || echo absent)" "1 absent"
+R=$(prfetch "$AVANCE" 4194304)
+expect "diff de PR, base divergente en clone superficiel : historique approfondi, point de divergence trouvé" "$(jq -r .rc <<< "$R") $(jq -r .out <<< "$R" | grep -c '^scanoria=pr-diff$')" "0 1"
+grep -q '^+++ b/app.py$' "$G/p/pr.diff" && ! grep -q 'main.txt' "$G/p/pr.diff" && ok "diff de PR : seulement les changements de la PR, jamais l'inverse de ceux de la base" || ko "diff de PR : base divergente mal traitée"
+R=$(prfetch "$ORPHELIN" 4194304)
+expect "base sans ancêtre commun : récupération réussie, aucun diff" "$(jq -r .rc <<< "$R") $(jq -r .out <<< "$R" | grep -c '^scanoria=pr-no-merge-base$') $([[ -e "$G/p/pr.diff" ]] && echo laissé || echo absent)" "0 1 absent"
 R=$(prfetch "$(printf 'b%.0s' {1..40})" 4194304)
 expect "base introuvable : récupération réussie quand même, sans diff" "$(jq -r .rc <<< "$R") $(jq -r .out <<< "$R" | grep -c '^scanoria=pr-base-missing$')" "0 1"
 R=$(prfetch "" 4194304)
@@ -578,6 +588,15 @@ print(len(r["results"]), locs, r["results"][0]["message"]["text"][:3], len(r["re
       r["results"][4]["locations"][0]["physicalLocation"]["region"], [x["ruleId"] for x in r["results"]].count("pr-agent/security-concern"),
       r["properties"]["scanoria/pr-agent"])' "$PA")" \
 	"50 [None, None, None, None, 'app.py', 'app.py'] h : True {'startLine': 9} 0 {'version': '1.0.0', 'effort': 3, 'description': {'title': 't', 'type': 'Bug fix'}}"
+cat > "$TMP/quoted.diff" <<'EOF'
++++ "b/r\303\251sum\303\251 \"x\".py"
++++ b/simple.py
++++ /dev/null
+EOF
+expect "PR-Agent : chemins cités par git reconnus, aucun chemin accepté sans en-tête de fichier" "$(python3 -I -B -c 'import runpy, sys
+g = runpy.run_path(sys.argv[1])
+print(sorted(g["diff_files"](open(sys.argv[2], encoding="utf-8").read())), g["clean_path"]("app.py", set()))' "$PA" "$TMP/quoted.diff")" \
+	"['résumé \"x\".py', 'simple.py'] None"
 expect "Fraim : sortie native → SARIF enregistré" "$(python3 -I -B -c 'import json, runpy, sys
 g = runpy.run_path(sys.argv[1]); d = sys.argv[2]
 res, rules = g["convert"]([tuple(x) for x in json.load(open(d + "/tests/native-results.json"))], "/src")
@@ -718,7 +737,7 @@ expect "Fraim : chemins relatifs aux sources" "$(jq -r '[.runs[0].results[].loca
 printf 'README.md\n' > "$ESS/changed.txt"; : > "$ESS/log.jsonl"; set +e
 SCANORIA_CHANGED_FILES="$ESS/changed.txt" tool "$FR" "$ESS/src" "$ESS/fr2.sarif"; rc1=$?
 set -e
-expect "Fraim : PR sans fichier concerné → SARIF vide, aucun workflow" "$rc1 $(jq -c '.runs[0].results | length' "$ESS/fr2.sarif") $(wc -l < "$ESS/log.jsonl")" "0 0 0"
+expect "Fraim : PR sans fichier concerné → rien à analyser, module écarté (3), aucun workflow" "$rc1 $([[ -e "$ESS/fr2.sarif" ]] && echo écrit || echo absent) $(wc -l < "$ESS/log.jsonl")" "3 absent 0"
 set +e
 ESSAI_LLM=down tool "$FR" "$ESS/src" "$ESS/fr3.sarif"; rc2=$?
 set -e

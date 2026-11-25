@@ -892,11 +892,14 @@ worker fige le commit de base (`pull_request.base_sha`) dans le plan
 (`source.pr_base`, G11) et le transmet au runner (`pr_base` de la tâche). Si
 un module du plan déclare `scan.pr_diff`, le conteneur de récupération
 (`fetch.FETCH_SCRIPT`) récupère aussi la base si le miroir ne l'a pas, puis
-écrit `git diff --no-ext-diff --no-textconv -M <merge-base> <tête>` (base
-seule si l'historique superficiel ne donne pas de merge-base) dans
-`ws/pr/pr.diff`, au plus 4 Mio. Le runner le monte en lecture seule sur
-`/pr.diff` (`SCANORIA_PR_DIFF`). `required` : hors PR, base introuvable ou diff
-trop gros, le module est `skipped` (`E_PR_DIFF_UNAVAILABLE`, classe `input`) ;
+écrit `git diff --no-ext-diff --no-textconv -M <merge-base> <tête>` dans
+`ws/pr/pr.diff`, au plus 4 Mio (écriture bornée). En clone superficiel,
+l'historique est approfondi en deux paliers (50 puis 1 000 commits) pour
+trouver le point de divergence ; sans lui, aucun diff (jamais base → tête,
+faux dès que la branche a divergé). Ces récupérations n'arrêtent jamais
+l'analyse. Le runner monte le diff en lecture seule sur
+`/pr.diff` (`SCANORIA_PR_DIFF`). `required` : hors PR, base ou point de
+divergence introuvable, diff trop gros, le module est `skipped` (`E_PR_DIFF_UNAVAILABLE`, classe `input`) ;
 `optional` : il tourne sans diff. Une sortie qui dépend du diff n'est jamais
 mise en cache (V4).
 

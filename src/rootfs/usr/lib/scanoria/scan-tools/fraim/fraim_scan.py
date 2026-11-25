@@ -25,7 +25,9 @@ indicateur de risque de la PR (plus haute gravité des risques relevés).
 
 Codes de sortie : 0 (SARIF écrit ; « partial » si une partie des appels au
 modèle a échoué), 2 (usage), 3 (aucun workflow n'a abouti, ou aucun appel au
-modèle n'a réussi : module « skipped », jamais une erreur G13).
+modèle n'a réussi, ou rien à analyser : module « skipped », jamais une
+erreur G13 ; litellm.acompletion est lu à chaque appel par Fraim 0.8.0,
+fraim/core/llms/litellm.py, d'où le comptage par remplacement de l'attribut).
 """
 
 import asyncio
@@ -258,9 +260,12 @@ def main(argv):
         use_diff_file(diff)
         plan.append(("risk_flagger", dict(base, diff=True, pr_url="", approver="", slack_webhook_url="",
                                           no_gh_comment=True)))
+    if not plan:
+        sys.stderr.write("fraim: nothing to analyse (no source, IaC or pull request diff)\n")
+        return 3
     count_llm_calls()
     found, ran, failed = asyncio.run(run_plan(plan))
-    if plan and not ran:
+    if not ran:
         sys.stderr.write("fraim: no workflow completed\n")
         return 3
     if CALLS["failed"] and not CALLS["ok"]:

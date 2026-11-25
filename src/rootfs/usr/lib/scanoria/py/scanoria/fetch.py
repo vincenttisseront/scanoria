@@ -349,20 +349,38 @@ if [ "$mode" = full ]; then
   printf '%s\n' "$commit" > /git/HEAD
 fi
 # 0.7 (K2, K4) : diff de la PR pour les modules scan.pr_diff, calculé ici sans
-# rien exécuter du dépôt (aucun pilote de diff, aucun textconv) ; base récupérée
-# à son tour si le miroir ne l'a pas. Échec : aucun diff, jamais une erreur.
+# rien exécuter du dépôt (aucun pilote de diff, aucun textconv). Base récupérée
+# si le miroir ne l'a pas, historique approfondi (deux paliers) tant que le
+# point de divergence manque : jamais de diff base → tête, faux dès que la
+# branche a divergé. Ces récupérations n'arrêtent jamais l'analyse : en échec,
+# aucun diff, et seuls les modules qui l'exigent sont écartés.
+prfetch() {
+  git fetch -q --no-tags --no-recurse-submodules --no-auto-gc "$@" "$url" "$base" "$commit" >/dev/null 2>&1 || true
+}
 if [ -n "$base" ]; then
   if ! have "$base"; then
-    if [ "$mode" = full ]; then depth=; else depth=--depth=1; fi
-    fetch "$base" || true
+    if [ "$mode" = full ]; then prfetch; else prfetch --depth=1; fi
   fi
   if have "$base"; then
-    mb=$(git merge-base "$base" "$commit" 2>/dev/null) || mb=$base
-    if git -c diff.noprefix=false diff --no-color --no-ext-diff --no-textconv -M "$mb" "$commit" > /pr/pr.diff.tmp 2>/tmp/diff.err \
-        && [ "$(wc -c < /pr/pr.diff.tmp)" -le PR_DIFF_MAX ]; then
-      mv /pr/pr.diff.tmp /pr/pr.diff; echo scanoria=pr-diff
+    mb=$(git merge-base "$base" "$commit" 2>/dev/null) || mb=
+    for d in 50 1000; do
+      [ -n "$mb" ] || [ ! -f /mirror/shallow ] && break
+      prfetch --deepen=$d
+      mb=$(git merge-base "$base" "$commit" 2>/dev/null) || mb=
+    done
+    if [ -z "$mb" ]; then
+      echo scanoria=pr-no-merge-base
     else
-      rm -f /pr/pr.diff.tmp; echo scanoria=pr-diff-too-large
+      rm -f /tmp/diff.failed
+      { git -c diff.noprefix=false -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv -M "$mb" "$commit" 2>/tmp/diff.err \
+          || : > /tmp/diff.failed; } | head -c PR_DIFF_LIMIT > /pr/pr.diff.tmp
+      if [ "$(wc -c < /pr/pr.diff.tmp)" -gt PR_DIFF_MAX_BYTES ]; then
+        rm -f /pr/pr.diff.tmp; echo scanoria=pr-diff-too-large
+      elif [ -f /tmp/diff.failed ]; then
+        rm -f /pr/pr.diff.tmp; echo scanoria=pr-diff-failed
+      else
+        mv /pr/pr.diff.tmp /pr/pr.diff; echo scanoria=pr-diff
+      fi
     fi
   else
     echo scanoria=pr-base-missing
@@ -373,7 +391,13 @@ echo "commit=$commit"
 
 # Diff de PR au-delà de cette taille : non transmis (le module est « skipped »).
 PR_DIFF_MAX_BYTES = 4 << 20
-FETCH_SCRIPT = FETCH_SCRIPT.replace("PR_DIFF_MAX", str(PR_DIFF_MAX_BYTES))
+# Écriture bornée (un octet de plus que la limite, pour la détecter) : un diff
+# énorme n'est jamais écrit en entier. Jetons substitués exacts, propres au script.
+FETCH_SCRIPT = (FETCH_SCRIPT.replace("PR_DIFF_LIMIT", str(PR_DIFF_MAX_BYTES + 1))
+                .replace("PR_DIFF_MAX_BYTES", str(PR_DIFF_MAX_BYTES)))
+
+PR_DIFF_STATES = {"pr-diff": "ok", "pr-diff-too-large": "too-large", "pr-base-missing": "base-missing",
+                  "pr-no-merge-base": "no-merge-base", "pr-diff-failed": "failed"}
 
 # Configuration imposée à chaque appel de git (variables GIT_CONFIG_*), en plus
 # de GIT_CONFIG_NOSYSTEM et GIT_CONFIG_GLOBAL=/dev/null : aucun hook, aucun
@@ -521,7 +545,7 @@ def fetch_git(job, ws, registry_modules, history, log_path, secrets, mirror=None
     created (premier clone) ou ephemeral. extra_memory_mb : taille du tmpfs de
     ws/src, dont les pages sont comptées au conteneur qui les écrit. pr_base
     (0.7, K2/K4) : commit de base d'une PR ; le diff est écrit dans ws/pr/pr.diff
-    et info["pr_diff"] reçoit ok, too-large ou base-missing."""
+    et info["pr_diff"] reçoit ok, too-large, base-missing, no-merge-base ou failed."""
     from . import gitmirror
     src = job["source"]
     host, port = parse_url(src["url"])
@@ -568,9 +592,9 @@ def fetch_git(job, ws, registry_modules, history, log_path, secrets, mirror=None
         raise SourceError("E_SOURCE_NOT_FOUND", "input", "requested commit not found")
     hit = re.search(r"^scanoria=mirror-hit$", out, re.M) is not None
     if pr_base:
-        diff = re.findall(r"^scanoria=(pr-diff|pr-diff-too-large|pr-base-missing)$", out, re.M)
-        info["pr_diff"] = {"pr-diff": "ok", "pr-diff-too-large": "too-large"}.get(diff[-1] if diff else "",
-                                                                                 "base-missing")
+        diff = re.findall(r"^scanoria=(pr-diff|pr-diff-too-large|pr-base-missing|pr-no-merge-base|pr-diff-failed)$",
+                          out, re.M)
+        info["pr_diff"] = PR_DIFF_STATES.get(diff[-1] if diff else "", "base-missing")
     info["mirror"] = "ephemeral" if mirror.project_id is None else (
         "hit" if hit else ("created" if mirror.state == "created" else "fetched"))
     return found[-1]
