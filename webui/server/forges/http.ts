@@ -128,7 +128,10 @@ export function createHttpsTransport(opts: HttpsTransportOptions = {}): FetchLik
       resolve(new Response(noBody ? null : Readable.toWeb(res) as ReadableStream, { status, headers: h }))
     })
     req.on('error', reject)
-    req.end()
+    const body = init.body
+    if (body instanceof Uint8Array) req.end(Buffer.from(body))
+    else if (typeof body === 'string') req.end(body)
+    else req.end()
   })
 }
 
@@ -304,5 +307,119 @@ export async function forgeGetJson<T = unknown>(url: string, req: ForgeRequest):
   }
   catch {
     throw new ForgeError('E_FORGE_RESPONSE', res.status)
+  }
+}
+
+export interface ForgeSendOptions {
+  method: 'POST' | 'PATCH' | 'PUT' | 'DELETE'
+  /** Corps JSON (sérialisé ici, borné). */
+  json?: unknown
+  /** Statuts attendus en plus de 2xx (ex. 404 pour « déjà supprimé »). */
+  allowStatus?: number[]
+}
+
+/** Corps envoyé au plus : un commentaire ou une revue, jamais un fichier. */
+export const MAX_SEND_BYTES = 512 * 1024
+
+/**
+ * Écriture authentifiée (statut de commit, commentaire, revue, webhook) : mêmes
+ * contrôles que forgeGet, mais aucune redirection n'est suivie (le corps et le
+ * jeton ne partent jamais ailleurs que vers l'URL demandée).
+ */
+export async function forgeSend(url: string, req: ForgeRequest, opts: ForgeSendOptions): Promise<ForgeResponse> {
+  const target = new URL(url)
+  if (target.protocol !== 'https:' || target.username || target.password) throw new ForgeError('E_FORGE_URL')
+  const payload = opts.json === undefined ? undefined : Buffer.from(JSON.stringify(opts.json), 'utf8')
+  if (payload && payload.length > MAX_SEND_BYTES) throw new ForgeError('E_FORGE_INPUT')
+  const headers: Record<string, string> = {
+    'accept': req.accept ?? 'application/json',
+    'user-agent': 'scanoria-console',
+    ...req.headers,
+  }
+  if (payload) {
+    headers['content-type'] = 'application/json'
+    headers['content-length'] = String(payload.length)
+  }
+  if (req.token) headers.authorization = `${req.authScheme} ${req.token}`
+  let res: Response
+  try {
+    res = await transport(target.toString(), {
+      method: opts.method,
+      headers,
+      body: payload ? new Uint8Array(payload) : undefined,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(req.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+    })
+  }
+  catch (err) {
+    throw classifyNetworkError(err)
+  }
+  const allowed = opts.allowStatus ?? []
+  if (res.status >= 300 && res.status < 400) {
+    await res.body?.cancel().catch(() => {})
+    throw new ForgeError('E_FORGE_REDIRECT', res.status)
+  }
+  if (!allowed.includes(res.status)) {
+    if (rateLimited(res)) {
+      await res.body?.cancel().catch(() => {})
+      throw new ForgeError('E_FORGE_RATE_LIMITED', res.status)
+    }
+    if (res.status === 401 || res.status === 403) {
+      await res.body?.cancel().catch(() => {})
+      throw new ForgeError('E_FORGE_AUTH', res.status)
+    }
+    if (res.status === 404) {
+      await res.body?.cancel().catch(() => {})
+      throw new ForgeError('E_FORGE_NOT_FOUND', 404)
+    }
+    if (res.status < 200 || res.status >= 300) {
+      await res.body?.cancel().catch(() => {})
+      throw new ForgeError('E_FORGE_RESPONSE', res.status)
+    }
+  }
+  let body: Buffer
+  try {
+    body = await readBounded(res, req.maxBytes ?? DEFAULT_MAX_BYTES)
+  }
+  catch (err) {
+    throw classifyNetworkError(err)
+  }
+  return { status: res.status, headers: res.headers, body }
+}
+
+export async function forgeSendJson<T = unknown>(url: string, req: ForgeRequest, opts: ForgeSendOptions): Promise<{ data: T | null, status: number }> {
+  const res = await forgeSend(url, req, opts)
+  if (!res.body.length) return { data: null, status: res.status }
+  try {
+    return { data: JSON.parse(res.body.toString('utf8')) as T, status: res.status }
+  }
+  catch {
+    throw new ForgeError('E_FORGE_RESPONSE', res.status)
+  }
+}
+
+/** Délais de recul entre deux essais (tests : setForgeRetryDelays([0, 0])). */
+let retryDelays = [500, 2000]
+export function setForgeRetryDelays(delays?: number[]): void {
+  retryDelays = delays ?? [500, 2000]
+}
+
+/** Erreur passagère : réseau, délai, quota, erreur 5xx de la forge. */
+export function transientForgeError(err: unknown): boolean {
+  if (!(err instanceof ForgeError)) return false
+  return err.code === 'E_FORGE_TIMEOUT' || err.code === 'E_FORGE_UNREACHABLE' || err.code === 'E_FORGE_RATE_LIMITED'
+    || (err.code === 'E_FORGE_RESPONSE' && (err.status ?? 0) >= 500)
+}
+
+/** Réessaie une opération sur erreur passagère, avec recul (deux essais de plus au plus). */
+export async function withForgeRetry<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn()
+    }
+    catch (err) {
+      if (!transientForgeError(err) || attempt >= retryDelays.length) throw err
+      await new Promise(r => setTimeout(r, retryDelays[attempt]))
+    }
   }
 }

@@ -240,6 +240,20 @@
     "cache": {
       "type": "boolean",
       "description": "0.6 (V4, contrat 21) : le runner peut réutiliser une sortie rangée dans le cache de résultats de la console. Absent ou false (analyse d'essai F13) : jamais."
+    },
+    "changed_files": {
+      "type": "array",
+      "maxItems": 3000,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024,
+        "pattern": "^[^/\\u0000-\\u001f\\u007f][^\\u0000-\\u001f\\u007f]*$",
+        "not": {
+          "pattern": "(^|/)\\.{1,2}(/|$)|//"
+        }
+      },
+      "description": "0.7 (contrat 33, G18) : fichiers modifiés d'une PR ; un module dont le manifeste déclare scan.incremental les lit dans /changed-files.txt (SCANORIA_CHANGED_FILES), les autres analysent tout. Absent : analyse complète."
     }
   }
 }

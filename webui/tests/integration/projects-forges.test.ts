@@ -147,7 +147,7 @@ describe.skipIf(!DATABASE_URL)('forges et projets (PostgreSQL, faux serveurs)', 
       expect(await capture(c.check())).toBe('ok')
       expect(await capture(forgeClient({ kind: 'forgejo', base_url: 'https://injoignable.exemple.test', token: forgejo.token }).check())).toBe('E_FORGE_UNREACHABLE')
       expect(await capture(c.latestCommit('equipe/app', '--upload-pack=id'))).toBe('E_FORGE_INPUT')
-      expect(await capture(forgeClient({ kind: 'gitlab', base_url: 'https://gitlab.exemple.test' }).listRepos())).toBe('E_FORGE_UNSUPPORTED')
+      expect(await capture(forgeClient({ kind: 'gitlab', base_url: 'https://injoignable.exemple.test' }).listRepos())).toBe('E_FORGE_UNREACHABLE')
       for (const e of errors) {
         expect(e).toBeInstanceOf(ForgeError)
         expect(`${e.message} ${e.stack}`).not.toContain(forgejo.token)
@@ -195,8 +195,8 @@ describe.skipIf(!DATABASE_URL)('forges et projets (PostgreSQL, faux serveurs)', 
         .rejects.toMatchObject({ statusCode: 409 })
       await expect(createForge(db.pool, { kind: 'forgejo', name: 'Mauvais jeton', base_url: `https://${FORGEJO}`, token: 'scn_faux', discovery: true }, actor))
         .rejects.toMatchObject({ statusCode: 422, data: { code: 'E_FORGE_AUTH' } })
-      await expect(createForge(db.pool, { kind: 'gitlab', name: 'GitLab', base_url: 'https://gitlab.exemple.test', discovery: true }, actor))
-        .rejects.toMatchObject({ statusCode: 501 })
+      await expect(createForge(db.pool, { kind: 'gitlab', name: 'GitLab', base_url: 'https://injoignable.exemple.test', discovery: true }, actor))
+        .rejects.toMatchObject({ statusCode: 502, data: { code: 'E_FORGE_UNREACHABLE' } })
       await expect(createForge(db.pool, { kind: 'forgejo', name: 'Boucle', base_url: 'https://127.0.0.1', discovery: true }, actor))
         .rejects.toMatchObject({ statusCode: 400, data: { code: 'E_FORGE_URL' } })
 

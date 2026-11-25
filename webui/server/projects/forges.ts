@@ -13,6 +13,8 @@ import { FORGE_COLUMNS, forgeClient, getForge, normalizeBaseUrl, type ForgeRow }
 import { discoverForge } from './discover'
 import { mapProjectError, projectError } from './errors'
 import { dropUnusedCredential } from './service'
+import { ensureServiceApp } from '../forges/apps'
+import { forgeIntegration } from '../forges/status'
 
 export async function forgeView(db: Queryable, f: ForgeRow) {
   const { rows } = await db.query<{ n: string }>(`SELECT count(*) AS n FROM projects WHERE forge_id = $1 AND archived_at IS NULL`, [f.id])
@@ -30,6 +32,8 @@ export async function forgeView(db: Queryable, f: ForgeRow) {
     last_error: f.last_error,
     created_at: f.created_at,
     projects: Number(rows[0]?.n ?? 0),
+    // 0.7 (D, J1) : application ou jeton de service, mode poussé ou tiré.
+    integration: await forgeIntegration(db, f.id),
   }
 }
 export type ForgeView = Awaited<ReturnType<typeof forgeView>>
@@ -59,7 +63,6 @@ export async function createForge(
   body: { kind: ForgeRow['kind'], name: string, base_url: string, token?: string, discovery: boolean },
   actor: AuditActor,
 ): Promise<{ forge: ForgeView, login: string | null }> {
-  if (body.kind === 'gitlab') throw projectError(501, 'E_FORGE_UNSUPPORTED')
   let baseUrl: string
   try {
     baseUrl = normalizeBaseUrl(body.base_url)
@@ -90,6 +93,8 @@ export async function createForge(
     actor, action: 'forge.create', outcome: 'success', targetType: 'forge', targetId: id,
     details: { name: body.name, kind: body.kind, base_url: baseUrl, with_token: !!body.token, discovery: body.discovery },
   })
+  // J1 : jeton de service → secret de webhook ; les webhooks sont posés à la découverte.
+  await ensureServiceApp(db, { id, kind: body.kind, credential_id: credentialId }, actor.userId ?? null)
   return { forge: await forgeView(db, (await getForge(db, id))!), login }
 }
 
@@ -130,6 +135,7 @@ export async function updateForge(
     actor, action: 'forge.update', outcome: 'success', targetType: 'forge', targetId: forge.id,
     details: { name: body.name, discovery: body.discovery, token: body.token === undefined ? 'unchanged' : body.token === null ? 'removed' : 'replaced' },
   })
+  await ensureServiceApp(db, { id: forge.id, kind: forge.kind, credential_id: credentialId }, actor.userId ?? null)
   return forgeView(db, (await getForge(db, forge.id))!)
 }
 
