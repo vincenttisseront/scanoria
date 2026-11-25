@@ -1,0 +1,21 @@
+# Exemple générique : publie une version candidate à chaque tag v*.
+# L'appliance Scanoria (mode tiré) détecte la pré-version et pose le statut
+# scanoria/release-gate sur le commit du tag.
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Construire
+        run: ./build.sh
+      - name: Publier la version candidate (pré-version)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" dist/* --prerelease --title "$TAG" --notes "Version candidate"

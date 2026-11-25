@@ -150,3 +150,75 @@ ne peut plus être promue. La correction passe par X.Y.Z+1.
 
 Ces actions demandent toujours l'accord explicite du propriétaire
 (CLAUDE.md § 16).
+
+## 7. Gate de release Scanoria pour vos dépôts (0.8)
+
+Cette section décrit comment **un dépôt de l'entreprise** fait passer ses releases
+par l'appliance (CLAUDE.md § 7). Les fichiers d'exemple sont dans
+[`docs/exemples/release-gate/`](exemples/release-gate/) ; ils n'utilisent que des noms
+`exemple.test`.
+
+### 7.1 Mode tiré (défaut, aucune exposition de l'appliance)
+
+1. Le projet est enrôlé dans la console (forge connectée, J1) ; son **mode de release**
+   vaut `pull` par défaut et ses **motifs de tag** (`v*` par défaut) se règlent sur la page
+   du projet. Les pré-versions déclarées dans la forge sont prises aussi.
+2. L'appliance interroge la forge toutes les 10 minutes (recul exponentiel jusqu'à 6 h en
+   cas d'erreur). Chaque nouveau tag est analysé **une seule fois** avec le profil
+   `release` (tous les modules installés et actifs applicables) ; au premier passage
+   d'un projet, seul le tag le plus récent est analysé.
+3. Le statut de commit **`scanoria/release-gate`** est posé sur le commit du tag :
+   `pending` pendant l'analyse et la signature, `success` si le verdict est favorable
+   **et** le rapport signé, `failure` sinon (verdict défavorable, non concluant, ou
+   rapport non signé). Le lien mène à la page Release de la console.
+4. La promotion (ou la règle de protection) exige ce statut au vert : voir
+   [`promote.yml`](exemples/release-gate/promote.yml).
+
+Un tag **déplacé** (même nom, autre commit) n'est jamais réanalysé en silence : il est
+signalé dans le journal d'audit, et le statut reste celui du commit analysé.
+
+### 7.2 Mode poussé (CI dans le réseau)
+
+```sh
+SCANORIA_TOKEN=… scanoria-scan --url https://analyse.exemple.test --project <id> \
+  --profile release --ref "$TAG" --wait --report scanoria-release-report.json
+```
+
+Le code de sortie reflète le verdict (0 favorable, 1 défavorable, 2 non concluant,
+3 erreur). Un second appel pour le même tag rend la même analyse. `--commit <sha>` est
+requis si l'appliance n'a pas accès à la forge ; il est comparé au commit du tag sinon.
+
+### 7.3 Preuves et vérification
+
+Pour chaque release, l'appliance produit un **rapport JSON canonique signé** (Ed25519,
+clé de l'appliance, signée par le service root), le **SARIF fusionné** et le **SBOM
+CycloneDX**, téléchargeables depuis la page Release et joints par défaut à la release
+de la forge (`scanoria-release-report.json`, `scanoria-results.sarif`,
+`scanoria-sbom.cdx.json`). Un droit manquant (écriture des releases) est signalé sur la
+page, sans bloquer le statut. Les notes de sécurité proposées par IA (I6),
+`scanoria-security-notes.md`, sont une **annexe non signée**.
+
+Vérification, hors de l'appliance :
+
+```sh
+curl -fsSo scanoria-verify https://analyse.exemple.test/api/releases/client
+sh scanoria-verify scanoria-release-report.json --key appliance.pem --commit "$SHA" --require-passed
+# ou, la première fois, en contrôlant l'empreinte affichée dans la console (Système > À propos) :
+sh scanoria-verify scanoria-release-report.json \
+  --fetch-key https://analyse.exemple.test/api/system/appliance-key --key-fingerprint <empreinte>
+```
+
+Codes de sortie : 0 valide, 1 rapport altéré ou signé par une autre clé, 2 commit
+différent, 3 erreur d'utilisation, 4 verdict autre que favorable (`--require-passed`).
+
+Le rapport signé est **figé** : si une exception est approuvée ensuite (J15), le verdict
+est réévalué sans réanalyse et le statut de commit est republié, mais le rapport garde le
+verdict d'origine ; la page Release montre l'écart.
+
+### 7.4 Exemple : un projet comme Ipnoria
+
+1. `release.yml` publie la version candidate (tag `vX.Y.Z-rc…` ou pré-version) ;
+2. l'appliance, en mode tiré, analyse le tag et pose `scanoria/release-gate` ;
+3. `promote.yml` n'accepte la promotion qu'avec ce statut au vert, **en plus** de la
+   validation existante (par exemple l'instance de dev pilotée par AWX), puis télécharge
+   et vérifie le rapport signé joint à la release.

@@ -1,0 +1,45 @@
+# Exemple générique : promotion d'une version candidate, refusée sans un
+# verdict favorable de l'appliance (statut scanoria/release-gate) et sans
+# rapport signé valide pour ce commit.
+name: promote
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version candidate à promouvoir
+        required: true
+permissions:
+  contents: write
+  statuses: read
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - name: Exiger scanoria/release-gate au vert
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
+          state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/status" \
+            --jq '[.statuses[] | select(.context == "scanoria/release-gate")][0].state // "absent"')
+          echo "scanoria/release-gate : $state"
+          [ "$state" = success ] || { echo "::error::verdict Scanoria absent ou défavorable"; exit 1; }
+          echo "SHA=$sha" >> "$GITHUB_ENV"
+      - name: Vérifier le rapport signé
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          SCANORIA_URL: ${{ vars.SCANORIA_URL }}
+          FINGERPRINT: ${{ vars.SCANORIA_KEY_FINGERPRINT }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern scanoria-release-report.json
+          curl -fsSo scanoria-verify "$SCANORIA_URL/api/releases/client"
+          sh scanoria-verify scanoria-release-report.json --require-passed --commit "$SHA" \
+            --fetch-key "$SCANORIA_URL/api/system/appliance-key" --key-fingerprint "$FINGERPRINT"
+      - name: Promouvoir
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
