@@ -36,6 +36,13 @@ export interface FakeRepoState {
   authors: Record<string, { login: string, email: string }>
   /** Droits des collaborateurs (admin, write, read) ; un compte absent n'en a aucun (404). */
   permissions: Record<string, string>
+  /** 0.8 (A) : tags, releases et fichiers joints (absents = aucun). */
+  tags?: { name: string, sha: string }[]
+  releases?: { id: number, tag_name: string, prerelease: boolean, assets: { name: string, size: number, body: Buffer }[] }[]
+  /** 0.8 (A) : refuser l'envoi de fichiers (droit manquant, 403). */
+  denyAssets?: boolean
+  /** Liste des tags en erreur 503 (forge indisponible). */
+  failTags?: boolean
 }
 
 export interface FakePrForge {
@@ -128,6 +135,41 @@ async function handle(f: FakePrForge, req: IncomingMessage, res: ServerResponse)
   const repo = m ? f.repos.get(decodeURIComponent(m[1]!)) : undefined
   if (!m || !repo) return send(res, 404, {})
   const rest = m[2] ?? ''
+  // 0.8 (A) : tags, releases et fichiers joints (multipart, lu avant le JSON).
+  if (rest === '/tags' && method === 'GET') {
+    if (repo.failTags) return send(res, 503, { message: 'unavailable' })
+    const page = Number(url.searchParams.get('page') ?? '1')
+    return send(res, 200, page === 1 ? (repo.tags ?? []).map(t => ({ name: t.name, commit: { sha: t.sha } })) : [])
+  }
+  if (rest === '/releases' && method === 'GET') {
+    const page = Number(url.searchParams.get('page') ?? '1')
+    return send(res, 200, page === 1 ? (repo.releases ?? []).map(r => ({ id: r.id, tag_name: r.tag_name, prerelease: r.prerelease })) : [])
+  }
+  let y: RegExpExecArray | null
+  if ((y = /^\/releases\/tags\/(.+)$/.exec(rest)) && method === 'GET') {
+    const rel = (repo.releases ?? []).find(r => r.tag_name === decodeURIComponent(y![1]!))
+    return rel ? send(res, 200, { id: rel.id, tag_name: rel.tag_name }) : send(res, 404, {})
+  }
+  if ((y = /^\/releases\/(\d+)\/assets$/.exec(rest))) {
+    const rel = (repo.releases ?? []).find(r => r.id === Number(y![1]))
+    if (!rel) return send(res, 404, {})
+    if (method === 'GET') {
+      const page = Number(url.searchParams.get('page') ?? '1')
+      return send(res, 200, page === 1 ? rel.assets.map(a => ({ name: a.name, size: a.size })) : [])
+    }
+    if (repo.denyAssets) return send(res, 403, { message: 'forbidden' })
+    const chunks: Buffer[] = []
+    for await (const c of req) chunks.push(c as Buffer)
+    const raw = Buffer.concat(chunks)
+    const name = url.searchParams.get('name') ?? ''
+    const ct = String(req.headers['content-type'] ?? '')
+    const boundary = /boundary=([^;]+)/.exec(ct)?.[1]
+    if (!boundary || !raw.includes(Buffer.from(`--${boundary}--`))) return send(res, 400, { message: 'multipart' })
+    const start = raw.indexOf('\r\n\r\n') + 4
+    const end = raw.lastIndexOf(Buffer.from(`\r\n--${boundary}--`))
+    rel.assets.push({ name, size: end - start, body: raw.subarray(start, end) })
+    return send(res, 201, { id: rel.assets.length, name })
+  }
   const body = method === 'GET' ? {} : await readBody(req)
 
   let x: RegExpExecArray | null

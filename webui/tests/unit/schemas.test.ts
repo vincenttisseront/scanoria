@@ -270,6 +270,20 @@ const CASES: Record<RequestType, { valid: unknown[], invalid: unknown[] }> = {
       { engine: 'opengrep', sha256: 'a'.repeat(64), content: 'rules: []' },
     ],
   },
+  'sign-release-report': {
+    valid: [
+      { scan_id: ID, sha256: 'a'.repeat(64), kind: 'release-report', content_b64: 'eyJ9' },
+      { scan_id: ID, sha256: 'b'.repeat(64), kind: 'release-report', content_b64: 'e30=' },
+    ],
+    invalid: [
+      {}, { scan_id: ID, sha256: 'a'.repeat(64), kind: 'release-report' },
+      { scan_id: ID, sha256: 'a'.repeat(64), kind: 'attestation', content_b64: 'e30=' },
+      { scan_id: ID, sha256: 'A'.repeat(64), kind: 'release-report', content_b64: 'e30=' },
+      { scan_id: '../x', sha256: 'a'.repeat(64), kind: 'release-report', content_b64: 'e30=' },
+      { scan_id: ID, sha256: 'a'.repeat(64), kind: 'release-report', content_b64: 'e30=\n' },
+      { scan_id: ID, sha256: 'a'.repeat(64), kind: 'release-report', content_b64: 'e30=', signature: 'x' },
+    ],
+  },
 }
 
 describe('expressions régulières identiques au contrat', () => {

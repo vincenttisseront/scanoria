@@ -69,7 +69,8 @@
             "run-canaries",
             "start-trial",
             "prefetch-images",
-            "validate-ruleset"
+            "validate-ruleset",
+            "sign-release-report"
           ]
         }
       ]
@@ -169,7 +170,14 @@
         "E_RULESET_NONE",
         "E_RULESET_ENGINE_MISSING",
         "E_RELAY_UNAVAILABLE",
-        "E_RELAY_TOKEN"
+        "E_RELAY_TOKEN",
+        "E_SIGN_TOO_LARGE",
+        "E_SIGN_ENCODING",
+        "E_SIGN_DIGEST",
+        "E_SIGN_CANONICAL",
+        "E_SIGN_SCHEMA",
+        "E_SIGN_SCAN",
+        "E_SIGN_KEY"
       ]
     },
     "message": {

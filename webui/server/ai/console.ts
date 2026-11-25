@@ -96,9 +96,11 @@ export async function subjectProject(db: Queryable, kind: string, subjectId: str
     const p = await db.query<{ id: string }>('SELECT id FROM projects WHERE id = $1', [subjectId])
     return p.rows[0]?.id ?? null
   }
-  const table = def.subjectType === 'finding' ? 'findings' : def.subjectType === 'scan' ? 'scans' : null
-  if (!table) return null
-  const { rows } = await db.query<{ project_id: string }>(`SELECT project_id FROM ${table} WHERE id = $1`, [subjectId])
+  // 0.8 (A, I6) : sujet « release » = rapport de release, identifié par son analyse.
+  const SOURCES: Record<string, string> = { finding: 'findings WHERE id', scan: 'scans WHERE id', release: 'release_reports WHERE scan_id' }
+  const source = SOURCES[def.subjectType] ?? null
+  if (!source) return null
+  const { rows } = await db.query<{ project_id: string }>(`SELECT project_id FROM ${source} = $1`, [subjectId])
   return rows[0]?.project_id ?? null
 }
 

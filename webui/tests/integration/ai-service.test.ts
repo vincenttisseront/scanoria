@@ -160,7 +160,7 @@ describe.skipIf(!DATABASE_URL)('service scanoria-ai (PostgreSQL réel, faux Olla
     expect(tb.map(r => [r.subject_id, r.output.passed])).toEqual([
       ['assess-reachability', true], ['classify-secret', true], ['diagnose-appliance', true], ['diagnose-scan', true], ['draft-exception', true], ['embed-finding', true],
       ['explain-finding', true], ['explain-license', true], ['explain-verdict', true], ['generate-rule', true], ['nl-search', true],
-      ['suggest-gate', true], ['summarize-scan', true], ['translate-rule', true], ['triage-finding', true],
+      ['release-notes', true], ['suggest-gate', true], ['summarize-scan', true], ['translate-rule', true], ['triage-finding', true],
     ])
     const t = await task(id!)
     expect(t).toMatchObject({ status: 'done', model: 'qwen-test:14b', model_digest: 'a'.repeat(64), locale: 'fr' })

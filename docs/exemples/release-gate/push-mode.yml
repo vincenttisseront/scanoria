@@ -1,0 +1,26 @@
+# Exemple générique, mode poussé : la CI tourne dans le réseau et appelle
+# l'appliance ; le code de sortie de scanoria-scan reflète le verdict.
+name: release-gate
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  scanoria:
+    runs-on: [self-hosted, interne]   # runner interne qui joint l'appliance
+    steps:
+      - name: Gate de release Scanoria
+        env:
+          SCANORIA_URL: ${{ vars.SCANORIA_URL }}
+          SCANORIA_PROJECT: ${{ vars.SCANORIA_PROJECT }}
+          SCANORIA_TOKEN: ${{ secrets.SCANORIA_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          curl -fsSo scanoria-scan "$SCANORIA_URL/api/gates/client"
+          sh scanoria-scan --profile release --ref "$TAG" --commit "$GITHUB_SHA" --wait \
+            --report scanoria-release-report.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scanoria-release-report
+          path: scanoria-release-report.json
