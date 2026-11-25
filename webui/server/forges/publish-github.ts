@@ -9,7 +9,7 @@ import { ForgeError, forgeGetJson, forgeSendJson, type ForgeRequest } from './ht
 import { githubApiBase } from './github'
 import { checkCommit, checkFullName, encodePath, type ForgeAccess } from './types'
 import {
-  checkLogin, checkNumber, emailOf, loginOf, toPermission, toPullRequest, uniqueAuthors,
+  checkLogin, checkNumber, emailOf, collaboratorPermission, loginOf, toPullRequest, uniqueAuthors,
   type Annotation, type ForgeComment, type ForgePublisherImpl, type PullRequestRef,
 } from './pr-types'
 
@@ -123,17 +123,7 @@ export function githubPublisher(access: ForgeAccess): ForgePublisherImpl {
       return raw.map(toPullRequest).filter((p): p is PullRequestRef => !!p)
     },
 
-    async permission(repo, login) {
-      try {
-        const { data } = await forgeGetJson<{ permission?: unknown }>(`${repoUrl(repo)}/collaborators/${encodeURIComponent(checkLogin(login))}/permission`, req)
-        return toPermission(data?.permission)
-      }
-      catch (err) {
-        // Compte inconnu ou hors du dépôt : aucun droit (refus par défaut).
-        if (err instanceof ForgeError && (err.code === 'E_FORGE_NOT_FOUND' || err.code === 'E_FORGE_AUTH')) return 'none'
-        throw err
-      }
-    },
+    permission: async (repo, login) => collaboratorPermission(`${repoUrl(repo)}/collaborators/${encodeURIComponent(checkLogin(login))}/permission`, req),
 
     async comments(repo, number, since) {
       const q = since ? `&since=${encodeURIComponent(since)}` : ''

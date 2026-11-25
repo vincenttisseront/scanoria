@@ -3,7 +3,7 @@
 //
 // Types et lectures communes du contrat 30 (client de forge pour les PR).
 
-import { ForgeError } from './http'
+import { ForgeError, forgeGetJson, type ForgeRequest } from './http'
 
 export const MAX_ANNOTATIONS = 30
 export const MAX_CHANGED_FILES = 3000
@@ -74,6 +74,18 @@ export function toPermission(raw: unknown): RepoPermission {
   if (p === 'write' || p === 'maintain' || p === 'push') return 'write'
   if (p === 'read' || p === 'triage' || p === 'pull') return 'read'
   return 'none'
+}
+
+/** Forgejo et GitHub : droit d'un collaborateur ; compte inconnu ou refusé → aucun droit (refus par défaut). */
+export async function collaboratorPermission(url: string, req: ForgeRequest): Promise<RepoPermission> {
+  try {
+    const { data } = await forgeGetJson<{ permission?: unknown }>(url, req)
+    return toPermission(data?.permission)
+  }
+  catch (err) {
+    if (err instanceof ForgeError && (err.code === 'E_FORGE_NOT_FOUND' || err.code === 'E_FORGE_AUTH')) return 'none'
+    throw err
+  }
 }
 
 export interface ForgePublisherImpl {
