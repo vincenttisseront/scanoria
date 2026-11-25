@@ -38,6 +38,8 @@ export interface IngestInput {
   categories?: string[]
   /** J6 (0.6) : document produit hors de l'appliance (masquage agressif, ParseContext.external). */
   external?: boolean
+  /** 0.7 (contrat 32) : le runner a lancé le module par le relais IA (result.json, ai_relay). */
+  aiRelay?: boolean
 }
 
 export interface IngestError {
@@ -141,6 +143,22 @@ interface UpsertRow {
   secret_type: string | null
 }
 
+/**
+ * Contrat 32 : un résultat IA non confirmé est de niveau informatif (`info`) ;
+ * sa gravité native reste dans native_severity, et la gravité normalisée lui
+ * est rendue à la confirmation (confirmAiFinding), puis à chaque ingestion.
+ */
+async function informationalUntilConfirmed<F extends { fingerprint: string, severity: string }>(db: Queryable, projectId: string, findings: F[]): Promise<F[]> {
+  if (!findings.length) return findings
+  const { rows } = await db.query<{ fingerprint: string }>(
+    `SELECT fingerprint FROM findings
+      WHERE project_id = $1 AND fingerprint = ANY($2::text[]) AND origin = 'ai' AND ai_confirmed_at IS NOT NULL`,
+    [projectId, findings.map(f => f.fingerprint)],
+  )
+  const confirmed = new Set(rows.map(r => r.fingerprint))
+  return findings.map(f => (confirmed.has(f.fingerprint) ? f : { ...f, severity: 'info' }))
+}
+
 async function upsert(db: Queryable, scan: ScanRow, findings: (ParsedFinding & { severity: string })[], origin: 'module' | 'ai' = 'module'): Promise<UpsertRow[]> {
   const out: UpsertRow[] = []
   for (let i = 0; i < findings.length; i += BATCH) {
@@ -192,7 +210,9 @@ async function upsert(db: Queryable, scan: ScanRow, findings: (ParsedFinding & {
                                THEN NULL ELSE f.status_by END,
               status_at = CASE WHEN f.status = 'fixed' OR (f.status = 'accepted' AND f.status_until < current_date)
                                THEN now() ELSE f.status_at END,
-              last_scan_id = EXCLUDED.last_scan_id, last_commit = EXCLUDED.last_commit, updated_at = now()
+              last_scan_id = EXCLUDED.last_scan_id, last_commit = EXCLUDED.last_commit, updated_at = now(),
+              -- 0.7 (contrat 32) : un résultat repris par un module d'IA devient « IA » (jamais l'inverse).
+              origin = CASE WHEN EXCLUDED.origin = 'ai' AND f.origin = 'module' THEN 'ai' ELSE f.origin END
        RETURNING id, (xmax = 0) AS inserted, severity, tool, rule_id, category, secret_type`,
       [scan.project_id, scan.id, scan.commit_sha, JSON.stringify(batch), origin],
     )
@@ -232,9 +252,12 @@ export async function ingestModuleOutputs(db: Db, input: IngestInput): Promise<I
 
   const rows = await inTransaction(db, async (q) => {
     const severities = await resolveSeverities(q, input.moduleId, unique.map(f => f.nativeSeverity), hints.severityMap)
-    const withSeverity = unique.map(f => ({ ...f, severity: severities.get(f.nativeSeverity) ?? 'medium' }))
-    // 0.7 (contrat 32) : résultats d'un module relié au relais IA, hors verdict jusqu'à confirmation.
-    const res = await upsert(q, scan, withSeverity, hints.aiRelay && !input.external ? 'ai' : 'module')
+    // 0.7 (contrat 32) : résultats d'un module relié au relais IA (d'après le runner,
+    // ou le manifeste du catalogue), hors verdict jusqu'à confirmation.
+    const origin = (input.aiRelay || hints.aiRelay) && !input.external ? 'ai' : 'module'
+    let withSeverity = unique.map(f => ({ ...f, severity: severities.get(f.nativeSeverity) ?? 'medium' }))
+    if (origin === 'ai') withSeverity = await informationalUntilConfirmed(q, scan.project_id, withSeverity)
+    const res = await upsert(q, scan, withSeverity, origin)
     // F16 (0.5, contrat 18) : clé de recoupement entre outils, sans toucher à l'empreinte G19.
     await assignCorrelationKeys(q, res.map(r => r.id))
     // G15 : sortie tronquée ou illisible consignée dans la couverture. Une sortie

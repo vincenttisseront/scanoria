@@ -129,6 +129,21 @@ describe.skipIf(!DATABASE_URL)('résultats des modules d’analyse par IA (Postg
     ids.ssrf = rows[1]!.id
   })
 
+  it('résultats IA : gravité informative tant qu’ils ne sont pas confirmés', async () => {
+    const { rows } = await db.pool.query(`SELECT DISTINCT severity, native_severity FROM findings WHERE origin = 'ai'`)
+    expect(rows).toEqual([{ severity: 'info', native_severity: 'level:error' }])
+  })
+
+  it('origine IA d’après le runner, même si le catalogue ne connaît plus le module', async () => {
+    const resultDir = join(root, 'results', scanId)
+    await mkdir(join(resultDir, 'retire'), { recursive: true })
+    await writeFile(join(resultDir, 'retire', 'r.sarif'), JSON.stringify(sarif('retire', [result('ai-xss', 'app/view.py')])))
+    await ingestModuleOutputs(db.pool, { scanId, moduleId: 'retire', resultDir, outputs: { sarif: 'retire/r.sarif' }, aiRelay: true })
+    const { rows } = await db.pool.query(`SELECT origin, severity FROM findings WHERE tool = 'retire'`)
+    expect(rows).toEqual([{ origin: 'ai', severity: 'info' }])
+    await db.pool.query(`DELETE FROM findings WHERE tool = 'retire'`)
+  })
+
   it('verdict : les résultats IA non confirmés n’y entrent pas', async () => {
     const v = await evaluateGate(db.pool, scanId)
     expect(v.counts.critical + v.counts.high).toBe(0)
@@ -168,8 +183,12 @@ describe.skipIf(!DATABASE_URL)('résultats des modules d’analyse par IA (Postg
     expect((await call(`/api/findings/${ids.sqli}/ai-confirm`, 'admin', 'POST')).data.data?.code).toBe('E_AI_CONFIRMED')
     const audit = await db.pool.query(`SELECT action, target_id FROM audit_log WHERE action = 'finding.ai-confirm'`)
     expect(audit.rows).toEqual([{ action: 'finding.ai-confirm', target_id: ids.sqli }])
-    const st = await db.pool.query(`SELECT status FROM findings WHERE id = $1`, [ids.sqli])
-    expect(st.rows[0].status).toBe('confirmed')
+    const st = await db.pool.query(`SELECT status, severity FROM findings WHERE id = $1`, [ids.sqli])
+    expect(st.rows[0]).toEqual({ status: 'confirmed', severity: 'high' })
+    // Analyse suivante : le résultat confirmé garde sa gravité normalisée.
+    await ingest('fraim', sarif('fraim', [result('ai-sqli', 'app/db.py'), result('ai-ssrf', 'app/http.py')]))
+    const again = await db.pool.query(`SELECT rule_id, severity FROM findings WHERE origin = 'ai' ORDER BY rule_id`)
+    expect(again.rows).toEqual([{ rule_id: 'ai-sqli', severity: 'high' }, { rule_id: 'ai-ssrf', severity: 'info' }])
   })
 
   it('confirmé : entre dans le verdict suivant ; un résultat non IA ne se confirme pas ainsi', async () => {

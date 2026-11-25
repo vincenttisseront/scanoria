@@ -119,9 +119,10 @@ def ensure_token_dir():
         if not os.path.isdir(d) or os.path.islink(d):
             raise Fail("E_INTERNAL", "relay token directory is not a directory")
         if not common.TEST_ROOT:
-            os.chown(d, 0, gid)
+            # Créé par tmpfiles.d ou par le runner (root) : un autre propriétaire est refusé.
             if st.st_uid != 0:
                 raise Fail("E_INTERNAL", "relay token directory not owned by root")
+            os.chown(d, 0, gid)
         os.chmod(d, 0o750)
     return gid
 

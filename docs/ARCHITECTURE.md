@@ -862,11 +862,21 @@ conteneur du module (--network=none, utilisateur 65534)
   demandé), `POST /v1/embeddings`, `GET /v1/relay/check`.
 - **Banc d'essai I23** : le banc d'essai d'installation d'un module relié tourne
   par le relais (jeton `testbed`, sans projet) ; sans connecteur, l'installation
-  échoue avec `E_RELAY_UNAVAILABLE`. Un module d'IA qui échoue à son canari
-  nocturne est désactivé de lui-même (`vigilance.disable_failed_ai_modules`).
+  échoue avec `E_RELAY_UNAVAILABLE`. Un module d'IA qui ne tient plus les
+  attentes de son banc d'essai deux nuits de suite est désactivé de lui-même
+  (`vigilance.disable_failed_ai_modules`) ; un outil qui s'arrête en erreur
+  (relais, modèle) est une panne « infra », jamais une détection perdue.
+- **Jamais bloquant** (§ 3.5) : une erreur, un délai ou une sortie invalide
+  d'un module relié (502 du relais, disjoncteur, file pleine, opt-out posé en
+  cours d'analyse) le rend `skipped` avec la cause lisible ; le verdict n'est
+  jamais non concluant à cause de l'IA. Le runner marque l'entrée du module
+  `ai_relay: true` dans `result.json` : la console en déduit l'origine « IA »
+  sans relire l'index du catalogue.
 
 **Résultats IA (contrat 32)** : les résultats d'un module relié sont ingérés
-avec `origin = 'ai'` (badge « IA », niveau informatif, modèle et empreinte lus
+avec `origin = 'ai'` (badge « IA », gravité `info` tant qu'ils ne sont pas
+confirmés, la gravité native gardée dans `native_severity` et rendue à la
+confirmation ; modèle et empreinte lus
 dans le journal du relais de la dernière analyse). `evaluate.ts` les écarte du
 verdict avant toute règle (`excludeUnconfirmedAi`, même un avis `MAL-` cité par
 un modèle) tant que `ai_confirmed_at` est vide. `POST /api/findings/:id/ai-confirm`

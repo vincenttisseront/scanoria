@@ -265,6 +265,8 @@ toks = sorted(os.listdir("$T/run/scanoria-relay/tokens"))
 open("$TMP/run-state", "w").write(json.dumps({"vols": vols, "tokens": [json.load(open("$T/run/scanoria-relay/tokens/" + t)) for t in toks],
     "hosts": open(vols["/etc/hosts"][0]).read() if "/etc/hosts" in vols else None}))
 print("jeton vu par l'outil : " + open("$TMP/secret-value").read())
+if os.path.exists("$TMP/tool-fails"):
+    print("upstream_error 502 from the relay"); sys.exit(1)
 out = vols["/out"][0]
 open(out + "/result.sarif", "w").write(json.dumps({"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "ia"}}, "results": [{"ruleId": "ai-1", "message": {"text": "m"}}]}]}))
 sys.exit(0)
@@ -315,6 +317,7 @@ SCAN_ID=$(uuid)
 id=$(uuid); drop "$id" "$(job "$id" '[{"id": "ia-faux", "version": "1.0.0"}]')"; : > "$TMP/podman.log"; run_runner
 M=$(mod "$id" ia-faux)
 expect "module IA : ok, une sortie SARIF" "$(jq -r '.status + " " + (.outputs | keys | join(","))' <<< "$M")" "ok sarif"
+expect "module IA : marqué ai_relay pour la console" "$(jq -r .ai_relay <<< "$M")" true
 RUN=$(grep '^\["run"' "$TMP/podman.log" | tail -n 1)
 expect "conteneur : --network=none conservé, aucun autre réseau" "$(jq -c '[.[] | select(startswith("--network"))]' <<< "$RUN")" '["--network=none"]'
 expect "conteneur : secret Podman du jeton monté pour l'utilisateur 65534" \
@@ -343,6 +346,14 @@ expect "aucune réutilisation de résultat (V4)" "$(jq -r '.cache_key // "aucune
 expect "result.json conforme au schéma" "$(py 'import json
 from scanoria import schema
 print(len(schema.load("schemas", "scan-result").errors(json.load(open(sys.argv[1])))))' "$SCANS/results/$id/result.json")" 0
+
+touch "$TMP/tool-fails"
+id=$(uuid); drop "$id" "$(job "$id" '[{"id": "ia-faux", "version": "1.0.0"}]')"; run_runner
+M=$(mod "$id" ia-faux)
+expect "outil IA en erreur (relais 502) : skipped, jamais non concluant (§ 3.5)" "$(jq -r '.status + " " + .error.code' <<< "$M")" "skipped E_TOOL_EXIT"
+expect "outil IA en erreur : cause lisible" "$(jq -r '.error.message | startswith("AI module, outside the verdict")' <<< "$M")" true
+expect "outil IA en erreur : jeton retiré" "$(find "$TOK_DIR" -type f | wc -l)" 0
+rm -f "$TMP/tool-fails"
 
 echo optout > "$SCEN"
 id=$(uuid); drop "$id" "$(job "$id" '[{"id": "ia-faux", "version": "1.0.0"}]')"; : > "$TMP/podman.log"; run_runner
@@ -432,7 +443,7 @@ expect "pont : usage sans « -- » → 70" "$rc" 70
 kill "$ECHO_PID" 2> /dev/null || true
 
 # --- 7. I23 : désactivation automatique d'un module d'IA au canari ------------------------------
-expect "canari : seul le module d'IA échoué est désactivé" "$(py 'import json
+expect "canari : module d'IA désactivé après deux échecs de suite, jamais un autre" "$(py 'import json
 from scanoria import modules, vigilance
 reg = modules.load_registry()
 reg["modules"]["sans-ia"] = json.loads(json.dumps(reg["modules"]["ia-faux"]))
@@ -440,8 +451,11 @@ reg["modules"]["sans-ia"]["manifest"]["id"] = "sans-ia"
 reg["modules"]["sans-ia"]["manifest"]["scan"]["network"] = "none"
 modules.save_registry(reg)
 print(vigilance.disable_failed_ai_modules(["ia-faux", "sans-ia"]))
+print(vigilance.disable_failed_ai_modules([], ["ia-faux"]))
+print(vigilance.disable_failed_ai_modules(["ia-faux"]))
+print(vigilance.disable_failed_ai_modules(["ia-faux", "sans-ia"]))
 reg = modules.load_registry()
-print(reg["modules"]["ia-faux"]["enabled"], reg["modules"]["ia-faux"]["status"], reg["modules"]["sans-ia"]["enabled"])' | tr '\n' ' ')" "['ia-faux'] False disabled True "
+print(reg["modules"]["ia-faux"]["enabled"], reg["modules"]["ia-faux"]["status"], reg["modules"]["sans-ia"]["enabled"])' 2> /dev/null | tr '\n' ' ')" "[] [] [] ['ia-faux'] False disabled True "
 
 printf '\n%d réussis, %d échoués\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]]

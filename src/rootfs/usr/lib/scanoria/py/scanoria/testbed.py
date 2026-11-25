@@ -521,6 +521,11 @@ def run(manifest, timeout=None):
                        "(container limit %d MB from resources.min_ram_mb)" % (manifest["id"], memory_mb(manifest)))
             elif rc == KILLED_RC:
                 msg = "scanner %s timed out on its testbed after %d s" % (manifest["id"], t)
+            if airelay.uses_relay(manifest):
+                # Module d'IA : un outil qui s'arrête en erreur vient le plus souvent du
+                # relais ou du modèle (502, disjoncteur, file pleine) ; classé infra (G12),
+                # jamais une détection perdue. Seules les attentes non tenues comptent (I23).
+                raise Fail("E_RELAY_UNAVAILABLE", msg + (": " + hint if hint else ""))
             raise Fail("E_TESTBED", msg + (": " + hint if hint else ""))
         details = check_expect(collect(manifest, out), tb["expect"])
         bad = [d for d in details if not d["ok"]]

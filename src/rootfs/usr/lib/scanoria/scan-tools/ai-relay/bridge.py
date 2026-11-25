@@ -26,6 +26,8 @@ import threading
 SOCKET = "/run/scanoria-relay/relay.sock"
 TOKEN = "/run/secrets/relay-token"
 MAX_CONNECTIONS = 32
+# Connexion sans aucun octet échangé pendant ce délai : refermée (emplacement rendu).
+IDLE_TIMEOUT_S = 600
 EX_SOFTWARE = 70
 
 
@@ -61,6 +63,8 @@ def serve(listener, slots):
 def handle(client, slots):
     upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
+        client.settimeout(IDLE_TIMEOUT_S)
+        upstream.settimeout(IDLE_TIMEOUT_S)
         upstream.connect(SOCKET)
         back = threading.Thread(target=pump, args=(upstream, client), daemon=True)
         back.start()

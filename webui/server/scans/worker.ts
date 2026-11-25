@@ -531,7 +531,7 @@ export class ScanWorker {
       else if (m.status === 'ok') {
         try {
           const outputs = Object.fromEntries(Object.entries(m.outputs).filter((e): e is [string, string] => typeof e[1] === 'string'))
-          const out = await this.integrations.ingestModuleOutputs(this.pool, { scanId: scan.id, moduleId: m.id, resultDir: resultDir(this.cfg.scansDir, scan.job_id), outputs })
+          const out = await this.integrations.ingestModuleOutputs(this.pool, { scanId: scan.id, moduleId: m.id, resultDir: resultDir(this.cfg.scansDir, scan.job_id), outputs, aiRelay: m.ai_relay === true })
           count = out.count
           if (out.errors.length) this.log(`scan ${scan.id} module ${m.id}: ${out.errors.length} ingestion error(s)`)
           // Sortie illisible ou non conforme (G2) : module non concluant ; une troncature reste un succès.
@@ -552,6 +552,8 @@ export class ScanWorker {
           errorClass = 'tool'
         }
       }
+      // 0.7 (§ 3.5) : la sortie d'un module d'IA ne rend jamais un verdict non concluant.
+      if (status === 'invalid-output' && m.ai_relay === true) status = 'skipped'
       if (status !== 'ok' && status !== 'skipped' && status !== 'not-applicable') complete = false
       let logPath: string | null = null
       if (m.log) {

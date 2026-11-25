@@ -730,7 +730,20 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
     if not common.TEST_ROOT:
         os.chown(mdir, 0, common.scanoria_ids()[1])
 
+    ai_relay = airelay.uses_relay(m)
+    if ai_relay:
+        # 0.7 (contrat 32) : la console marque ses résultats « IA » d'après le
+        # manifeste réellement lancé, sans relire l'index du catalogue.
+        entry["ai_relay"] = True
+
     def finish(status, error=None, rc=None):
+        if ai_relay and status in ("error", "timeout", "oom"):
+            # § 3.5 : l'indisponibilité de l'IA (502, disjoncteur, file pleine,
+            # opt-out posé en cours d'analyse) ne rend jamais un verdict non
+            # concluant ; l'erreur reste lisible dans l'entrée du module.
+            status = "skipped"
+            error = dict(error or {}, message=("AI module, outside the verdict: %s"
+                                               % (error or {}).get("message", "failed"))[:2000])
         entry.update(status=status, error=error, exit_code=rc, finished_at=common.iso(common.now()))
         entry.setdefault("stats", {})["duration_ms"] = int((time.monotonic() - t0) * 1000)
         if os.path.isfile(log_tmp):
@@ -774,7 +787,7 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
     cache = scan_cache_dir(m, job)
     if cache:
         mounts.append((cache, "/cache", "rw"))
-    relay = airelay.uses_relay(m)
+    relay = ai_relay
     if relay:
         # 0.7 (contrat 31) : une sortie d'IA dépend du modèle du moment ; jamais reprise (V4).
         entry.pop("cache_key", None)

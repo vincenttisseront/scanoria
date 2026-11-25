@@ -199,7 +199,19 @@ export function prepareChat(raw: unknown): PreparedChat {
   if (rf?.type === 'json_object') format = 'json'
   else if (rf?.type === 'json_schema') {
     const schema = rf.json_schema?.schema
-    format = schema && JSON.stringify(schema).length <= 64 * 1024 ? schema : 'json'
+    if (schema && JSON.stringify(schema).length <= 64 * 1024) {
+      // Le schéma part aussi vers Ollama : ses textes (description, enum, const,
+      // default…) sont masqués comme les messages.
+      const r = redactText(JSON.stringify(schema))
+      redacted += r.count
+      try {
+        format = JSON.parse(r.text) as Record<string, unknown>
+      }
+      catch {
+        format = 'json' // masque à cheval sur la syntaxe : JSON libre, jamais le schéma d'origine
+      }
+    }
+    else format = 'json'
   }
   const wanted = body.max_completion_tokens ?? body.max_tokens ?? null
   return {
@@ -315,11 +327,17 @@ export class Relay {
   }
 
   private async callLog(auth: Authorized, kind: string, model: ModelChoice | null, bytes: number, durationMs: number | null, outcome: string): Promise<void> {
-    await this.deps.db.query(
-      `INSERT INTO ai_calls (task_id, kind, project_id, model, bytes_sent, duration_ms, outcome, via, module_id)
-       VALUES (NULL, $1, $2, $3, $4, $5, $6, 'relay', $7)`,
-      [kind, auth.token.project_id, model ? modelLabel(model) : null, bytes, durationMs, outcome, auth.token.module_id],
-    )
+    try {
+      await this.deps.db.query(
+        `INSERT INTO ai_calls (task_id, kind, project_id, model, bytes_sent, duration_ms, outcome, via, module_id)
+         VALUES (NULL, $1, $2, $3, $4, $5, $6, 'relay', $7)`,
+        [kind, auth.token.project_id, model ? modelLabel(model) : null, bytes, durationMs, outcome, auth.token.module_id],
+      )
+    }
+    catch (err) {
+      // Journal indisponible : la réponse (et le disjoncteur) n'en dépendent pas.
+      this.log(`relay: call log failed: ${(err as Error).message}`)
+    }
   }
 
   /** Vérification préalable du runner : prêt, avec le modèle retenu. */

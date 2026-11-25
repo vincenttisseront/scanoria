@@ -403,6 +403,10 @@
           "sbom_fallback": {
             "type": "boolean",
             "description": "0.6 (V3) : le module préfère le SBOM de l'analyse, absent ou invalide ; il a lu le dépôt."
+          },
+          "ai_relay": {
+            "type": "boolean",
+            "description": "0.7 (contrat 32) : module relié au relais IA ; ses résultats sont marqués « IA », hors verdict jusqu'à confirmation."
           }
         }
       }

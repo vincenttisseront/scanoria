@@ -197,6 +197,15 @@ describe('relais IA : préparation des requêtes (contrat 31)', () => {
     expect(prepareChat(chatBody('a\0b')).messages[1]!.content).toBe('ab')
   })
 
+  it('schéma JSON : ses textes sont masqués avant envoi (description, enum, default)', () => {
+    const s = ghToken()
+    const schema = { type: 'object', description: `jeton ${s}`, properties: { k: { type: 'string', enum: [s], default: s } } }
+    const r = prepareChat(chatBody('x', { response_format: { type: 'json_schema', json_schema: { name: 'n', schema } } }))
+    expect(JSON.stringify(r.format)).not.toContain(s)
+    expect(r.format).toMatchObject({ type: 'object', properties: { k: { type: 'string' } } })
+    expect(r.redacted).toBeGreaterThanOrEqual(3)
+  })
+
   it('embeddings : entrées masquées, nombre et taille bornés', () => {
     const s = ghToken()
     const r = prepareEmbed({ input: [`key ${s}`, 'plain'] })

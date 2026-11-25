@@ -3,7 +3,8 @@
 //
 // Résultats des modules d'analyse par IA (0.7, contrat 32 ; CLAUDE.md § 3.5,
 // K1–K10). Un module relié au relais IA (scan.network: ai-relay) produit des
-// résultats origin = 'ai' : badge « IA », niveau informatif, avec le modèle et
+// résultats origin = 'ai' : badge « IA », niveau informatif (gravité `info`,
+// la gravité native gardée et rendue à la confirmation), avec le modèle et
 // son empreinte, et **hors verdict** tant qu'une personne ne les a pas
 // confirmés. Confirmer est réservé à une personne humaine (users.kind =
 // 'human') de rôle operator ou plus ; c'est tracé dans l'audit, et le résultat
@@ -15,6 +16,8 @@
 
 import type { Queryable } from '../utils/db'
 import { parseModelLabel } from '../ai/models'
+import { readModuleHints } from './manifest'
+import { resolveSeverities } from './severity'
 
 /** Ce que le gate lit d'un résultat pour décider s'il compte (contrat 32). */
 export interface AiOriginFields {
@@ -109,21 +112,28 @@ export async function getAiFinding(db: Queryable, id: string): Promise<AiFinding
 export async function confirmAiFinding(db: Queryable, id: string, userId: number): Promise<{ project_id: string, tool: string }> {
   const user = await db.query<{ kind: string }>('SELECT kind FROM users WHERE id = $1', [userId])
   if (user.rows[0]?.kind !== 'human') throw new AiFindingError('E_NOT_HUMAN')
-  const cur = await db.query<{ project_id: string, tool: string, origin: string, ai_confirmed_at: Date | null }>(
-    'SELECT project_id, tool, origin, ai_confirmed_at FROM findings WHERE id = $1 FOR UPDATE',
+  const cur = await db.query<{ project_id: string, tool: string, origin: string, ai_confirmed_at: Date | null, native_severity: string | null }>(
+    'SELECT project_id, tool, origin, ai_confirmed_at, native_severity FROM findings WHERE id = $1 FOR UPDATE',
     [id],
   )
   const row = cur.rows[0]
   if (!row) throw new AiFindingError('E_NOT_FOUND')
   if (row.origin !== 'ai') throw new AiFindingError('E_NOT_AI')
   if (row.ai_confirmed_at) throw new AiFindingError('E_ALREADY_CONFIRMED')
+  // Informatif jusqu'ici (`info`) : il retrouve la gravité normalisée de sa gravité native.
+  let severity: string | null = null
+  if (row.native_severity) {
+    const hints = await readModuleHints(row.tool)
+    severity = (await resolveSeverities(db, row.tool, [row.native_severity], hints.severityMap)).get(row.native_severity) ?? null
+  }
   await db.query(
     `UPDATE findings SET ai_confirmed_by = $2, ai_confirmed_at = now(), updated_at = now(),
+            severity = COALESCE($3, severity),
             status = CASE WHEN status = 'new' THEN 'confirmed' ELSE status END,
             status_by = CASE WHEN status = 'new' THEN $2 ELSE status_by END,
             status_at = CASE WHEN status = 'new' THEN now() ELSE status_at END
       WHERE id = $1`,
-    [id, userId],
+    [id, userId, severity],
   )
   return { project_id: row.project_id, tool: row.tool }
 }
