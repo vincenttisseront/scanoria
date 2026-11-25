@@ -75,6 +75,17 @@ export interface Forge {
   last_error: string | null
   created_at: string
   projects: number
+  /** 0.7 (J1) : application ou jeton de service, mode poussé ou tiré. */
+  integration?: {
+    app: 'github-app' | 'forgejo-token' | 'gitlab-token' | 'forgejo-oauth' | 'gitlab-oauth' | null
+    scopes: string[]
+    slug: string | null
+    installations: number
+    webhook: boolean
+    mode: 'push' | 'pull'
+    last_webhook_at: string | null
+    rejected_webhooks_30d: number
+  }
 }
 
 export interface ForgeRepo {

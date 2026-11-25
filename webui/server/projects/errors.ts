@@ -15,6 +15,7 @@ export const PROJECT_ERROR_CODES = [
   'E_ARCHIVE_FORMAT', 'E_CONFIRM', 'E_ARCHIVED', 'E_NO_FORGE_ACCESS', 'E_SECRET', 'E_FORGE_IN_USE',
   // 0.7 (G8) : « aucun envoi à l'IA » imposé par un verrou de profil.
   'E_AI_OPT_OUT_LOCKED',
+  'E_FORGEAPP_STATE', 'E_FORGEAPP_CONSOLE_URL', 'E_FORGEAPP_INSTALLATION', 'E_FORGEAPP_KIND',
 ] as const
 export type ProjectErrorCode = (typeof PROJECT_ERROR_CODES)[number] | ForgeErrorCode
 

@@ -26,6 +26,8 @@ import { decryptSecret } from '../utils/secrets'
 import { runProjectSchedules } from '../projects/schedule'
 import { ingestSbomFile } from '../sbom/ingest'
 import { applyGateFloor, planGateFloor } from '../profiles/locks'
+import { applyPullRequestBaseline } from '../gates/pr-baseline'
+import { publishScan } from '../forges/publish'
 
 export interface IngestOutcome { count: number, newCount: number, errors: unknown[] }
 
@@ -54,6 +56,10 @@ export interface Integrations {
   ingestSbomOutput?: (db: pg.Pool, args: { scanId: string, projectId: string, moduleId: string, resultDir: string, path: string }) => Promise<unknown>
   /** 0.5, chantier D : I11 (index reach-index) et I18 (licences du SBOM) après le verdict ; ne lève jamais. */
   enqueueAfterVerdict?: (db: Queryable, args: { scanId: string, projectId: string, scansDir: string }) => Promise<unknown>
+  /** 0.7, chantier D (contrat 33) : « nouveau » d'une PR relatif à sa base (G18). */
+  applyPullRequestBaseline?: (db: pg.Pool, scanId: string) => Promise<unknown>
+  /** 0.7, chantier D (contrats 30, 35) : statut, commentaire et annotations dans la forge ; ne lève jamais. */
+  publishScan?: (db: pg.Pool, scanId: string, opts: { phase: 'pending' | 'early' | 'final', earlyReasons?: string[] }) => Promise<unknown>
 }
 
 /** Bouchon du contrat 6 : verdict non concluant, sans raison inventée. */
@@ -88,4 +94,6 @@ export const defaultIntegrations: Integrations = {
     return undefined
   }),
   ingestSbomOutput: (db, args) => ingestSbomFile(db, args),
+  applyPullRequestBaseline: (db, scanId) => applyPullRequestBaseline(db, scanId),
+  publishScan: (db, scanId, opts) => publishScan(db, scanId, opts),
 }

@@ -58,7 +58,7 @@ const previewing = ref(false)
 
 onMounted(async () => {
   try {
-    forges.value = (await api<{ items: Forge[] }>('/api/forges')).items.filter(f => f.kind !== 'gitlab')
+    forges.value = (await api<{ items: Forge[] }>('/api/forges')).items
     if (forges.value.length) forgeId.value = forges.value[0]!.id
     else mode.value = 'git'
   }

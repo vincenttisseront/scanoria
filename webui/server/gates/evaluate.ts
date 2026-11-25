@@ -28,6 +28,7 @@ import { collapseCorrelated } from '../findings/correlation'
 import { intelJoin } from '../intel/lookup'
 import { applyGateFloor, planGateFloor } from '../profiles/locks'
 import { decideComponent, loadPolicy } from '../licenses/policy'
+import { pullRequestBaseline } from './pr-baseline'
 
 type Reason = z.infer<typeof VerdictDetails>['reasons'][number]
 type Action = Reason['actions'][number]
@@ -607,13 +608,16 @@ export async function evaluateGate(db: Queryable, scanId: string, now = new Date
     ),
   ])
 
+  // 0.7 (D, contrat 33) : une analyse de PR compare à la base de la PR (G18).
+  const baseline = await pullRequestBaseline(db, scanId)
+
   return computeVerdict({
     gateId: row.gate_id,
     rules,
     modules: modules.rows,
     planModules: planModuleIds(row.plan),
     companionModules: planCompanionIds(row.plan),
-    findings: findings.rows,
+    findings: baseline ? findings.rows.map(f => ({ ...f, is_new: !baseline.has(f.id) })) : findings.rows,
     exceptions: exceptions.rows,
     coverage: row.coverage,
     correlate: !planIsPre05(row.plan),
