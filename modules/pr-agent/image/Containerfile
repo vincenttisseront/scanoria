@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Image du module pr-agent (0.7, K2) : PR-Agent 0.50.0 (MIT) et ses
+# dépendances, installés depuis PyPI par empreintes (requirements.lock, produit
+# le 2026-11-25 par « uv pip compile --generate-hashes --python-version 3.13
+# --python-platform x86_64-unknown-linux-gnu » sur « pr-agent==0.50.0 »),
+# roues seulement : rien n'est compilé. L'amont ne publie aucune image
+# épinglable pour la 0.50.0 (docs/MODULES.md § 8).
+#
+# Base : python 3.13.18-slim (étiquette 3.13-slim, index multi-architecture
+# relevé le 2026-11-25). Aucun réseau à l'exécution : le seul échange est le
+# relais IA de l'appliance, à travers le pont (contrat 31). Le jeu de jetons
+# o200k_base de tiktoken est celui que livre litellm (TIKTOKEN_CACHE_DIR) :
+# aucun téléchargement à l'exécution.
+ARG SOURCE_DATE_EPOCH=0
+FROM docker.io/library/python@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
+ARG SOURCE_DATE_EPOCH
+COPY requirements.lock /tmp/requirements.lock
+RUN python3 -m venv /opt/pr-agent \
+ && /opt/pr-agent/bin/pip install --no-cache-dir --no-compile --require-hashes --no-deps --only-binary :all: \
+      -r /tmp/requirements.lock \
+ && rm -f /tmp/requirements.lock \
+ && test -s /opt/pr-agent/lib/python3.13/site-packages/litellm/litellm_core_utils/tokenizers/fb374d419588a4632f3f557e76b4b70aebbca790
+ENV PATH=/opt/pr-agent/bin:/usr/local/bin:/usr/bin:/bin \
+    HOME=/tmp \
+    PYTHONDONTWRITEBYTECODE=1 \
+    GIT_PYTHON_REFRESH=quiet \
+    LITELLM_LOCAL_MODEL_COST_MAP=True \
+    TIKTOKEN_CACHE_DIR=/opt/pr-agent/lib/python3.13/site-packages/litellm/litellm_core_utils/tokenizers
+LABEL org.opencontainers.image.source="https://github.com/the-pr-agent/pr-agent" \
+      org.opencontainers.image.revision="v0.50.0" \
+      org.opencontainers.image.version="0.50.0" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.description="PR-Agent for Scanoria (plain-diff mode, AI relay only)" \
+      io.scanoria.module="pr-agent"
+USER 65534:65534

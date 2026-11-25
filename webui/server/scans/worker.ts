@@ -22,7 +22,7 @@ import { isPullRequestScan } from '../gates/pr-baseline'
 import { copyModuleLog, jobPending, listIncomingJobs, readResult, readRunnerState, resultDir, withdrawJob, writeJob } from './files'
 import { defaultIntegrations, pendingGate, type Integrations } from './integrations'
 import {
-  PLAN_VERSION, incrementalFiles, parsePlan, planHistory, planTimeout, readPlanCatalog, replayAvailability, resolveProfile,
+  PLAN_VERSION, incrementalFiles, parsePlan, prBase, planHistory, planTimeout, readPlanCatalog, replayAvailability, resolveProfile,
   type PlannedModule, type ScanPlan,
 } from './plan'
 import { EFFECTIVE_PRIORITY_SQL, retryDelayS } from './priority'
@@ -313,6 +313,7 @@ export class ScanWorker {
         kind: recorrelate ? 'sbom' : project.source_kind, ref: scan.ref, commit: scan.commit_sha, history: recorrelate ? 'shallow' : planHistory(modules),
         // 0.7 (D, contrat 33) : fichiers modifiés d'une PR, figés dans le plan (G11, G18).
         ...(incrementalFiles(scan) && !recorrelate ? { changed_files: incrementalFiles(scan) } : {}),
+        ...(prBase(scan) && !recorrelate ? { pr_base: prBase(scan) } : {}),
       },
       profile: prof.rows[0]!,
       gate: { id: gate.rows[0]!.id, slug: gate.rows[0]!.slug, rules: rules.data },
@@ -377,6 +378,8 @@ export class ScanWorker {
       cache: scan.trigger !== TRIAL_TRIGGER,
       // 0.7 (D, contrat 33) : le runner les passe aux modules scan.incremental (G18).
       ...(plan.source.changed_files ? { changed_files: plan.source.changed_files } : {}),
+      // 0.7 (K2, K4) : le runner en tire le diff de la PR pour les modules scan.pr_diff.
+      ...(plan.source.pr_base && source.kind === 'git' ? { pr_base: plan.source.pr_base } : {}),
     }
     const parsed = scanJobSchema.safeParse(job)
     // Message générique : la tâche peut contenir un secret, jamais recopié.

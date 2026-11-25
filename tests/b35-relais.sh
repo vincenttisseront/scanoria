@@ -479,5 +479,255 @@ print(vigilance.disable_failed_ai_modules(["ia-faux", "sans-ia"]))
 reg = modules.load_registry()
 print(reg["modules"]["ia-faux"]["enabled"], reg["modules"]["ia-faux"]["status"], reg["modules"]["sans-ia"]["enabled"])' 2> /dev/null | tr '\n' ' ')" "[] [] [] ['ia-faux'] False disabled True "
 
+# --- 8. K2 PR-Agent et K4 Fraim : diff de la PR, convertisseurs, outils ---------------------------
+# 8.1 Runner : scan.pr_diff hors PR (archive, aucun commit de base).
+python3 - "$T/var/lib/scanoria/modules/installed.json" <<'EOF'
+import json, sys
+reg = json.load(open(sys.argv[1]))
+for mid, mode in (("ia-diff", "required"), ("ia-diff-opt", "optional")):
+    e = json.loads(json.dumps(reg["modules"]["ia-faux"]))
+    e["manifest"]["id"] = mid
+    e["manifest"]["scan"]["pr_diff"] = mode
+    e.update(enabled=True, status="healthy")
+    reg["modules"][mid] = e
+json.dump(reg, open(sys.argv[1], "w"))
+EOF
+id=$(uuid); drop "$id" "$(job "$id" '[{"id": "ia-diff", "version": "1.0.0"}, {"id": "ia-diff-opt", "version": "1.0.0"}]')"
+: > "$TMP/podman.log"; run_runner
+expect "pr_diff required hors PR : skipped, avec sa raison" "$(mod "$id" ia-diff | jq -r '.status + " " + .error.code + " " + .error.class + " " + .error.message')" \
+	"skipped E_PR_DIFF_UNAVAILABLE input not a pull request analysis: module not run"
+# Le relais de l'essai est arrêté (section 5) : le module optionnel va jusqu'à la vérification du relais.
+expect "pr_diff optional hors PR : jamais écarté pour le diff, aucun /pr.diff" "$(mod "$id" ia-diff-opt | jq -r '.status + " " + .error.code') $(grep -c '/pr.diff' "$TMP/podman.log")" "skipped E_RELAY_UNAVAILABLE 0"
+expect "pr_diff : raison si la base manque ou si le diff est trop gros" "$(py 'from scanoria import runner
+b = "a" * 40
+print(runner.pr_diff_reason({"pr_base": b}, None)); print(runner.pr_diff_reason({"pr_base": b}, "too-large"))
+print(runner.pr_base({"pr_base": "-x"}), runner.prdiff_mode({"scan": {"pr_diff": "toujours"}}))' | tr '\n' '|')" \
+	"the base commit of the pull request could not be fetched: module not run|the pull request diff exceeds 4 MiB: module not run|None None|"
+expect "pr_diff : jamais mis en cache (V4)" "$(py 'from scanoria import resultcache
+m = {"id": "x", "image": "r/x@sha256:" + "0" * 64, "scan": {"network": "none", "pr_diff": "optional"}}
+m2 = dict(m, scan={"network": "none"})
+args = ({"cache": True, "source": {"kind": "git"}}, {"history": False, "command": ["x"]}, [], "t" * 40, None, False)
+print(resultcache.key_for(args[0], m, *args[1:]), resultcache.key_for(args[0], m2, *args[1:]) is not None)')" "None True"
+
+# 8.2 Diff de la PR calculé par fetch.FETCH_SCRIPT, avec le vrai git (chemins du conteneur remplacés).
+G="$TMP/git"; mkdir -p "$G/forge" "$G/tt"
+(
+	set -e
+	git init -q -b main "$G/forge/depot" && cd "$G/forge/depot"
+	git config user.email essai@exemple.test && git config user.name essai
+	echo un > base.txt && printf '*.txt diff=piege\n' > .gitattributes && git add -A && git commit -qm base
+	git checkout -q -b pr && echo deux >> base.txt && echo 'print(1)' > app.py && git add -A && git commit -qm pr
+) > /dev/null
+BASE=$(git -C "$G/forge/depot" rev-parse main); HEAD_C=$(git -C "$G/forge/depot" rev-parse pr)
+cat > "$TMP/fetch-harness.py" <<'EOF'
+import json, os, subprocess, sys
+sys.path.insert(0, sys.argv[1])
+from scanoria import fetch
+tt, mirror, src, prd, url, ref, want, base, limit = sys.argv[2:11]
+script = fetch.FETCH_SCRIPT.replace("-le %d" % fetch.PR_DIFF_MAX_BYTES, "-le " + limit)
+for i, cpath in enumerate(("/tmp/", "/mirror", "/src", "/git", "/pr/")):
+    script = script.replace(cpath, "\x00%d\x00" % i)
+for i, real in enumerate((tt + "/", mirror, src, src + "-git", prd + "/")):
+    script = script.replace("\x00%d\x00" % i, real)
+env, _ = fetch.git_env(None)
+n = int(env["GIT_CONFIG_COUNT"])
+# Pilote de diff piégé du dépôt (.gitattributes) : jamais lancé (--no-ext-diff, --no-textconv).
+extra = {"protocol.file.allow": "always", "diff.piege.command": "touch " + tt + "/piege-diff",
+         "diff.piege.textconv": "touch " + tt + "/piege-textconv"}
+for i, (k, v) in enumerate(extra.items()):
+    env["GIT_CONFIG_KEY_%d" % (n + i)], env["GIT_CONFIG_VALUE_%d" % (n + i)] = k, v
+env.update({"GIT_CONFIG_COUNT": str(n + len(extra)), "PATH": os.environ["PATH"], "HOME": tt})
+os.makedirs(src, exist_ok=True); os.makedirs(prd, exist_ok=True)
+subprocess.run(["git", "init", "-q", "--bare", mirror], check=True)
+r = subprocess.run(["/bin/sh", "-c", script, "git-fetch", url, ref, want, "shallow", "k" * 16, base],
+                   env=env, capture_output=True, text=True)
+print(json.dumps({"rc": r.returncode, "out": r.stdout, "err": r.stderr[-2000:]}))
+EOF
+prfetch() { # base limite
+	rm -rf "$G/m" "$G/s" "$G/s-git" "$G/p"
+	python3 -I -B "$TMP/fetch-harness.py" "$PYLIB" "$G/tt" "$G/m" "$G/s" "$G/p" "file://$G/forge/depot" pr "$HEAD_C" "$1" "$2"
+}
+R=$(prfetch "$BASE" 4194304)
+expect "diff de PR : récupération réussie, base récupérée à son tour" "$(jq -r .rc <<< "$R") $(jq -r .out <<< "$R" | grep -c '^scanoria=pr-diff$')" "0 1"
+grep -q '^+++ b/app.py$' "$G/p/pr.diff" && grep -q '^+deux$' "$G/p/pr.diff" && ok "diff de PR : base → tête, fichiers ajoutés et modifiés" || ko "diff de PR : contenu inattendu"
+[[ ! -e "$G/tt/piege-diff" && ! -e "$G/tt/piege-textconv" ]] && ok "diff de PR : pilote de diff du dépôt jamais lancé" || ko "diff de PR : pilote de diff lancé"
+R=$(prfetch "$BASE" 10)
+expect "diff de PR trop gros : non transmis" "$(jq -r .out <<< "$R" | grep -c '^scanoria=pr-diff-too-large$') $([[ -e "$G/p/pr.diff" || -e "$G/p/pr.diff.tmp" ]] && echo laissé || echo absent)" "1 absent"
+R=$(prfetch "$(printf 'b%.0s' {1..40})" 4194304)
+expect "base introuvable : récupération réussie quand même, sans diff" "$(jq -r .rc <<< "$R") $(jq -r .out <<< "$R" | grep -c '^scanoria=pr-base-missing$')" "0 1"
+R=$(prfetch "" 4194304)
+expect "hors PR : aucun diff calculé" "$(jq -r .out <<< "$R" | grep -c '^scanoria=pr-')" 0
+
+# 8.3 Convertisseurs (sorties enregistrées et entrées piégées).
+PA="$ROOT/src/rootfs/usr/lib/scanoria/scan-tools/pr-agent/pragent_scan.py"
+FR="$ROOT/src/rootfs/usr/lib/scanoria/scan-tools/fraim/fraim_scan.py"
+expect "PR-Agent : sortie native → SARIF enregistré" "$(python3 -I -B -c 'import json, runpy, sys
+g = runpy.run_path(sys.argv[1]); d = sys.argv[2]
+doc = g["convert"](json.load(open(d + "/tests/native-review.json")), json.load(open(d + "/tests/native-describe.json")),
+                   g["diff_files"](open(d + "/testbed/pr.diff").read()))
+print(doc == json.load(open(d + "/tests/recorded.sarif")))' "$PA" "$ROOT/modules/pr-agent")" True
+expect "PR-Agent : chemins piégés écartés, textes nettoyés, 50 points au plus, « No » sans préoccupation" "$(python3 -I -B -c 'import json, runpy, sys
+g = runpy.run_path(sys.argv[1])
+issues = [{"relevant_file": p, "issue_header": "h\x00\x07", "issue_content": "c" * 9000, "start_line": 9, "end_line": 2}
+          for p in ("../etc/passwd", "/etc/passwd", "a/./b.py", "hors-diff.py", "b/app.py")] + [{"relevant_file": "app.py", "issue_header": "x", "start_line": "4"}] * 60
+doc = g["convert"]({"review": {"key_issues_to_review": issues, "security_concerns": "No", "score": 500,
+                               "estimated_effort_to_review_[1-5]": "3, because"}}, {"type": ["Bug fix", 3], "title": "t"}, {"app.py"})
+r = doc["runs"][0]
+locs = [x.get("locations", [{}])[0].get("physicalLocation", {}).get("artifactLocation", {}).get("uri") for x in r["results"][:6]]
+print(len(r["results"]), locs, r["results"][0]["message"]["text"][:3], len(r["results"][0]["message"]["text"]) <= 4100,
+      r["results"][4]["locations"][0]["physicalLocation"]["region"], [x["ruleId"] for x in r["results"]].count("pr-agent/security-concern"),
+      r["properties"]["scanoria/pr-agent"])' "$PA")" \
+	"50 [None, None, None, None, 'app.py', 'app.py'] h : True {'startLine': 9} 0 {'version': '1.0.0', 'effort': 3, 'description': {'title': 't', 'type': 'Bug fix'}}"
+expect "Fraim : sortie native → SARIF enregistré" "$(python3 -I -B -c 'import json, runpy, sys
+g = runpy.run_path(sys.argv[1]); d = sys.argv[2]
+res, rules = g["convert"]([tuple(x) for x in json.load(open(d + "/tests/native-results.json"))], "/src")
+doc = g["document"](res, rules, {"version": g["VERSION"], "workflows": ["code", "iac", "risk_flagger"], "failed": [],
+                                 "llm_calls": {"ok": 4, "failed": 0}, "partial": False, "pr_risk": g["risk_level"](res)})
+print(doc == json.load(open(d + "/tests/recorded.sarif")))' "$FR" "$ROOT/modules/fraim")" True
+expect "Fraim : chemins hors des sources écartés, gravité bornée, indicateur de risque" "$(python3 -I -B -c 'import runpy, sys
+g = runpy.run_path(sys.argv[1])
+loc = lambda u: [{"physicalLocation": {"artifactLocation": {"uri": u}, "region": {"startLine": 0, "endLine": -1}}}]
+found = [("code", {"level": "bizarre", "message": {"text": "m\x00"}, "locations": loc("file:///src/a.py") + loc("/autre/b.py") + loc("../c.py"),
+                   "properties": {"type": "T", "confidence": 99}}),
+         ("risk_flagger", {"level": "error", "message": {"text": "r"}, "properties": {"risk_type": "Database Changes", "risk_severity": "critical"}}),
+         ("risk_flagger", {"level": "note", "message": {"text": "r2"}, "properties": {"risk_type": "X", "risk_severity": "énorme"}}), "pas un dict"]
+res, rules = g["convert"](found, "/src")
+print([r["ruleId"] for r in res], res[0]["level"], res[0]["properties"], res[0]["locations"], res[0]["message"]["text"],
+      [r["properties"]["severity"] for r in res], g["risk_level"](res), [r["id"] for r in rules])' "$FR")" \
+	"['fraim/code', 'fraim/risk-flagger', 'fraim/risk-flagger'] warning {'severity': 'medium', 'tags': ['ai', 'code'], 'type': 'T'} [{'physicalLocation': {'artifactLocation': {'uri': 'a.py'}}}] T : m ['medium', 'critical', 'low'] critical ['fraim/code', 'fraim/risk-flagger']"
+
+# 8.4 Outils lancés de bout en bout, avec des paquets pr_agent, fraim et litellm de substitution.
+STUB="$TMP/stubs-py"; mkdir -p "$STUB/pr_agent" "$STUB/fraim/core/workflows" "$STUB/fraim/workflows/code" "$STUB/fraim/workflows/iac" "$STUB/fraim/inputs" "$STUB/litellm"
+touch "$STUB/pr_agent/__init__.py" "$STUB/fraim/__init__.py" "$STUB/fraim/core/__init__.py" "$STUB/fraim/core/workflows/__init__.py" \
+	"$STUB/fraim/workflows/__init__.py" "$STUB/fraim/workflows/code/__init__.py" "$STUB/fraim/workflows/iac/__init__.py" "$STUB/fraim/inputs/__init__.py"
+cat > "$STUB/pr_agent/cli.py" <<'EOF'
+import json, os
+def run(inargs):
+    # Substitut de pr_agent.cli.run : rend la réponse préparée de la commande, note l'environnement.
+    with open(os.environ["ESSAI_LOG"], "a") as f:
+        f.write(json.dumps({"args": inargs, "model": os.environ.get("CONFIG__MODEL"), "key": os.environ.get("OPENAI__KEY"),
+                            "base": os.environ.get("OPENAI__API_BASE"), "extra": os.environ.get("PR_AGENT_EXTRA_CONFIG_URL"),
+                            "cwd": os.getcwd()}) + "\n")
+    cmd, out = inargs[-1], inargs[inargs.index("--json-output") + 1]
+    src = os.environ.get("ESSAI_" + cmd.upper())
+    if src == "raise":
+        raise RuntimeError("relay down")
+    if src:
+        with open(src) as i, open(out, "w") as o:
+            o.write(i.read())
+EOF
+cat > "$STUB/litellm/__init__.py" <<'EOF'
+import os
+async def acompletion(**kw):
+    if os.environ.get("ESSAI_LLM") == "down":
+        raise ConnectionError("relay down")
+    return {"ok": True}
+EOF
+cat > "$STUB/fraim/workflows/code/workflow.py" <<'EOF'
+FILE_PATTERNS = ["*.py"]
+EOF
+cat > "$STUB/fraim/workflows/iac/workflow.py" <<'EOF'
+FILE_PATTERNS = ["*.tf"]
+EOF
+cat > "$STUB/fraim/inputs/git_diff.py" <<'EOF'
+class GitDiff:
+    def _git_repo(self):
+        raise RuntimeError("git must not run in the container")
+    def _git_diff(self, repo):
+        raise RuntimeError("git must not run in the container")
+EOF
+cat > "$STUB/fraim/core/workflows/discovery.py" <<'EOF'
+import dataclasses, json, os
+import litellm
+from fraim.inputs.git_diff import GitDiff
+
+@dataclasses.dataclass
+class Opts:
+    location: str = "."
+    model: str = ""
+    temperature: float = 0
+    confidence: int = 7
+    output: str = ""
+    max_concurrent_chunks: int = 5
+    globs: list | None = None
+    diff: bool = False
+    pr_url: str = ""
+    approver: str = ""
+    slack_webhook_url: str = ""
+    no_gh_comment: bool = False
+
+class R:
+    def __init__(self, d): self.d = d
+    def model_dump(self, **kw): return self.d
+
+def make(name):
+    class W:
+        @classmethod
+        def options(cls): return Opts
+        def __init__(self, args): self.args = args
+        async def run(self):
+            with open(os.environ["ESSAI_LOG"], "a") as f:
+                f.write(json.dumps({"workflow": name, "args": dataclasses.asdict(self.args)}) + "\n")
+            if os.environ.get("ESSAI_FAIL") == name:
+                raise RuntimeError("boom")
+            try:
+                await litellm.acompletion(model=self.args.model)
+            except ConnectionError:
+                return []      # Fraim saute le morceau en silence
+            diff = None
+            if self.args.diff:
+                g = GitDiff(); diff = g._git_diff(g._git_repo())
+            return [R({"message": {"text": name + (" diff=%d" % len(diff) if diff else "")}, "level": "error",
+                       "locations": [{"physicalLocation": {"artifactLocation": {"uri": self.args.location + "/app.py"},
+                                                           "region": {"startLine": 1, "endLine": 1}}}],
+                       "properties": {"type": "T", "risk_type": "Database Changes", "risk_severity": "high", "confidence": 8}})]
+    return W
+
+def discover_workflows():
+    return {n: make(n) for n in ("code", "iac", "risk_flagger")}
+EOF
+ESS="$TMP/essai-k"; mkdir -p "$ESS"
+tool() { # outil args… (environnement de l'essai déjà posé)
+	PYTHONPATH="$STUB" TMPDIR="$ESS" ESSAI_LOG="$ESS/log.jsonl" python3 -B "$@" 2> "$ESS/err"
+}
+cp "$ROOT/modules/pr-agent/tests/native-review.json" "$ESS/review.json"; cp "$ROOT/modules/pr-agent/tests/native-describe.json" "$ESS/describe.json"
+: > "$ESS/log.jsonl"; set +e
+SCANORIA_PR_DIFF="$ROOT/modules/pr-agent/testbed/pr.diff" OPENAI_BASE_URL=https://ai-relay.exemple.test:8443/v1 OPENAI_API_KEY=scr_essai \
+	PR_AGENT_EXTRA_CONFIG_URL=https://config.exemple.test/x.toml ESSAI_REVIEW="$ESS/review.json" ESSAI_DESCRIBE="$ESS/describe.json" \
+	tool "$PA" "$ESS/pa.sarif"; rc=$?; set -e
+expect "PR-Agent : review et describe sur le diff seul, SARIF écrit" "$rc $(jq -c '[.runs[0].results[].ruleId]' "$ESS/pa.sarif" 2> /dev/null)" '0 ["pr-agent/key-issue","pr-agent/security-concern"]'
+expect "PR-Agent : modèle de l'appliance par le relais, jeton du pont, aucune configuration distante" \
+	"$(jq -sc '[.[] | [.args[0], .args[-1], .model, .key, .base, .extra, (.cwd | startswith($e))]]' --arg e "$ESS/pr-agent-" "$ESS/log.jsonl")" \
+	'[["--diff-file","review","openai/scanoria","scr_essai","https://ai-relay.exemple.test:8443/v1",null,true],["--diff-file","describe","openai/scanoria","scr_essai","https://ai-relay.exemple.test:8443/v1",null,true]]'
+set +e
+SCANORIA_PR_DIFF="$ESS/absent.diff" tool "$PA" "$ESS/pa2.sarif"; rc1=$?
+SCANORIA_PR_DIFF="$ROOT/modules/pr-agent/testbed/pr.diff" ESSAI_REVIEW=raise ESSAI_DESCRIBE="$ESS/describe.json" tool "$PA" "$ESS/pa2.sarif"; rc2=$?
+tool "$PA"; rc3=$?
+set -e
+expect "PR-Agent : sans diff ou sans revue → 3 (skipped), usage → 2, aucun SARIF" "$rc1 $rc2 $rc3 $([[ -e "$ESS/pa2.sarif" ]] && echo écrit || echo absent)" "3 3 2 absent"
+mkdir -p "$ESS/src" && printf 'app.py\ninfra/main.tf\n../hors.py\n' > "$ESS/changed.txt"
+: > "$ESS/log.jsonl"; set +e
+SCANORIA_PR_DIFF="$ROOT/modules/fraim/testbed/pr.diff" SCANORIA_CHANGED_FILES="$ESS/changed.txt" GITHUB_TOKEN=ghp_essai \
+	tool "$FR" "$ESS/src" "$ESS/fr.sarif"; rc=$?; set -e
+expect "Fraim : code, iac et risk_flagger, SARIF écrit, indicateur de risque" "$rc $(jq -c '[.runs[0].results[].ruleId], .runs[0].properties["scanoria/fraim"].pr_risk' "$ESS/fr.sarif" | tr '\n' ' ')" \
+	'0 ["fraim/code","fraim/iac","fraim/risk-flagger"] "high" '
+expect "Fraim : fichiers modifiés seulement, diff lu dans le fichier, aucune URL de PR ni webhook" \
+	"$(jq -sc '[.[] | [.workflow, .args.globs, .args.diff, .args.pr_url, .args.slack_webhook_url, .args.no_gh_comment, .args.model]]' "$ESS/log.jsonl")" \
+	'[["code",["app.py"],false,"","",false,"openai/scanoria"],["iac",["infra/main.tf"],false,"","",false,"openai/scanoria"],["risk_flagger",null,true,"","",true,"openai/scanoria"]]'
+expect "Fraim : chemins relatifs aux sources" "$(jq -r '[.runs[0].results[].locations[0].physicalLocation.artifactLocation.uri] | unique | join(",")' "$ESS/fr.sarif")" app.py
+printf 'README.md\n' > "$ESS/changed.txt"; : > "$ESS/log.jsonl"; set +e
+SCANORIA_CHANGED_FILES="$ESS/changed.txt" tool "$FR" "$ESS/src" "$ESS/fr2.sarif"; rc1=$?
+set -e
+expect "Fraim : PR sans fichier concerné → SARIF vide, aucun workflow" "$rc1 $(jq -c '.runs[0].results | length' "$ESS/fr2.sarif") $(wc -l < "$ESS/log.jsonl")" "0 0 0"
+set +e
+ESSAI_LLM=down tool "$FR" "$ESS/src" "$ESS/fr3.sarif"; rc2=$?
+set -e
+expect "Fraim : relais injoignable → 3 (skipped), jamais « aucun résultat »" "$rc2 $([[ -e "$ESS/fr3.sarif" ]] && echo écrit || echo absent) $(cat "$ESS/err")" \
+	"3 absent fraim: every call to the AI relay failed"
+set +e
+ESSAI_FAIL=code tool "$FR" "$ESS/src" "$ESS/fr4.sarif"; rc3=$?
+set -e
+expect "Fraim : un workflow en échec n'empêche pas les autres" "$rc3 $(jq -c '.runs[0].properties["scanoria/fraim"] | [.workflows, .failed]' "$ESS/fr4.sarif")" '0 [["iac"],["code"]]'
+
 printf '\n%d réussis, %d échoués\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]]

@@ -338,7 +338,8 @@ def podman_args(manifest, src, out, feeds, tool=True, image=None):
     res = manifest["resources"]
     args = [
         "run", "--rm", "--pull=never",
-        "--network=none" if scan["network"] == "none" else "--network=slirp4netns",
+        # ai-relay : jamais de réseau ici ; le relais passe par le socket du pont (b35-live).
+        "--network=none" if scan["network"] in ("none", "ai-relay") else "--network=slirp4netns",
         "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
         # Mêmes bornes que l'appliance (testbed.confined_args) : le banc
         # d'essai de la CI doit reproduire exactement celui de l'installation.

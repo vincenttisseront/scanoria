@@ -294,7 +294,7 @@ def reset_network():
 # Marqueurs : « scanoria=nospace » (code 75, tmpfs trop petit), « scanoria=corrupt »
 # (code 74, miroir à recréer), puis la dernière ligne « commit=… ».
 FETCH_SCRIPT = r"""set -eu
-url=$1; ref=$2; want=$3; mode=$4; key=$5
+url=$1; ref=$2; want=$3; mode=$4; key=$5; base=${6:-}
 export GIT_DIR=/mirror
 have() { git cat-file -e "$1^{commit}" 2>/dev/null; }
 shallow=; [ -f /mirror/shallow ] && shallow=1
@@ -348,8 +348,32 @@ if [ "$mode" = full ]; then
   printf '[core]\n\trepositoryformatversion = 0\n\tbare = false\n' > /git/config
   printf '%s\n' "$commit" > /git/HEAD
 fi
+# 0.7 (K2, K4) : diff de la PR pour les modules scan.pr_diff, calculé ici sans
+# rien exécuter du dépôt (aucun pilote de diff, aucun textconv) ; base récupérée
+# à son tour si le miroir ne l'a pas. Échec : aucun diff, jamais une erreur.
+if [ -n "$base" ]; then
+  if ! have "$base"; then
+    if [ "$mode" = full ]; then depth=; else depth=--depth=1; fi
+    fetch "$base" || true
+  fi
+  if have "$base"; then
+    mb=$(git merge-base "$base" "$commit" 2>/dev/null) || mb=$base
+    if git -c diff.noprefix=false diff --no-color --no-ext-diff --no-textconv -M "$mb" "$commit" > /pr/pr.diff.tmp 2>/tmp/diff.err \
+        && [ "$(wc -c < /pr/pr.diff.tmp)" -le PR_DIFF_MAX ]; then
+      mv /pr/pr.diff.tmp /pr/pr.diff; echo scanoria=pr-diff
+    else
+      rm -f /pr/pr.diff.tmp; echo scanoria=pr-diff-too-large
+    fi
+  else
+    echo scanoria=pr-base-missing
+  fi
+fi
 echo "commit=$commit"
 """
+
+# Diff de PR au-delà de cette taille : non transmis (le module est « skipped »).
+PR_DIFF_MAX_BYTES = 4 << 20
+FETCH_SCRIPT = FETCH_SCRIPT.replace("PR_DIFF_MAX", str(PR_DIFF_MAX_BYTES))
 
 # Configuration imposée à chaque appel de git (variables GIT_CONFIG_*), en plus
 # de GIT_CONFIG_NOSYSTEM et GIT_CONFIG_GLOBAL=/dev/null : aucun hook, aucun
@@ -473,11 +497,11 @@ def _clear(d):
             os.unlink(q)
 
 
-def _prepare_dirs(ws, history):
-    """ws/src (déjà créé et monté en tmpfs par le runner, ou créé ici) et ws/git."""
-    for d in ("src", "git"):
+def _prepare_dirs(ws, history, pr_base=None):
+    """ws/src (déjà créé et monté en tmpfs par le runner, ou créé ici), ws/git, et ws/pr (diff de PR)."""
+    for d in ("src", "git", "pr"):
         path = os.path.join(ws, d)
-        if d == "git" and history != "full":
+        if (d == "git" and history != "full") or (d == "pr" and not pr_base):
             continue
         if os.path.isdir(path) and not os.path.islink(path):
             _clear(path)
@@ -487,7 +511,7 @@ def _prepare_dirs(ws, history):
 
 
 def fetch_git(job, ws, registry_modules, history, log_path, secrets, mirror=None, info=None,
-              extra_memory_mb=0):
+              extra_memory_mb=0, pr_base=None):
     """Met à jour le miroir du projet (V2) puis extrait le commit dans ws/src (et
     ws/git pour l'historique complet) ; retourne le commit.
 
@@ -495,7 +519,9 @@ def fetch_git(job, ws, registry_modules, history, log_path, secrets, mirror=None
     sans elle, un miroir jetable dans ws/mirror. info reçoit « mirror » : hit
     (commit déjà présent, forge non contactée), fetched (nouveaux objets seulement),
     created (premier clone) ou ephemeral. extra_memory_mb : taille du tmpfs de
-    ws/src, dont les pages sont comptées au conteneur qui les écrit."""
+    ws/src, dont les pages sont comptées au conteneur qui les écrit. pr_base
+    (0.7, K2/K4) : commit de base d'une PR ; le diff est écrit dans ws/pr/pr.diff
+    et info["pr_diff"] reçoit ok, too-large ou base-missing."""
     from . import gitmirror
     src = job["source"]
     host, port = parse_url(src["url"])
@@ -504,6 +530,8 @@ def fetch_git(job, ws, registry_modules, history, log_path, secrets, mirror=None
     want = src.get("commit") or ""
     if want and not SHA_RE.match(want):
         raise SourceError("E_SOURCE_REF", "input", "invalid commit")
+    if pr_base is not None and not SHA_RE.match(str(pr_base)):
+        pr_base = None
     m = _container_ready(registry_modules)
     addrs = resolve(host, port)
     ensure_network()
@@ -514,9 +542,9 @@ def fetch_git(job, ws, registry_modules, history, log_path, secrets, mirror=None
         mirror.__enter__()
     try:
         for attempt in (0, 1):
-            _prepare_dirs(ws, history)
+            _prepare_dirs(ws, history, pr_base)
             rc, out = _fetch_once(job, ws, m, host, port, addrs, history, want, log_path, secrets,
-                                  mirror.path, extra_memory_mb)
+                                  mirror.path, extra_memory_mb, pr_base)
             if rc == 74 and attempt == 0:
                 common.log("runner: git mirror unusable, recreated by a shallow clone")
                 mirror.recreate()
@@ -539,12 +567,17 @@ def fetch_git(job, ws, registry_modules, history, log_path, secrets, mirror=None
     if want and found[-1] != want:
         raise SourceError("E_SOURCE_NOT_FOUND", "input", "requested commit not found")
     hit = re.search(r"^scanoria=mirror-hit$", out, re.M) is not None
+    if pr_base:
+        diff = re.findall(r"^scanoria=(pr-diff|pr-diff-too-large|pr-base-missing)$", out, re.M)
+        info["pr_diff"] = {"pr-diff": "ok", "pr-diff-too-large": "too-large"}.get(diff[-1] if diff else "",
+                                                                                 "base-missing")
     info["mirror"] = "ephemeral" if mirror.project_id is None else (
         "hit" if hit else ("created" if mirror.state == "created" else "fetched"))
     return found[-1]
 
 
-def _fetch_once(job, ws, m, host, port, addrs, history, want, log_path, secrets, mirror_path, extra_mb):
+def _fetch_once(job, ws, m, host, port, addrs, history, want, log_path, secrets, mirror_path, extra_mb,
+                pr_base=None):
     """Un passage du conteneur git-fetch ; (code de sortie, sortie)."""
     from . import gitmirror
     src = job["source"]
@@ -555,6 +588,8 @@ def _fetch_once(job, ws, m, host, port, addrs, history, want, log_path, secrets,
     mounts = [(mirror_path, "/mirror", "rw"), (os.path.join(ws, "src"), "/src", "rw")]
     if history == "full":
         mounts.append((os.path.join(ws, "git"), "/git", "rw"))
+    if pr_base:
+        mounts.append((os.path.join(ws, "pr"), "/pr", "rw"))
     if cred_dir:
         mounts.append((cred_dir, "/cred", "ro"))
     ca = _ca_bundle()
@@ -571,7 +606,7 @@ def _fetch_once(job, ws, m, host, port, addrs, history, want, log_path, secrets,
         args += ["--env", k]           # valeur héritée de l'environnement : jamais dans l'argv
     args += ["--entrypoint", '["/bin/sh"]', m["image"], "-c", FETCH_SCRIPT, "git-fetch",
              src["url"], src["ref"], want, "full" if history == "full" else "shallow",
-             gitmirror.ref_key(src["ref"])]
+             gitmirror.ref_key(src["ref"])] + ([pr_base] if pr_base else [])
     allowed = False
     try:
         allow(ip, addrs, port)

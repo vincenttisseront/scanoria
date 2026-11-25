@@ -121,6 +121,9 @@ def key_for(job, m, spec, feeds, tree, sbom_file, sbom_mounted):
     # G18 (0.7) : une analyse limitée aux fichiers modifiés d'une PR n'est jamais mise en cache.
     if scan.get("incremental") is True and job.get("changed_files") is not None:
         return None
+    # K2/K4 (0.7) : une sortie qui dépend du diff d'une PR n'est jamais mise en cache.
+    if scan.get("pr_diff") in ("required", "optional"):
+        return None
     image = m.get("image") or ""
     digest = image.split("@", 1)[1] if "@sha256:" in image else None
     if not digest or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):

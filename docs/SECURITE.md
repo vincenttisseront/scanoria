@@ -98,6 +98,17 @@ de l'IA (relais, modèle, sortie invalide) ne rend jamais un verdict non
 concluant : le module est « skipped », la panne figure dans la couverture de
 l'analyse (G15, `ai-module-failed`) et dans la santé des analyses (G20).
 
+**Diff de la PR (K2, K4).** Le diff est calculé dans le conteneur de
+récupération, avec la configuration Git imposée (aucun hook, aucun lien
+symbolique) et `--no-ext-diff --no-textconv` : un pilote de diff déclaré par
+le dépôt (`.gitattributes`) n'est jamais lancé (b35). Le commit de base est
+revalidé (SHA-1 ou SHA-256) par la console, le contrat de tâche et le runner.
+Le diff est monté en lecture seule dans le conteneur du module, borné à
+4 Mio. PR-Agent et Fraim ne reçoivent ni jeton de forge, ni URL de PR, ni
+webhook Slack : ils ne peuvent rien publier, et Fraim lit le diff dans ce
+fichier au lieu de lancer git. Les outils tree-sitter que Fraim propose au
+modèle sont retirés par le relais, comme tout outil.
+
 ## 2. Dépôt et CI
 
 - **Dépôt public, mais non annoncé** : aucun nom d'hôte, domaine, adresse ou

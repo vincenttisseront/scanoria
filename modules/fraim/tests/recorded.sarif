@@ -1,0 +1,172 @@
+{
+ "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+ "version": "2.1.0",
+ "runs": [
+  {
+   "tool": {
+    "driver": {
+     "name": "fraim",
+     "version": "1.0.0",
+     "informationUri": "https://github.com/fraim-dev/fraim",
+     "rules": [
+      {
+       "id": "fraim/code",
+       "shortDescription": {
+        "text": "Faille probable dans le code (Fraim)"
+       },
+       "properties": {
+        "tags": [
+         "ai"
+        ]
+       }
+      },
+      {
+       "id": "fraim/iac",
+       "shortDescription": {
+        "text": "Configuration d'infrastructure risquée (Fraim)"
+       },
+       "properties": {
+        "tags": [
+         "ai"
+        ]
+       }
+      },
+      {
+       "id": "fraim/risk-flagger",
+       "shortDescription": {
+        "text": "Changement à risque dans la PR (Fraim)"
+       },
+       "properties": {
+        "tags": [
+         "ai"
+        ]
+       }
+      }
+     ]
+    }
+   },
+   "results": [
+    {
+     "ruleId": "fraim/code",
+     "level": "error",
+     "message": {
+      "text": "SQL Injection : User input is concatenated into an SQL query\n\nname reaches db.execute without parameters"
+     },
+     "properties": {
+      "severity": "high",
+      "tags": [
+       "ai",
+       "code"
+      ],
+      "type": "SQL Injection",
+      "confidence": 9
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "app.py"
+        },
+        "region": {
+         "startLine": 5,
+         "endLine": 6
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "fraim/iac",
+     "level": "error",
+     "message": {
+      "text": "Public Storage : Bucket ACL grants public read and write"
+     },
+     "properties": {
+      "severity": "high",
+      "tags": [
+       "ai",
+       "iac"
+      ],
+      "type": "Public Storage",
+      "confidence": 8
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "main.tf"
+        },
+        "region": {
+         "startLine": 3,
+         "endLine": 3
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "fraim/risk-flagger",
+     "level": "warning",
+     "message": {
+      "text": "Database Changes : New database query from user input\n\nA query on users is added"
+     },
+     "properties": {
+      "severity": "medium",
+      "tags": [
+       "ai",
+       "risk-flagger"
+      ],
+      "type": "Database Changes",
+      "confidence": 8
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "app.py"
+        },
+        "region": {
+         "startLine": 5,
+         "endLine": 5
+        }
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "fraim/code",
+     "level": "error",
+     "message": {
+      "text": "Escape : Path outside of the sources"
+     },
+     "properties": {
+      "severity": "high",
+      "tags": [
+       "ai",
+       "code"
+      ],
+      "type": "Escape",
+      "confidence": 9
+     }
+    }
+   ],
+   "properties": {
+    "scanoria/fraim": {
+     "version": "1.0.0",
+     "workflows": [
+      "code",
+      "iac",
+      "risk_flagger"
+     ],
+     "failed": [],
+     "llm_calls": {
+      "ok": 4,
+      "failed": 0
+     },
+     "partial": false,
+     "pr_risk": "medium"
+    }
+   }
+  }
+ ]
+}
