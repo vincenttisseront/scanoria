@@ -79,6 +79,14 @@ def option_errors(manifest):
     return errs
 
 
+
+def _output_dir_name(cmd, path, kind):
+    """« --output-path /out --output-name kics » (KICS) : <répertoire>/<nom>.<format>."""
+    def val(flag):
+        return cmd[cmd.index(flag) + 1] if flag in cmd and cmd.index(flag) + 1 < len(cmd) else None
+    d, n = val("--output-path"), val("--output-name")
+    return bool(d and n) and path == "%s/%s.%s" % (d.rstrip("/"), n, kind)
+
 def scan_errors(manifest):
     errs = []
     scan = manifest.get("scan")
@@ -99,7 +107,8 @@ def scan_errors(manifest):
     for kind, out in (manifest.get("outputs") or {}).items():
         for key in ("command", "history_command", "sbom_command"):
             # « --output format=/out/fichier » (Syft) compte comme le chemin lui-même.
-            if key in scan and not any(a == out["path"] or a.endswith("=" + out["path"]) for a in scan[key]):
+            if key in scan and not any(a == out["path"] or a.endswith("=" + out["path"]) for a in scan[key]) \
+                    and not _output_dir_name(scan[key], out["path"], kind):
                 errs.append(f"outputs.{kind}: {out['path']} absent de scan.{key}")
     if "sbom_command" in scan and "sbom" not in scan.get("inputs", []):
         errs.append("scan.sbom_command exige l'entrée « sbom »")
@@ -340,6 +349,13 @@ def podman_args(manifest, src, out, feeds, tool=True, image=None):
     ]
     for feed in manifest["requires"]["feeds"]:
         args.append(f"--volume={os.path.join(feeds, feed)}:/feeds/{feed}:ro")
+    # Jeux de règles (G4) : comme runner.ruleset_mount et testbed, /rules est
+    # toujours monté (vide au banc d'essai), car la commande peut le citer.
+    if scan.get("rulesets"):
+        rules = os.path.join(os.path.dirname(os.path.abspath(out)), "rules-" + os.path.basename(os.path.abspath(out)))
+        if not os.path.isdir(rules):
+            os.mkdir(rules, 0o755)
+        args.append(f"--volume={rules}:/rules:ro")
     # Outil de l'appliance (scan.tool) monté en lecture seule sur /scanoria, comme svcnet.tool_mount
     # (tool=False : l'appelant monte lui-même celui de sa racine de test, comme sonar_live).
     if tool and scan.get("tool"):

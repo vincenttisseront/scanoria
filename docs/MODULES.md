@@ -42,6 +42,13 @@ qui est risqué ou irréversible (licence restrictive, désinstallation).
 | `grype-db` | feed | sca | schéma 6 | Apache-2.0 (données : conditions des sources) | — |
 | `dependency-track` | service | sbom, sca, licenses | 4.14.7 | Apache-2.0 | — |
 | `dtrack-upload` | scanner | sbom | 1.0.0 | PSF-2.0 (image Python ; script de l'appliance AGPL) | module `dependency-track` |
+| `opengrep` | scanner (image construite, § 8) | sast | 2.0.0 | LGPL-2.1-only (règles maison de l'appliance : AGPL-3.0-or-later) | — |
+| `semgrep` | scanner | sast | 1.187.0 | LGPL-2.1-only (règles officielles : Semgrep Rules License, jamais livrées) | jeu de règles G4 |
+| `checkov` | scanner | iac | 3.4.11 | Apache-2.0 | — |
+| `kics` | scanner | iac | 2.2.1 | Apache-2.0 | — |
+| `bandit` | scanner | sast | 1.9.4 | Apache-2.0 | — |
+| `zizmor` | scanner (image construite, § 8) | ci | 1.33.1 | MIT | — |
+| `scorecard` | scanner (image construite, § 8) | ci | 5.7.0 | Apache-2.0 | — |
 
 `git-fetch` est un **module système** (catégorie `system`) : il n'analyse rien,
 n'entre dans aucun profil, et `scanoria-runner` l'utilise pour cloner les dépôts
@@ -397,6 +404,52 @@ revérifier la licence, remplir le gabarit commenté de
   l'inventaire et le rend en CycloneDX avec la propriété
   `scanoria:dtrack:project` : la console relie l'analyse au projet et affiche
   le lien. Sans Dependency-Track, il est sauté (`E_SERVICE_MISSING`).
+
+### 4.6 SAST, IaC, CI et jeux de règles G4 (0.7, chantier A, contrat 34)
+
+- **Enveloppe commune** `scan-tools/sast/sast_run.py` (outil `sast`, monté sur
+  `/scanoria`) : `python3 -I /scanoria/sast_run.py <moteur> --out=/out/<moteur>.sarif`
+  pour Opengrep, Semgrep CE, Checkov, Bandit, zizmor et Scorecard. Elle lance
+  l'outil sans réseau, puis revoit le SARIF : chemins relatifs à `/src` (un
+  chemin « .. » ou absolu est écarté), extraits bornés à 400 caractères, et pour
+  les règles de secrets (identifiant, CWE-259/321/547/798, étiquette « secret »)
+  extrait, message et corrections remplacés : la valeur n'est jamais recopiée.
+  Bandit (JSON) et Scorecard (JSON) sont convertis en SARIF ; codes de sortie :
+  0 réussite, 2 échec de l'outil, 3 règles invalides, 4 aucune règle.
+- **Opengrep** est le SAST par défaut ; ses règles maison
+  (`rules/opengrep/scanoria-base.yaml`, AGPL, identifiants `scanoria-…`) s'ajoutent
+  aux jeux G4 tant que l'option `builtin_rules` reste vraie. **Semgrep CE**
+  n'exécute que des jeux importés par l'administrateur (les règles officielles
+  sont sous Semgrep Rules License : usage interne, redistribution interdite) ;
+  sans jeu rattaché au profil, il n'est pas planifié (trou de couverture
+  `no-ruleset`) et le runner le marque `skipped` (`E_RULESET_NONE`).
+- **Checkov et KICS** : gravités natives par `severity_map` (G5) ; Checkov ne
+  publie pas de gravité dans son SARIF (niveau `error` → `medium`).
+- **zizmor (H1)** ne tourne que sur un dépôt qui contient des workflows
+  (`applies_to`), hors ligne (`--offline`). **Scorecard (H2)** tourne en
+  `--local` : les contrôles qui interrogent l'API de la forge (revue, protection
+  de branche, mainteneurs) ne sont pas évalués, c'est un trou de couverture
+  assumé. Un contrôle faible donne un résultat informatif ou `low` ; seul le
+  score global sous `min_score` (option, défaut 4) donne
+  `scorecard/score-below-threshold`, `high`, catégorie `ci`, donc bloquant par
+  défaut (famille SAST du quality gate).
+- **Jeux de règles G4** : versions immuables en base (`rulesets`,
+  `ruleset_versions`), rattachées aux profils (`profile_rulesets`, dernière
+  version ou version épinglée). Le plan d'analyse fige slug, version et sha256
+  par module (G11) ; le worker dépose le contenu dans
+  `jobs/rulesets/<sha256>` (0600, propriétaire scanoria) ; le runner le relit
+  sans faire confiance à la console (lien unique, propriétaire, taille ≤ 1 Mio,
+  empreinte, contrôles statiques) et le monte en lecture seule sous
+  `/rules/<slug>/` : `rules.yaml` (Opengrep, Semgrep), `gitleaks.toml`
+  (`GITLEAKS_CONFIG`, un seul jeu ; `[extend]` limité à `useDefault`),
+  `policies.yaml` (Checkov), requêtes KICS dépliées en
+  `<id>/{metadata.json,query.rego}`. Un jeu invalide donne une erreur
+  `E_RULESET_INVALID` de classe `input`, jamais un résultat vide. La clé de
+  réutilisation (V4) inclut les empreintes des jeux.
+- **Validation** : demande `validate-ruleset` (moteur, sha256, au plus 10
+  exemples de 8 Kio) ; le helper lance le module du moteur, confiné, sur les
+  seules règles du jeu (règles intégrées retirées quand l'outil le permet) et
+  rend `ok`, les erreurs du moteur et le nombre de résultats par exemple.
 
 ## 5. Banc d'essai (F12)
 

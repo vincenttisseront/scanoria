@@ -10,7 +10,7 @@ import { ForgeError, forgeGetJson, forgeSendJson } from './http'
 import { gitlabApiBase, gitlabProjectId, gitlabRequest } from './gitlab'
 import { checkCommit, type ForgeAccess } from './types'
 import {
-  checkNumber, emailOf, loginOf, uniqueAuthors,
+  checkLogin, checkNumber, emailOf, loginOf, uniqueAuthors,
   type ForgeComment, type ForgePublisherImpl, type PullRequestRef,
 } from './pr-types'
 
@@ -125,6 +125,14 @@ export function gitlabPublisher(access: ForgeAccess): ForgePublisherImpl {
         if (one) out.push(one)
       }
       return out
+    },
+
+    async permission(repo, login) {
+      // Membres directs et hérités ; Developer (30) et plus peuvent pousser.
+      const raw = await pages<{ username?: unknown, access_level?: unknown }>(p => `${proj(repo)}/members/all?query=${encodeURIComponent(checkLogin(login))}&per_page=${PAGE}&page=${p}`, 100)
+      const m = raw.find(x => typeof x?.username === 'string' && x.username.toLowerCase() === login.toLowerCase())
+      const level = typeof m?.access_level === 'number' ? m.access_level : 0
+      return level >= 40 ? 'admin' : level >= 30 ? 'write' : level >= 10 ? 'read' : 'none'
     },
 
     async comments(repo, number, since) {

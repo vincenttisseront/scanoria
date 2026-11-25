@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-25T00:00:00Z",
+  "repo": {"name": "file:///src", "commit": "unknown"},
+  "scorecard": {"version": "v5.7.0", "commit": "unknown"},
+  "score": 3.2,
+  "checks": [
+    {"name": "Token-Permissions", "score": 0, "reason": "detected GitHub workflow tokens with excessive permissions",
+     "details": ["Warn: topLevel 'write-all' permission set: .github/workflows/triage.yml:8"],
+     "documentation": {"short": "Determines if the project's workflows follow the principle of least privilege.", "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#token-permissions"}},
+    {"name": "Dangerous-Workflow", "score": 0, "reason": "dangerous workflow patterns detected",
+     "details": ["Warn: untrusted code checkout: .github/workflows/triage.yml:15"],
+     "documentation": {"short": "Determines if the project's GitHub Action workflows avoid dangerous patterns.", "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#dangerous-workflow"}},
+    {"name": "Binary-Artifacts", "score": 9, "reason": "binaries present in source code",
+     "details": ["Warn: binary detected: tools/helper.jar:1"],
+     "documentation": {"short": "Determines if the project has generated executable (binary) artifacts in the source repository.", "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#binary-artifacts"}},
+    {"name": "Pinned-Dependencies", "score": -1, "reason": "no dependencies found", "details": null,
+     "documentation": {"short": "Determines if the project has declared and pinned the dependencies of its build process.", "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#pinned-dependencies"}},
+    {"name": "License", "score": 10, "reason": "license file detected", "details": [],
+     "documentation": {"short": "Determines if the project has defined a license.", "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md#license"}}
+  ]
+}

@@ -8,6 +8,7 @@ import { getConfig } from '../utils/config'
 import { getRunningVersion } from '../utils/appliance'
 import { PROJECT_OPS, projectSchemas } from '../projects/openapi'
 import { VIGILANCE_OPS, vigilanceSchemas } from '../vigilance/openapi'
+import { RULESET_OPS, rulesetSchemas } from '../rulesets/openapi'
 import { TRIAGE_OPS, triageSchemas } from '../findings/openapi-07'
 
 type Role = 'public' | 'viewer' | 'operator' | 'admin'
@@ -139,6 +140,7 @@ const OPS: Record<string, Record<string, Op>> = {
   '/api/badges/projects/{id}': { put: { summary: 'Enable or disable the public badge of a project (disabled by default)', role: 'operator', body: 'BadgeUpdate' } },
   ...PROJECT_OPS,
   ...VIGILANCE_OPS,
+  ...RULESET_OPS,
   ...TRIAGE_OPS,
   '/api/scans': {
     get: { summary: 'Scan queue (status=active, in worker order) or history (filters: project, status, verdict, trigger; paginated)', role: 'viewer' },
@@ -391,6 +393,7 @@ export default defineEventHandler(async () => {
         },
         ...projectSchemas(),
         ...vigilanceSchemas(),
+        ...rulesetSchemas(),
         ...triageSchemas(),
         FindingStatus: {
           type: 'object', additionalProperties: false, required: ['status'],

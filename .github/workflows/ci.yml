@@ -609,6 +609,29 @@ jobs:
       - name: tests/b34-live.sh
         run: sudo env "PATH=$PATH" bash tests/b34-live.sh
 
+  sast-live:
+    # Modules SAST, IaC et CI (chantier A de la 0.7) : images (construites ou
+    # épinglées), bancs d'essai (F12), analyse par le vrai runner, jeux de règles
+    # G4 montés et validés par leur moteur, confinés comme sur l'appliance
+    # (tests/b31-live.sh).
+    name: sast-live (SAST, IaC et CI par le runner, b31-live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dépendances (podman, jq, zstd, python3-yaml, python3-jsonschema)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends jq zstd podman netavark nftables python3-yaml python3-jsonschema curl openssl
+          sudo podman --version
+      # Machine jetable : le runner tourne en root avec le vrai podman (§ 6.4).
+      - name: tests/b31-live.sh
+        run: sudo env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 bash tests/b31-live.sh
+
   ia-modules-live:
     # Modules d'analyse du code IA de la 0.7 (chantier F, K3, K5–K7) : image
     # construite depuis modules/<id>/image (pas d'image amont), puis banc
@@ -642,7 +665,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live, forges-live, relay-live, ia-modules-live]
+    needs: [lint, gitleaks, osv-scanner, dependency-review, console, batteries, iso-build, sonarqube, modules-live, runner-live, feeds-live, services-live, sonarqube-live, sbom-live, reach-live, modelscan-live, execution-live, vigilance-live, bundle-live, forges-live, relay-live, sast-live, ia-modules-live]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

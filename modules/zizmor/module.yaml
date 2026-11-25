@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module zizmor (0.7, chantier A, H1) : audit des workflows GitHub Actions
+# (injection de modèle dans un script, pull_request_target, actions non
+# épinglées, droits trop larges, identifiants persistés…). Lancé
+# automatiquement dès que le dépôt contient des workflows (détection F1 « ci »,
+# contrat 23). Mode --offline : les audits qui interrogent l'API GitHub sont
+# omis, ce que la console note en couverture.
+#
+# Amont relevé le 2026-11-25 : zizmor 1.33.1 (PyPI et dernière étiquette du
+# dépôt zizmorcore/zizmor), MIT. Image d'outil Scanoria (image/Containerfile).
+id: zizmor
+name: zizmor
+description:
+  fr: Audit de sécurité des workflows GitHub Actions et Forgejo Actions (injections, déclencheurs dangereux, actions non épinglées, droits trop larges).
+  en: Security audit of GitHub Actions and Forgejo Actions workflows (injections, dangerous triggers, unpinned actions, excessive permissions).
+type: scanner
+categories: [ci]
+license:
+  spdx: MIT
+  url: https://github.com/zizmorcore/zizmor/blob/v1.33.1/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: zizmor (MIT), roue PyPI non modifiée ; image de base python:3.13-slim (PSF-2.0).
+upstream:
+  homepage: https://docs.zizmor.sh
+  source: https://github.com/zizmorcore/zizmor
+image_pending: true
+version: "1.33.1"
+resources: { min_ram_mb: 256, min_cpu: 1, disk_mb: 200 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/sast_run.py", "zizmor", "--out=/out/zizmor.sarif"]
+  tool: sast
+  env:
+    PYTHONDONTWRITEBYTECODE: "1"
+  applies_to:
+    detect: [ci]
+    paths:
+      - ".github/workflows/*.{yml,yaml}"
+      - ".forgejo/workflows/*.{yml,yaml}"
+      - ".gitea/workflows/*.{yml,yaml}"
+      - "**/action.{yml,yaml}"
+  timeout_s: 600
+  network: none
+  exit_codes_ok: [0]
+  severity_map: { "level:error": high, "level:warning": medium, "level:note": low }
+outputs:
+  sarif: { path: /out/zizmor.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    - { rule: zizmor/template-injection, category: ci, min: 1 }
+    - { rule: zizmor/dangerous-triggers, category: ci, min: 1 }
+health: { command: ["zizmor", "--version"] }
+upgrade: { policy: on-demand }
