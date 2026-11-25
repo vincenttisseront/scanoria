@@ -9,6 +9,7 @@ import { randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 import { applyMigrations, loadMigrationsFromDir } from '../../migrate.mjs'
+import { endPool, trackClients } from '../../server/utils/db'
 
 export const DATABASE_URL = process.env.DATABASE_URL ?? ''
 export const MIGRATIONS_DIR = fileURLToPath(new URL('../../server/db/migrations', import.meta.url))
@@ -37,7 +38,7 @@ export async function createTestDatabase(opts: { migrate?: boolean } = {}): Prom
     await admin.end()
   }
   const url = withDatabase(DATABASE_URL, name)
-  const pool = new pg.Pool({ connectionString: url, max: 5 })
+  const pool = trackClients(new pg.Pool({ connectionString: url, max: 5 }))
   if (opts.migrate !== false) {
     const client = await pool.connect()
     try {
@@ -52,7 +53,10 @@ export async function createTestDatabase(opts: { migrate?: boolean } = {}): Prom
     url,
     pool,
     drop: async () => {
-      await pool.end()
+      // Connexions réellement fermées avant le DROP … WITH (FORCE) : sinon un
+      // backend encore ouvert est tué (57P01) et l'erreur remonte, non gérée,
+      // par ce pool sans écouteur 'error' (server/utils/db.ts, endPool).
+      await endPool(pool)
       const c = new pg.Client({ connectionString: DATABASE_URL })
       await c.connect()
       try {
