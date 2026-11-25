@@ -7,11 +7,10 @@
 
 import { readdirSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createApp, createRouter, toNodeListener, type EventHandler } from 'h3'
+import { createApp, createRouter, toWebHandler, type EventHandler } from 'h3'
 import { createTestDatabase, type TestDatabase } from './db'
 import { loadConfig, setConfig } from '../../server/utils/config'
 import { closePool } from '../../server/utils/db'
@@ -83,10 +82,10 @@ export async function startHarness(prefix: string): Promise<Harness> {
   const router = createRouter()
   for (const r of apiRoutes()) router[r.method as 'get'](r.path, (await import(r.file)).default as EventHandler)
   app.use(router)
-  const server: Server = createServer(toNodeListener(app))
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const addr = server.address()
-  const base = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`
+  // Appels en mémoire (sans socket) : la console répond sur son nom d'exemple.
+  const handler = toWebHandler(app)
+  const base = 'https://analyse.exemple.test'
+  const fetch = (url: string, init: RequestInit) => handler(new Request(url, init))
 
   const call: Harness['call'] = async (path, init = {}) => {
     const headers = new Headers(init.headers)
@@ -127,7 +126,6 @@ export async function startHarness(prefix: string): Promise<Harness> {
       await writeFile(join(root, 'catalog-index.json'), JSON.stringify(index))
     },
     close: async () => {
-      await new Promise<void>(resolve => server.close(() => resolve()))
       await stopConsole()
       await closePool()
       await db.drop()

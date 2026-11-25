@@ -177,6 +177,25 @@ export interface ResolveOptions {
   profileId?: string | null
   /** Origine de profileId : « explicit » (API, console) ou « config » (.scanoria.yml). */
   source?: 'explicit' | 'config'
+  /** Le profil imposé ne peut qu'ajouter au profil de l'emplacement (catégories, modules). */
+  additive?: boolean
+}
+
+/** Union d'un profil effectif avec le profil de l'emplacement : rien de ce dernier n'est retiré. */
+export function withSlotFloor(e: EffectiveProfile, slot: EffectiveProfile): EffectiveProfile {
+  const categories = [...new Set([...slot.categories, ...e.categories])]
+  const include = [...new Set([...slot.include_modules, ...e.include_modules])]
+  const keep = new Set(include)
+  const exclude = slot.exclude_modules.filter(m => !keep.has(m))
+  const rulesets = new Map(slot.rulesets.map(r => [r.ruleset_id, r]))
+  for (const r of e.rulesets) rulesets.set(r.ruleset_id, r)
+  return {
+    ...e,
+    categories,
+    include_modules: include,
+    exclude_modules: exclude,
+    rulesets: [...rulesets.values()].sort((a, b) => a.slug.localeCompare(b.slug)),
+  }
 }
 
 /** Contrat 29 : profil choisi (G9) et profil effectif (G8) d'une analyse. */
@@ -188,7 +207,8 @@ export async function resolveProfile(db: Queryable, projectId: string, trigger: 
   const slot = slotFor(trigger, opts.pullRequest)
   const bySlot = profileForSlot(project, slot)
   const chosenId = opts.profileId ?? bySlot
-  const effective = await effectiveProfile(db, chosenId, { alsoLockedBy: bySlot })
+  let effective = await effectiveProfile(db, chosenId, { alsoLockedBy: bySlot })
+  if (opts.additive && chosenId !== bySlot) effective = withSlotFloor(effective, await effectiveProfile(db, bySlot))
   return {
     chosen: { id: chosenId, slug: effective.slug, slot, source: opts.profileId && opts.profileId !== bySlot ? (opts.source ?? 'explicit') : 'project' },
     effective,

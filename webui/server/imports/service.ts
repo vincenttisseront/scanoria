@@ -19,6 +19,7 @@ import type { ForgeClient } from '../forges'
 import { effectiveProfile } from '../profiles/resolve'
 import { DEFAULT_IMPORT_DAYS, fileRequests, type RequestOutcome } from '../profiles/requests'
 import { IMPORT_FILES, IMPORT_FILE_MAX_BYTES, nosecRequests, parseImportFile, type ImportedRequest, type ParsedImport } from './repo-files'
+import { globToRegExp } from '../gates/evaluate'
 import { instanceSchema, readInstance, type InstanceRef } from './instances'
 
 /** Fichiers Python lus au plus pour « # nosec » (lecture bornée par l'API de la forge). */
@@ -125,6 +126,47 @@ export interface RunImportInput {
   dryRun: boolean
 }
 
+/** Efface un jeton d'import, hors de toute transaction : effacé même si l'application échoue. */
+export async function discardImportToken(db: Queryable, id: string | null | undefined): Promise<void> {
+  if (!id) return
+  await db.query('DELETE FROM credentials WHERE id = $1 AND username = $2', [id, IMPORT_TOKEN_USER]).catch(() => {})
+}
+
+/** Résultats examinés au plus pour traduire les entrées à portée combinée. */
+const SCOPED_MAX_FINDINGS = 50_000
+
+/**
+ * Entrées à portée combinée (chemin ET règle, ou ligne) : une demande par
+ * résultat existant qui y correspond exactement ; sans résultat, l'entrée est
+ * listée comme non traduite. Jamais d'exception de chemin ou de règle entière.
+ */
+export async function resolveScoped(db: Queryable, projectId: string, parsed: ParsedImport): Promise<void> {
+  const scoped = parsed.requests.filter(r => r.match)
+  if (!scoped.length) return
+  const tools = [...new Set(scoped.map(r => r.match!.tool))]
+  const rows = (await db.query<{ id: string, tool: string, rule_id: string, path: string | null, start_line: number | null }>(
+    `SELECT id::text, tool, rule_id, path, start_line FROM findings
+      WHERE project_id = $1 AND tool = ANY($2::text[]) AND NOT malicious AND status <> 'fixed' LIMIT $3`,
+    [projectId, tools, SCOPED_MAX_FINDINGS])).rows
+  const out: ImportedRequest[] = []
+  for (const r of parsed.requests) {
+    const m = r.match
+    if (!m) {
+      out.push(r)
+      continue
+    }
+    const re = globToRegExp(m.glob)
+    const hits = rows.filter(f => f.tool === m.tool && f.path !== null && re.test(f.path)
+      && (!m.rules?.length || m.rules.includes(f.rule_id)) && (m.line === undefined || f.start_line === m.line))
+    if (!hits.length) {
+      parsed.unsupported.push({ source: r.source, entry: `no matching finding: ${m.tool} ${(m.rules ?? []).join(',')} ${m.glob}${m.line ? `:${m.line}` : ''}`.slice(0, 160) })
+      continue
+    }
+    for (const f of hits.slice(0, 200)) out.push({ kind: 'finding', target: { finding_id: f.id }, reason: r.reason, expires_on: r.expires_on, source: r.source })
+  }
+  parsed.requests = out
+}
+
 /** Aperçu (dryRun) ou application d'une reprise de l'existant. */
 export async function runImport(db: Queryable, input: RunImportInput): Promise<ImportReport> {
   const today = isoDay()
@@ -144,7 +186,9 @@ export async function runImport(db: Queryable, input: RunImportInput): Promise<I
     let token = input.instance.token ?? null
     if (!token) {
       if (!input.importToken) throw new ImportRunError('E_IMPORT_TOKEN')
-      const r = await db.query('SELECT 1 FROM credentials WHERE id = $1 AND username = $2 AND kind = $3', [input.importToken, IMPORT_TOKEN_USER, 'token'])
+      // Jeton lié à l'administrateur qui a fait l'aperçu.
+      const r = await db.query('SELECT 1 FROM credentials WHERE id = $1 AND username = $2 AND kind = $3 AND created_by = $4',
+        [input.importToken, IMPORT_TOKEN_USER, 'token', input.userId])
       if (!r.rowCount) throw new ImportRunError('E_IMPORT_TOKEN')
       token = (await decryptSecret(db, input.importToken)).value
     }
@@ -159,10 +203,11 @@ export async function runImport(db: Queryable, input: RunImportInput): Promise<I
       }
     }
     finally {
-      // Application : le jeton est effacé, que la lecture réussisse ou non.
+      // Application : le jeton est effacé ; l'appelant l'efface aussi hors transaction (discardImportToken).
       if (!input.dryRun && input.importToken) await deleteSecret(db, input.importToken).catch(() => {})
     }
   }
+  await resolveScoped(db, input.projectId, all)
   const outcome = await fileRequests(db, {
     projectId: input.projectId, via: 'tool-import', requesterLabel: `import ${all.sources.map(s => s.source).join(', ')}`.slice(0, 255),
     requests: all.requests, lockedModules: await lockedModules(db, input.projectId), dryRun: input.dryRun, today,

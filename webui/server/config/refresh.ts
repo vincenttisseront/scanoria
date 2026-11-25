@@ -50,7 +50,7 @@ export type ReadFn = (ref: string) => Promise<string | null>
  * Lit et range la configuration d'un projet pour une ref (ou un commit).
  * read : contenu du fichier, null s'il est absent ; une exception = illisible.
  */
-export async function refreshRepoConfig(db: Queryable, projectId: string, key: string, read: ReadFn, now = new Date()): Promise<ConfigState> {
+export async function refreshRepoConfig(db: Queryable, projectId: string, key: string, read: ReadFn, now = new Date(), opts: { scanId?: string } = {}): Promise<ConfigState> {
   const prev = parseConfigState((await db.query<{ config_state: unknown }>('SELECT config_state FROM projects WHERE id = $1', [projectId])).rows[0]?.config_state)
   const base = { version: CONFIG_STATE_VERSION, read_at: now.toISOString(), read_key: key } as const
   let state: ConfigState
@@ -80,7 +80,7 @@ export async function refreshRepoConfig(db: Queryable, projectId: string, key: s
   const { requests } = configRequests(parsed.config, now.toISOString().slice(0, 10))
   const locked = await lockedModules(db, projectId)
   const outcome = await fileRequests(db, {
-    projectId, via: 'config', requesterLabel: `${REPO_CONFIG_FILE} @ ${key.slice(0, 40)}`, requests, lockedModules: locked,
+    projectId, via: 'config', requesterLabel: `${REPO_CONFIG_FILE} @ ${key.slice(0, 40)}`, requests, lockedModules: locked, scanId: opts.scanId,
     today: now.toISOString().slice(0, 10),
   })
   if (outcome.created.length) {
@@ -134,8 +134,8 @@ async function lockedModules(db: Queryable, projectId: string): Promise<string[]
  * Hors transaction de dépôt : la forge peut être lente.
  */
 export async function prepareRepoConfigs(pool: Pick<pg.Pool, 'query'>, opts: { limit?: number, now?: Date, log?: (m: string) => void } = {}): Promise<number> {
-  const rows = await pool.query<{ project_id: string, key: string, forge_id: string, repo_full_name: string }>(
-    `SELECT DISTINCT ON (s.project_id) s.project_id::text, COALESCE(s.commit_sha, s.ref) AS key, p.forge_id::text, p.repo_full_name
+  const rows = await pool.query<{ scan_id: string, project_id: string, key: string, forge_id: string, repo_full_name: string }>(
+    `SELECT DISTINCT ON (s.project_id) s.id::text AS scan_id, s.project_id::text, COALESCE(s.commit_sha, s.ref) AS key, p.forge_id::text, p.repo_full_name
        FROM scans s JOIN projects p ON p.id = s.project_id
       WHERE s.status = 'queued' AND s.plan IS NULL AND s.trigger NOT IN ('replay', 'trial', 'recorrelate')
         AND p.source_kind = 'git' AND p.forge_id IS NOT NULL AND p.repo_full_name IS NOT NULL AND p.archived_at IS NULL
@@ -147,16 +147,20 @@ export async function prepareRepoConfigs(pool: Pick<pg.Pool, 'query'>, opts: { l
   for (const row of rows.rows) {
     try {
       const forge = await getForge(pool, row.forge_id)
-      if (!forge) continue
+      if (!forge) throw new Error('forge not found')
       const client = await openForge(pool, forge)
       await refreshRepoConfig(pool, row.project_id, row.key, async (ref) => {
         // Lecture un peu au-delà de la borne : un fichier trop grand est signalé, pas pris pour absent.
         const text = await client.readFile(row.repo_full_name, ref, REPO_CONFIG_FILE, { maxBytes: REPO_CONFIG_MAX_BYTES * 4 })
         return text
-      }, opts.now)
+      }, opts.now, { scanId: row.scan_id })
     }
     catch (e) {
       opts.log?.(`repo config of project ${row.project_id}: ${(e as Error).message}`)
+      // Forge introuvable : lecture notée « illisible » pour ce commit (configuration précédente conservée), le plan n'attend pas indéfiniment.
+      await refreshRepoConfig(pool, row.project_id, row.key, async () => {
+        throw new Error('forge unavailable')
+      }, opts.now, { scanId: row.scan_id }).catch(() => {})
     }
   }
   return rows.rows.length

@@ -346,7 +346,8 @@ const AI_LOCKED_PROFILES = `WITH RECURSIVE locked AS (
 
 /**
  * « Aucun envoi à l'IA » imposé (G8, § 3.5) : un projet dont un profil (défaut
- * ou déclencheur) est sous un verrou ai_opt_out passe à ai_opt_out = true. Tous
+ * ou déclencheur, ou profil choisi pour une de ses analyses : API, .scanoria.yml)
+ * est sous un verrou ai_opt_out passe à ai_opt_out = true, durablement. Tous
  * les envois IA (console, relais) lisent cette colonne : le verrou s'applique
  * partout sans autre point de contrôle. Renvoie les projets basculés.
  */
@@ -355,7 +356,8 @@ export async function syncAiOptOut(db: Queryable, projectId?: string): Promise<{
     `UPDATE projects SET ai_opt_out = true
       WHERE NOT ai_opt_out AND ($1::uuid IS NULL OR id = $1::uuid)
         AND (profile_id IN (${AI_LOCKED_PROFILES}) OR profile_pr_id IN (${AI_LOCKED_PROFILES})
-             OR profile_nightly_id IN (${AI_LOCKED_PROFILES}) OR profile_release_id IN (${AI_LOCKED_PROFILES}))
+             OR profile_nightly_id IN (${AI_LOCKED_PROFILES}) OR profile_release_id IN (${AI_LOCKED_PROFILES})
+             OR EXISTS (SELECT 1 FROM scans s WHERE s.project_id = projects.id AND s.profile_id IN (${AI_LOCKED_PROFILES})))
       RETURNING id::text, slug`, [projectId ?? null])
   return res.rows
 }
@@ -365,6 +367,7 @@ export async function aiOptOutLocked(db: Queryable, projectId: string): Promise<
   const res = await db.query(
     `SELECT 1 FROM projects WHERE id = $1
         AND (profile_id IN (${AI_LOCKED_PROFILES}) OR profile_pr_id IN (${AI_LOCKED_PROFILES})
-             OR profile_nightly_id IN (${AI_LOCKED_PROFILES}) OR profile_release_id IN (${AI_LOCKED_PROFILES}))`, [projectId])
+             OR profile_nightly_id IN (${AI_LOCKED_PROFILES}) OR profile_release_id IN (${AI_LOCKED_PROFILES})
+             OR EXISTS (SELECT 1 FROM scans s WHERE s.project_id = projects.id AND s.profile_id IN (${AI_LOCKED_PROFILES})))`, [projectId])
   return !!res.rowCount
 }

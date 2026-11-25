@@ -10,7 +10,7 @@ import { getPool, withTransaction } from '../../../../utils/db'
 import { clientAddress, readValidated, requireRole } from '../../../../utils/http'
 import { writeAudit } from '../../../../utils/audit'
 import { requireProject } from '../../../../projects/guards'
-import { importApplySchema, runImport } from '../../../../imports/service'
+import { discardImportToken, importApplySchema, runImport } from '../../../../imports/service'
 import { importHttpError, repoAccess } from '../../../../imports/http'
 
 export default defineEventHandler(async (event) => {
@@ -39,5 +39,9 @@ export default defineEventHandler(async (event) => {
   }
   catch (err) {
     importHttpError(err)
+  }
+  finally {
+    // Jeton à usage unique : effacé hors transaction, que l'application réussisse ou échoue.
+    await discardImportToken(pool, body.import_token)
   }
 })

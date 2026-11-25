@@ -12,7 +12,8 @@ import { DATABASE_URL } from '../helpers/db'
 import { startHarness, type Client, type Harness } from '../helpers/console-harness'
 import { setForgeTransport } from '../../server/forges'
 import type { ForgeClient } from '../../server/forges/types'
-import { NOSEC_MAX_FILES, readRepoImports, runImport } from '../../server/imports/service'
+import { NOSEC_MAX_FILES, readRepoImports, resolveScoped, runImport } from '../../server/imports/service'
+import { parseImportFile } from '../../server/imports/repo-files'
 
 const DT_PROJECT = randomUUID()
 
@@ -194,6 +195,7 @@ describe.skipIf(!DATABASE_URL)('reprise de l’existant (PostgreSQL réel)', () 
         ['vuln', { vuln_id: 'GHSA-2345-6789-cfgh' }],
         ['path', { glob: 'app/db.py', tool: 'bandit' }],
       ])
+      expect(r.requests[2]!.match).toEqual({ tool: 'bandit', glob: 'app/db.py', line: 1, rules: ['B608'] })
       expect(r.sources.map(s => s.source)).toEqual(['.gitleaks.toml', 'osv-scanner.toml', '# nosec'])
       expect(r.unsupported).toEqual(expect.arrayContaining([
         { source: '.trivyignore', entry: 'file too large' },
@@ -203,6 +205,13 @@ describe.skipIf(!DATABASE_URL)('reprise de l’existant (PostgreSQL réel)', () 
     })
 
     it('application : demandes déposées, dates bornées, source absente refusée', async () => {
+      // Résultats Bandit : celui de la ligne marquée (repris) et un autre du même fichier (jamais exempté).
+      const ins = (rule: string, line: number) => h.db.pool.query<{ id: string }>(
+        `INSERT INTO findings (project_id, fingerprint, tool, rule_id, category, severity, title, path, start_line)
+         VALUES ($1, encode(sha256(gen_random_uuid()::text::bytea), 'hex'), 'bandit', $2, 'sast', 'medium', 'x', 'app/db.py', $3)
+         RETURNING id::text`, [projectId, rule, line])
+      const banditId = (await ins('B608', 1)).rows[0]!.id
+      await ins('B602', 7)
       const repo = { client: client(), fullName: 'equipe/depot', ref: 'main' }
       const dry = await runImport(h.db.pool, { projectId, repo, instance: null, userId: 1, dryRun: true })
       // Aperçu : ce qui serait créé, sans identifiant, rien en base.
@@ -216,7 +225,11 @@ describe.skipIf(!DATABASE_URL)('reprise de l’existant (PostgreSQL réel)', () 
       const rows = await h.db.pool.query<{ requested_via: string, status: string, reason: string }>(
         `SELECT requested_via, status, reason FROM exceptions WHERE project_id = $1 AND requested_via = 'tool-import'`, [projectId])
       expect(rows.rows.every(r => r.status === 'requested' && r.reason.startsWith('importé ('))).toBe(true)
-      expect(rows.rows.map(r => r.reason)).toEqual(expect.arrayContaining(['importé (osv-scanner.toml) : x', 'importé (# nosec) : app/db.py (B608)']))
+      expect(rows.rows.map(r => r.reason)).toEqual(expect.arrayContaining(['importé (osv-scanner.toml) : x', 'importé (# nosec) : app/db.py:1 (B608)']))
+      // « # nosec » : une demande sur le résultat Bandit de la ligne, jamais une exception du fichier entier.
+      const nosec = await h.db.pool.query<{ kind: string, target: { finding_id?: string } }>(
+        `SELECT kind, target FROM exceptions WHERE project_id = $1 AND reason LIKE 'importé (# nosec)%'`, [projectId])
+      expect(nosec.rows).toEqual([{ kind: 'finding', target: { finding_id: banditId } }])
       await expect(runImport(h.db.pool, { projectId, repo: null, instance: null, userId: 1, dryRun: true })).rejects.toThrow('E_IMPORT_NO_SOURCE')
       await expect(runImport(h.db.pool, { projectId, repo, instance: null, userId: 1, dryRun: true, expiresOn: '2099-01-01' })).rejects.toThrow('E_IMPORT_DATE')
       await expect(runImport(h.db.pool, { projectId, repo: null, instance: { kind: 'sonarqube', base_url: 'https://sonar.exemple.test', project: 'x' }, userId: 1, dryRun: false })).rejects.toThrow('E_IMPORT_TOKEN')
@@ -226,5 +239,25 @@ describe.skipIf(!DATABASE_URL)('reprise de l’existant (PostgreSQL réel)', () 
       const r = await preview({ repo: true })
       expect(r.data.data.code).toBe('E_IMPORT_NO_SOURCE')
     })
+  })
+  it('portée combinée (chemin ET règle) : seulement les résultats qui y correspondent, sinon non traduite', async () => {
+    const ins = (tool: string, rule: string, path: string) => h.db.pool.query<{ id: string }>(
+      `INSERT INTO findings (project_id, fingerprint, tool, rule_id, category, severity, title, path, start_line)
+       VALUES ($1, encode(sha256(gen_random_uuid()::text::bytea), 'hex'), $2, $3, 'secrets', 'high', 'x', $4, 1)
+       RETURNING id::text`, [projectId, tool, rule, path])
+    const hit = (await ins('gitleaks', 'generic-api-key', 'docs/guide.md')).rows[0]!.id
+    await ins('gitleaks', 'private-key', 'docs/cle.pem')
+    await ins('gitleaks', 'generic-api-key', 'src/app.ts')
+    const parsed = parseImportFile('.gitleaks.toml', `
+[[allowlists]]
+targetRules = ["generic-api-key"]
+paths = ['''^docs/''']
+[[allowlists]]
+targetRules = ["aws-access-token"]
+paths = ['''^infra/''']
+`, '2027-02-23')
+    await resolveScoped(h.db.pool, projectId, parsed)
+    expect(parsed.requests.map(r => [r.kind, r.target])).toEqual([['finding', { finding_id: hit }]])
+    expect(parsed.unsupported.map(u => u.entry)).toEqual(['no matching finding: gitleaks aws-access-token infra/**'])
   })
 })

@@ -13,6 +13,7 @@ import { enqueueScan } from '../../server/scans/enqueue'
 import { evaluateGate } from '../../server/gates/evaluate'
 import { effectiveProfile, resolveProfile } from '../../server/profiles/resolve'
 import { planProfile } from '../../server/profiles/plan-profile'
+import { aiOptOutLocked } from '../../server/profiles/service'
 
 const PLAN_GATE = { new_code_only: true, max_secrets: 0, vuln_block_from: 'high', sast_block_from: 'high', iac_block_from: 'high', block_malicious: true, inconclusive_blocks: true }
 
@@ -215,6 +216,40 @@ describe.skipIf(!DATABASE_URL)('profils (PostgreSQL réel)', () => {
       expect(explicit.effective.locks.required_modules).toContain('gitleaks')
       expect(explicit.effective.locks.ai_opt_out).toBe(true)
       expect(explicit.effective.categories).toContain('secrets')
+      // Choix non humain (jeton d'API, dépôt) ou release : il n'ajoute qu'au profil de l'emplacement.
+      const slot = await resolveProfile(h.db.pool, p, 'release')
+      const additive = await resolveProfile(h.db.pool, p, 'release', { profileId: ids.rapide, additive: true })
+      expect(additive.effective.slug).toBe('rapide')
+      expect(additive.effective.categories).toEqual(expect.arrayContaining(slot.effective.categories))
+      expect(additive.effective.include_modules).toEqual(expect.arrayContaining(slot.effective.include_modules))
+      expect(explicit.effective.categories.length).toBeLessThanOrEqual(additive.effective.categories.length)
+    })
+
+    it('planProfile : profil demandé par un jeton d’API borné par l’emplacement, choix humain respecté hors release', async () => {
+      const p = await newProject('g9-additif')
+      await h.call(`/api/projects/${p}/profiles`, { method: 'PUT', client: admin, json: { default: ids.complet } })
+      const complet = (await resolveProfile(h.db.pool, p, 'api')).effective.categories
+      const mk = async (trigger: string, requestedBy: number | null) => (await h.db.pool.query<{ id: string }>(
+        `INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id, status, requested_by)
+         SELECT id, (SELECT count(*) + 1 FROM scans WHERE project_id = $1), $2, 50, 'main', $3, gate_id, 'queued', $4
+           FROM projects WHERE id = $1 RETURNING id::text`, [p, trigger, ids.rapide, requestedBy])).rows[0]!.id
+      const user = (await h.db.pool.query<{ id: number }>(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`)).rows[0]!.id
+      const token = await planProfile(h.db.pool, { id: await mk('api', null), project_id: p, trigger: 'api', profile_id: ids.rapide })
+      expect(token.profile.categories).toEqual(expect.arrayContaining(complet))
+      const human = await planProfile(h.db.pool, { id: await mk('manual', user), project_id: p, trigger: 'manual', profile_id: ids.rapide })
+      expect(human.profile.categories.length).toBeLessThan(complet.length)
+    })
+
+    it('« aucun envoi à l’IA » d’un profil choisi pour une analyse : imposé au projet, durablement', async () => {
+      const p = await newProject('g8-ia-analyse')
+      expect((await h.db.pool.query<{ ai_opt_out: boolean }>('SELECT ai_opt_out FROM projects WHERE id = $1', [p])).rows[0]!.ai_opt_out).toBe(false)
+      const s = (await h.db.pool.query<{ id: string }>(
+        `INSERT INTO scans (project_id, number, trigger, priority, ref, profile_id, gate_id, status)
+         SELECT id, 1, 'api', 50, 'main', $2, gate_id, 'queued' FROM projects WHERE id = $1 RETURNING id::text`, [p, ids.projet])).rows[0]!.id
+      const { profile } = await planProfile(h.db.pool, { id: s, project_id: p, trigger: 'api', profile_id: ids.projet })
+      expect(profile.locks!.ai_opt_out).toBe(true)
+      expect((await h.db.pool.query<{ ai_opt_out: boolean }>('SELECT ai_opt_out FROM projects WHERE id = $1', [p])).rows[0]!.ai_opt_out).toBe(true)
+      expect(await aiOptOutLocked(h.db.pool, p)).toBe(true)
     })
 
     it('enqueueScan choisit le profil du déclencheur', async () => {

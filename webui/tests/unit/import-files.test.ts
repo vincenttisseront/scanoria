@@ -65,9 +65,23 @@ paths = ['''^docs/''']
     ])
     expect(r.requests[0]!.reason).toBe('importé (.gitleaks.toml) : Jeux d\'essai')
     expect(r.requests[1]!.reason).toContain('generic-api-key')
+    // Chemin ET règle : jamais une exception de chemin entière, traduite sur les résultats existants.
+    expect(r.requests[0]!.match).toBeUndefined()
+    expect(r.requests[1]!.match).toEqual({ tool: 'gitleaks', glob: 'docs/**', rules: ['generic-api-key'] })
     expect(r.requests.every(x => x.expires_on === UNTIL)).toBe(true)
     expect(r.unsupported.map(u => u.entry.split(':')[0])).toEqual(['paths', 'regexes', 'commits'])
     expect(parseImportFile('.gitleaks.toml', '[[[', UNTIL).unsupported[0]!.entry).toBe('unreadable TOML')
+  })
+
+  it('.gitleaks.toml : condition AND (chemin et motif) non traduite, rien importé de la liste', () => {
+    const r = parseImportFile('.gitleaks.toml', `
+[[allowlists]]
+condition = "AND"
+paths = ['''^docs/''']
+regexes = ['''exemple''']
+`, '2027-02-23')
+    expect(r.requests).toEqual([])
+    expect(r.unsupported[0]!.entry).toBe('condition AND: ^docs/')
   })
 
   it('.gitleaksignore : empreintes avec ou sans commit', () => {
@@ -77,6 +91,10 @@ paths = ['''^docs/''']
       ['path', { glob: 'config/dev.env', tool: 'gitleaks' }],
     ])
     expect(r.requests[0]!.source).toBe('.gitleaksignore:2')
+    expect(r.requests.map(q => q.match)).toEqual([
+      { tool: 'gitleaks', glob: 'src/app.ts', rules: ['generic-api-key'], line: 12 },
+      { tool: 'gitleaks', glob: 'config/dev.env', rules: ['private-key'], line: 3 },
+    ])
     expect(r.unsupported).toHaveLength(2)
   })
 
@@ -114,6 +132,7 @@ secrets:
       ['rule', { rule_id: 'AVD-KSV-0001', tool: 'trivy' }],
     ])
     expect(r.requests[0]!.expires_on).toBe('2026-12-01')
+    expect(r.requests[1]!.match).toEqual({ tool: 'trivy', glob: 'vendor/lib/**', rules: ['CVE-2026-0002'] })
     expect(r.unsupported).toHaveLength(3)
     expect(parseImportFile('.trivyignore.yaml', 'a: &x 1\nb: *x', UNTIL).unsupported[0]!.entry).toBe('unreadable YAML')
   })
@@ -182,10 +201,14 @@ ignore = true
     expect(r.requests.map(x => x.target)).toEqual(rules.map(rule_id => ({ rule_id, tool })))
   })
 
-  it('# nosec : exception de chemin Bandit pour le fichier, règles citées', () => {
+  it('# nosec : une demande par ligne marquée, limitée à la ligne et aux règles citées', () => {
     const r = nosecRequests('app/db.py', 'x = 1\nq = f"SELECT {a}"  # nosec B608\nsubprocess.call(c, shell=True)  # nosec\n', UNTIL)
-    expect(targets(r)).toEqual([['path', { glob: 'app/db.py', tool: 'bandit' }]])
-    expect(r.requests[0]!.reason).toBe('importé (# nosec) : app/db.py (B608)')
+    expect(r.requests.map(q => q.match)).toEqual([
+      { tool: 'bandit', glob: 'app/db.py', line: 2, rules: ['B608'] },
+      { tool: 'bandit', glob: 'app/db.py', line: 3 },
+    ])
+    expect(r.requests[0]!.reason).toBe('importé (# nosec) : app/db.py:2 (B608)')
+    expect(r.requests[0]!.source).toBe('# nosec:2')
     expect(nosecRequests('app/ok.py', 'print(1)\n', UNTIL).requests).toEqual([])
     expect(nosecRequests('../x.py', '# nosec\n', UNTIL).requests).toEqual([])
     expect(parseImportFile('nosec', '# nosec', UNTIL).requests).toEqual([])

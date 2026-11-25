@@ -106,7 +106,7 @@ export function configRequests(config: RepoConfig, today = isoDay()): ConfigRequ
 export function repoConfigJsonSchema(): Record<string, unknown> {
   const s = z.toJSONSchema(repoConfigSchema, { target: 'draft-2020-12', unrepresentable: 'any' }) as Record<string, unknown>
   return {
-    $id: 'https://scanoria.invalid/schemas/scanoria-config.schema.json',
+    $id: 'https://scanoria.exemple.test/schemas/scanoria-config.schema.json',
     title: '.scanoria.yml',
     description: 'Configuration en code d\'un dépôt analysé par Scanoria (J8). Lue sans exécution, dans les limites des verrous de profil.',
     ...s,

@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { DATABASE_URL } from '../helpers/db'
 import { startHarness, type Client, type Harness } from '../helpers/console-harness'
 import { appliedConfig, parseConfigState, refreshRepoConfig } from '../../server/config/refresh'
-import { planProfile } from '../../server/profiles/plan-profile'
+import { RepoConfigPending, planProfile } from '../../server/profiles/plan-profile'
 import { encryptSecret } from '../../server/utils/secrets'
 import { parse, stringify } from 'yaml'
 import { GateRules } from '#shared/analysis'
@@ -95,8 +95,37 @@ describe.skipIf(!DATABASE_URL)('configuration en code (PostgreSQL réel)', () =>
       expect(profile.slug).toBe('rapide')
       expect(profile.source).toBe('config')
       expect(config?.profile).toBe('rapide')
+      // Le dépôt ne fait qu'ajouter : rien du profil de l'emplacement (complet) n'est retiré.
+      const slotCats = (await h.db.pool.query<{ categories: string[] }>(`SELECT categories FROM profiles WHERE slug = 'complet'`)).rows[0]!.categories
+      expect(profile.categories).toEqual(expect.arrayContaining(slotCats))
       const saved = await h.db.pool.query<{ slug: string }>('SELECT p.slug FROM scans s JOIN profiles p ON p.id = s.profile_id WHERE s.id = $1', [scan.rows[0]!.id])
       expect(saved.rows[0]!.slug).toBe('rapide')
+    })
+
+    it('analyse d’un autre commit : le plan attend la lecture de sa propre configuration', async () => {
+      const f = await h.db.pool.query<{ id: string }>(
+        `INSERT INTO forges (kind, name, base_url) VALUES ('forgejo', 'forge-config', 'https://forge.exemple.test') RETURNING id::text`)
+      const p = await h.db.pool.query<{ id: string }>(
+        `INSERT INTO projects (slug, name, source_kind, repo_url, forge_id, repo_full_name, profile_id, gate_id, default_branch)
+         VALUES ('depot-config-git', 'Dépôt config git', 'git', 'https://forge.exemple.test/equipe/config.git', $1, 'equipe/config',
+                 (SELECT id FROM profiles WHERE slug = 'complet'), (SELECT id FROM gates WHERE slug = 'defaut'), 'main') RETURNING id::text`, [f.rows[0]!.id])
+      const pid = p.rows[0]!.id
+      const scan = async (sha: string) => (await h.db.pool.query<{ id: string, profile_id: string }>(
+        `INSERT INTO scans (project_id, number, trigger, priority, ref, commit_sha, profile_id, gate_id, status)
+         SELECT id, (SELECT count(*) + 1 FROM scans WHERE project_id = $1), 'manual', 50, 'main', $2, profile_id, gate_id, 'queued'
+           FROM projects WHERE id = $1 RETURNING id::text, profile_id::text`, [pid, sha])).rows[0]!
+      const a = await scan('1'.repeat(40))
+      const b = await scan('2'.repeat(40))
+      await refreshRepoConfig(h.db.pool, pid, '1'.repeat(40), async () => 'version: 1\nprofiles:\n  default: rapide\n', NOW)
+      const ref = (s: { id: string, profile_id: string }, sha: string) => ({ id: s.id, project_id: pid, trigger: 'manual', profile_id: s.profile_id, ref: 'main', commit_sha: sha })
+      expect((await planProfile(h.db.pool, ref(a, '1'.repeat(40)))).profile.source).toBe('config')
+      await expect(planProfile(h.db.pool, ref(b, '2'.repeat(40)))).rejects.toBeInstanceOf(RepoConfigPending)
+      // Forge illisible : la lecture est notée pour ce commit, le plan reprend (configuration précédente).
+      await refreshRepoConfig(h.db.pool, pid, '2'.repeat(40), async () => {
+        throw new Error('down')
+      }, NOW)
+      const planned = await planProfile(h.db.pool, ref(b, '2'.repeat(40)))
+      expect(planned.config?.status).toBe('unavailable')
     })
 
     it.each([

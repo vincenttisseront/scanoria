@@ -29,7 +29,20 @@ const MAX_LINES = 2000
 export interface ImportedRequest extends ExceptionRequestInput {
   /** Fichier d'origine et ligne (affichés dans l'aperçu). */
   source: string
+  /**
+   * Portée exacte d'une entrée qui combine chemin et règle (ou ligne) : aucune
+   * cible d'exception ne la représente. La reprise la traduit en demandes sur
+   * les résultats existants qui y correspondent exactement (resolveScoped),
+   * jamais en exception de chemin ou de règle, qui serait plus large.
+   */
+  match?: ScopedMatch
 }
+
+export interface ScopedMatch { tool: string, glob: string, rules?: string[], line?: number }
+
+const scopedReq = (m: ScopedMatch, file: string, until: string, extra?: string | null, line?: number): ImportedRequest => ({
+  kind: 'path', target: { glob: m.glob, tool: m.tool }, reason: reasonOf(file, extra), expires_on: until, source: line ? `${file}:${line}` : file, match: m,
+})
 
 export interface ParsedImport {
   requests: ImportedRequest[]
@@ -136,18 +149,28 @@ function gitleaksToml(text: string, until: string): ParsedImport {
   for (const l of lists.slice(0, 50)) {
     const desc = typeof l.description === 'string' ? l.description.slice(0, 200) : null
     const rules = strings(l.targetRules ?? l.rules)
-    for (const p of strings(l.paths)) {
+    const paths = strings(l.paths)
+    const regexes = strings(l.regexes)
+    const commits = strings(l.commits)
+    const stopwords = strings(l.stopwords)
+    // condition = "AND" : chemin ET motif de valeur (ou commit) ; non représentable, la liste n'est pas importée.
+    if (typeof l.condition === 'string' && l.condition.toUpperCase() === 'AND' && paths.length && (regexes.length || commits.length || stopwords.length)) {
+      out.unsupported.push({ source: '.gitleaks.toml', entry: `condition AND: ${paths.join(', ').slice(0, 100)}` })
+      continue
+    }
+    for (const p of paths) {
       const glob = regexToGlob(p)
       if (!glob) {
         out.unsupported.push({ source: '.gitleaks.toml', entry: `paths: ${p.slice(0, 120)}` })
         continue
       }
-      if (rules.length) for (const r of rules) out.requests.push({ ...pathReq(glob, 'gitleaks', '.gitleaks.toml', until, desc ? `${desc} (${r})` : r) })
+      // Règles ciblées : portée chemin ET règle, traduite sur les résultats existants seulement.
+      if (rules.length) out.requests.push(scopedReq({ tool: 'gitleaks', glob, rules }, '.gitleaks.toml', until, desc ? `${desc} (${rules.join(', ')})` : rules.join(', ')))
       else out.requests.push(pathReq(glob, 'gitleaks', '.gitleaks.toml', until, desc))
     }
-    for (const r of strings(l.regexes)) out.unsupported.push({ source: '.gitleaks.toml', entry: `regexes: ${r.slice(0, 120)}` })
-    for (const c of strings(l.commits)) out.unsupported.push({ source: '.gitleaks.toml', entry: `commits: ${c.slice(0, 64)}` })
-    for (const s of strings(l.stopwords)) out.unsupported.push({ source: '.gitleaks.toml', entry: `stopwords: ${s.slice(0, 64)}` })
+    for (const r of regexes) out.unsupported.push({ source: '.gitleaks.toml', entry: `regexes: ${r.slice(0, 120)}` })
+    for (const c of commits) out.unsupported.push({ source: '.gitleaks.toml', entry: `commits: ${c.slice(0, 64)}` })
+    for (const s of stopwords) out.unsupported.push({ source: '.gitleaks.toml', entry: `stopwords: ${s.slice(0, 64)}` })
   }
   return out
 }
@@ -166,7 +189,8 @@ function gitleaksIgnore(text: string, until: string): ParsedImport {
       out.unsupported.push({ source: `.gitleaksignore:${i + 1}`, entry: l.slice(0, 120) })
       continue
     }
-    out.requests.push(pathReq(glob, 'gitleaks', '.gitleaksignore', until, rule, i + 1))
+    const ln = Number(parts[parts.length - 1])
+    out.requests.push(scopedReq({ tool: 'gitleaks', glob, rules: [rule], ...(Number.isInteger(ln) && ln > 0 ? { line: ln } : {}) }, '.gitleaksignore', until, rule, i + 1))
   }
   return out
 }
@@ -217,10 +241,10 @@ function trivyIgnoreYaml(text: string, until: string): ParsedImport {
         continue
       }
       if (paths.length) {
-        // Exception par chemin pour Trivy seulement (l'avis précis reste visible pour les autres outils).
+        // Avis ou règle ET chemin : traduit sur les résultats Trivy existants seulement.
         for (const p of paths) {
           const glob = safeGlob(p)
-          if (glob) out.requests.push(pathReq(glob, 'trivy', '.trivyignore.yaml', end, why ? `${id} : ${why}` : id))
+          if (glob) out.requests.push(scopedReq({ tool: 'trivy', glob, rules: [id] }, '.trivyignore.yaml', end, why ? `${id} : ${why}` : id))
           else out.unsupported.push({ source: '.trivyignore.yaml', entry: `${id} ${p}`.slice(0, 120) })
         }
       }
@@ -346,24 +370,20 @@ function banditConfig(text: string, until: string): ParsedImport {
 
 /**
  * « # nosec » (Bandit) dans un fichier Python : la ligne n'est pas
- * représentable (exception par règle ou par chemin) ; on demande une exception
- * de chemin Bandit pour le fichier, limitée aux règles citées quand il y en a.
+ * représentable par une exception de chemin ou de règle ; chaque ligne marquée
+ * est traduite sur les résultats Bandit existants de cette ligne (et des
+ * règles citées), jamais en exception pour tout le fichier.
  */
 export function nosecRequests(path: string, text: string, until: string): ParsedImport {
   const out: ParsedImport = { requests: [], unsupported: [] }
   const glob = safeGlob(path)
   if (!glob) return out
-  const rules = new Set<string>()
-  let bare = 0
-  for (const raw of lines(text)) {
+  for (const [i, raw] of lines(text).entries()) {
     const m = /#\s*nosec\b[:\s]*([A-Z0-9, ]*)/.exec(raw)
     if (!m) continue
     const ids = (m[1] ?? '').split(/[,\s]+/).filter(x => /^B\d{3}$/.test(x))
-    if (ids.length) for (const id of ids) rules.add(id)
-    else bare++
+    out.requests.push(scopedReq({ tool: 'bandit', glob, line: i + 1, ...(ids.length ? { rules: ids } : {}) }, '# nosec', until, `${path}:${i + 1}${ids.length ? ` (${ids.join(', ')})` : ''}`, i + 1))
   }
-  if (!rules.size && !bare) return out
-  out.requests.push(pathReq(glob, 'bandit', '# nosec', until, `${path}${rules.size ? ` (${[...rules].sort().join(', ')})` : ''}`))
   return out
 }
 

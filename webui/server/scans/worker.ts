@@ -36,7 +36,7 @@ import { TRIAL_TRIGGER, concludeTrial, isTrialScan, recordTrialModule } from '..
 import { needsPrefetch, requestPrefetch } from './execution'
 import { loadDurations, orderModules } from './order'
 import { recordOrchestration } from './orchestration'
-import { planProfile } from '../profiles/plan-profile'
+import { planProfile, RepoConfigPending } from '../profiles/plan-profile'
 import { prepareRepoConfigs } from '../config/refresh'
 
 export interface WorkerPaths {
@@ -272,7 +272,10 @@ export class ScanWorker {
       'SELECT source_kind, spdx_license FROM projects WHERE id = $1', [scan.project_id])
     const project = pr.rows[0]!
     // 0.7 (G8, G9, J8, contrat 29) : profil effectif (héritage, verrous, configuration du dépôt), figé dans le plan.
-    const { profile, config: repoConfig } = await planProfile(client, scan)
+    const { profile, config: repoConfig } = await planProfile(client, scan).catch((e: unknown) => {
+      if (e instanceof RepoConfigPending) throw new Deferred(err('E_REPO_CONFIG_PENDING', 'infra', e.message))
+      throw e
+    })
     const gate = await client.query<{ id: string, slug: string, rules: unknown }>('SELECT id, slug, rules FROM gates WHERE id = $1', [scan.gate_id])
     const rules = GateRules.safeParse(gate.rows[0]!.rules)
     if (!rules.success) throw new ScanFailure(err('E_SCAN_GATE', 'input', 'quality gate rules are invalid'))

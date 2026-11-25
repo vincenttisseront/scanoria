@@ -20,7 +20,7 @@ import { ProfileError, profileChain } from './service'
 const moduleId = z.string().regex(MODULE_ID_RE)
 
 export const profilePreviewSchema = z.strictObject({
-  /** Profil existant (modifié) : sa chaîne et ses enfants sont pris en compte. */
+  /** Profil existant (modifié) : son identifiant est repris dans l'aperçu (la chaîne vient de parent_id). */
   profile_id: z.string().uuid().nullable().default(null),
   parent_id: z.string().uuid().nullable().default(null),
   slug: z.string().max(63).default('apercu'),

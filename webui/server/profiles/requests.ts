@@ -7,14 +7,14 @@
 // un administrateur humain les approuve ou les refuse. Une identité non humaine
 // (dépôt, outil importé) demande sans jamais approuver.
 //
-// Insertion conforme au schéma 013, isolée ici en attendant requestException
-// (chantier B) ; une demande déjà connue (même cible, quel que soit son
-// statut) n'est jamais recréée, pour qu'un refus ne revienne pas à chaque analyse.
+// Chaque demande passe par requestException (contrat 27) : mêmes contrôles
+// (H4, verrous G8), même audit. Une demande déjà connue (même cible, quel que
+// soit son statut) n'est jamais recréée, pour qu'un refus ne revienne pas à
+// chaque analyse.
 
 import { ExceptionTargets, type ExceptionKind } from '#shared/analysis'
 import type { Queryable } from '../utils/db'
-import { MAX_EXCEPTION_DAYS, isValidDay, isoDay } from '../findings/exceptions'
-import { redact } from '../findings/redact'
+import { ExceptionError, MAX_EXCEPTION_DAYS, isValidDay, isoDay, requestException } from '../findings/exceptions'
 
 export type RequestVia = 'config' | 'tool-import'
 
@@ -69,6 +69,8 @@ export async function fileRequests(db: Queryable, p: {
   requesterLabel: string
   requests: ExceptionRequestInput[]
   commitAuthors?: string[]
+  /** Analyse d'origine : l'auteur de sa PR ne peut pas approuver (J15). */
+  scanId?: string
   lockedModules?: string[]
   dryRun?: boolean
   today?: string
@@ -91,18 +93,26 @@ export async function fileRequests(db: Queryable, p: {
       continue
     }
     seen.add(key)
-    out.statuses.push('new')
     if (p.dryRun) {
+      out.statuses.push('new')
       out.created.push({ id: '', kind: r.kind, target })
       continue
     }
-    const ins = await db.query<{ id: string }>(
-      `INSERT INTO exceptions (project_id, kind, target, reason, expires_on, created_by, status, requested_via,
-                               requester_label, requester_is_human, decided_at, commit_authors)
-       VALUES ($1, $2, $3, $4, $5::date, NULL, 'requested', $6, $7, false, NULL, $8) RETURNING id::text`,
-      [p.projectId, r.kind, JSON.stringify(target), redact(r.reason.trim()), r.expires_on, p.via,
-        p.requesterLabel.slice(0, 255), (p.commitAuthors ?? []).slice(0, 50)])
-    out.created.push({ id: ins.rows[0]!.id, kind: r.kind, target })
+    try {
+      const row = await requestException(db, {
+        project_id: p.projectId, kind: r.kind, target, reason: r.reason, expires_on: r.expires_on,
+        requested_via: p.via, requester_label: p.requesterLabel.slice(0, 255), requester_is_human: false,
+        requester_user_id: null, commit_authors: p.commitAuthors ?? [], scan_id: p.scanId,
+      }, today)
+      out.statuses.push('new')
+      out.created.push({ id: row.id, kind: r.kind, target })
+    }
+    catch (e) {
+      if (!(e instanceof ExceptionError)) throw e
+      const why: RequestSkip = e.code === 'E_MALICIOUS' ? 'malicious' : e.code === 'E_LOCKED' ? 'locked' : 'invalid'
+      out.skipped.push({ kind: r.kind, target, why })
+      out.statuses.push(why)
+    }
   }
   return out
 }
