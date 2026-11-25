@@ -17,7 +17,7 @@ import { GATE_CONTEXT, gateState } from './gate'
 import { forgeLocale } from '../forges/publish'
 
 export type ReleaseErrorCode = 'E_RELEASE_NOT_FOUND' | 'E_RELEASE_NOT_SIGNED' | 'E_RELEASE_MODE' | 'E_RELEASE_TAG'
-  | 'E_RELEASE_TAG_MOVED' | 'E_RELEASE_COMMIT' | 'E_RELEASE_PROJECT'
+  | 'E_RELEASE_TAG_MOVED' | 'E_RELEASE_COMMIT' | 'E_RELEASE_PROJECT' | 'E_RELEASE_FORGE'
 
 export function releaseError(statusCode: number, code: ReleaseErrorCode, extra: Record<string, unknown> = {}) {
   return createError({ statusCode, statusMessage: code, data: { code, ...extra } })

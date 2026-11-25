@@ -55,17 +55,33 @@ export interface ReleasePollResult { projects: number, scans: number, moved: num
  * Analyse de release d'un tag nouveau, ou d'un tag noté comme vu sans analyse
  * (premier passage) quand la CI la demande ; null si le tag a déjà son analyse.
  */
-export async function enqueueRelease(db: Db, projectId: string, tag: string, commit: string, source: 'pull' | 'push', opts: { requestedBy?: number, apiTokenId?: string } = {}): Promise<{ scanId: string, number: number } | null> {
-  const ins = await db.query(
-    `INSERT INTO release_candidates (project_id, tag, commit_sha, source) VALUES ($1, $2, $3, $4)
-     ON CONFLICT (project_id, tag) DO UPDATE SET source = EXCLUDED.source, seen_at = now()
-       WHERE release_candidates.scan_id IS NULL AND release_candidates.commit_sha = EXCLUDED.commit_sha`, [projectId, tag, commit, source])
-  if (!ins.rowCount) return null
-  const res = await enqueueScan(db, { projectId, ref: tag, commit, trigger: 'release', ...opts })
-  await db.query('UPDATE release_candidates SET scan_id = $3 WHERE project_id = $1 AND tag = $2', [projectId, tag, res.scanId])
-  await writeAudit(db, { actor: { type: 'system' }, action: 'release.detected', outcome: 'success', targetType: 'scan', targetId: res.scanId, details: { tag, commit, source } })
-  void publishReleaseGate(db, res.scanId).catch(() => {})
-  return { scanId: res.scanId, number: res.number }
+export async function enqueueRelease(db: Db, projectId: string, tag: string, commit: string, source: 'pull' | 'push', opts: { requestedBy?: number, apiTokenId?: string } = {}): Promise<{ scanId: string, number: number, existing: boolean } | null> {
+  // Verrou consultatif par (projet, tag), tenu jusqu'au rattachement de
+  // l'analyse : deux appels simultanés (relance de CI, interrogation et CI en
+  // même temps) n'analysent jamais deux fois la même release.
+  const lock = await db.connect()
+  const key = `scanoria-release:${projectId}:${tag}`
+  try {
+    await lock.query('SELECT pg_advisory_lock(hashtext($1))', [key])
+    const cur = (await lock.query<{ commit_sha: string, scan_id: string | null, number: number | null }>(
+      `SELECT rc.commit_sha, rc.scan_id::text, s.number FROM release_candidates rc LEFT JOIN scans s ON s.id = rc.scan_id
+        WHERE rc.project_id = $1 AND rc.tag = $2`, [projectId, tag])).rows[0]
+    if (cur && cur.commit_sha !== commit) return null
+    if (cur?.scan_id) return { scanId: cur.scan_id, number: cur.number ?? 0, existing: true }
+    await lock.query(
+      `INSERT INTO release_candidates (project_id, tag, commit_sha, source) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (project_id, tag) DO UPDATE SET source = EXCLUDED.source, seen_at = now()
+         WHERE release_candidates.scan_id IS NULL AND release_candidates.commit_sha = EXCLUDED.commit_sha`, [projectId, tag, commit, source])
+    const res = await enqueueScan(db, { projectId, ref: tag, commit, trigger: 'release', ...opts })
+    await lock.query('UPDATE release_candidates SET scan_id = $3 WHERE project_id = $1 AND tag = $2 AND scan_id IS NULL', [projectId, tag, res.scanId])
+    await writeAudit(db, { actor: { type: 'system' }, action: 'release.detected', outcome: 'success', targetType: 'scan', targetId: res.scanId, details: { tag, commit, source } })
+    void publishReleaseGate(db, res.scanId).catch(() => {})
+    return { scanId: res.scanId, number: res.number, existing: false }
+  }
+  finally {
+    await lock.query('SELECT pg_advisory_unlock(hashtext($1))', [key]).catch(() => {})
+    lock.release()
+  }
 }
 
 /** Tag déplacé : signalé une fois par (tag, nouveau commit), jamais réanalysé en silence. */
@@ -100,7 +116,7 @@ async function pollProject(db: Db, projectId: string, patterns: string[], out: R
     }
   }
   for (const t of scan.reverse()) {
-    if (await enqueueRelease(db, projectId, t.name, t.commit_sha, 'pull')) out.scans++
+    if ((await enqueueRelease(db, projectId, t.name, t.commit_sha, 'pull'))?.existing === false) out.scans++
   }
 }
 

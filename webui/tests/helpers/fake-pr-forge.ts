@@ -41,6 +41,8 @@ export interface FakeRepoState {
   releases?: { id: number, tag_name: string, prerelease: boolean, assets: { name: string, size: number, body: Buffer }[] }[]
   /** 0.8 (A) : refuser l'envoi de fichiers (droit manquant, 403). */
   denyAssets?: boolean
+  /** Liste des tags en erreur 503 (forge indisponible). */
+  failTags?: boolean
 }
 
 export interface FakePrForge {
@@ -135,6 +137,7 @@ async function handle(f: FakePrForge, req: IncomingMessage, res: ServerResponse)
   const rest = m[2] ?? ''
   // 0.8 (A) : tags, releases et fichiers joints (multipart, lu avant le JSON).
   if (rest === '/tags' && method === 'GET') {
+    if (repo.failTags) return send(res, 503, { message: 'unavailable' })
     const page = Number(url.searchParams.get('page') ?? '1')
     return send(res, 200, page === 1 ? (repo.tags ?? []).map(t => ({ name: t.name, commit: { sha: t.sha } })) : [])
   }

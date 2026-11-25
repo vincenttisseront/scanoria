@@ -338,8 +338,10 @@ fi
 say "rapport : $URL$url" "report: $URL$url"
 
 # Rapport de release signé (§ 7.3) : attendu tant que la signature n'est pas
-# revenue (409 E_RELEASE_NOT_SIGNED), au plus 10 minutes ; écrit atomiquement.
-if [ -n "$REPORT" ]; then
+# revenue (409 E_RELEASE_NOT_SIGNED), au plus 10 minutes ; écrit atomiquement
+# avec --report. En release, un verdict favorable sans rapport signé reste
+# non concluant (code 2), même sans --report.
+if [ -n "$REPORT" ] || { [ "$PROFILE" = release ] && [ "$verdict" = passed ]; }; then
   tries=0
   while :; do
     status=$(api GET "/api/releases/$SCAN/report.json")
@@ -356,8 +358,12 @@ if [ -n "$REPORT" ]; then
     esac
   done
   grep -q '"schema":"scanoria-signed-release-report/1"' "$TMP/body" || die 3 "réponse inattendue pour le rapport" "unexpected report response"
-  { cp "$TMP/body" "$REPORT.tmp.$$" && mv "$REPORT.tmp.$$" "$REPORT"; } || die 3 "écriture impossible : $REPORT" "cannot write: $REPORT"
-  info "scanoria-scan: rapport signé écrit dans $REPORT (scanoria-verify $REPORT --key appliance.pem)" "scanoria-scan: signed report written to $REPORT (scanoria-verify $REPORT --key appliance.pem)"
+  if [ -n "$REPORT" ]; then
+    { cp "$TMP/body" "$REPORT.tmp.$$" && mv "$REPORT.tmp.$$" "$REPORT"; } || die 3 "écriture impossible : $REPORT" "cannot write: $REPORT"
+    info "scanoria-scan: rapport signé écrit dans $REPORT (scanoria-verify $REPORT --key appliance.pem)" "scanoria-scan: signed report written to $REPORT (scanoria-verify $REPORT --key appliance.pem)"
+  else
+    info "scanoria-scan: rapport de release signé disponible" "scanoria-scan: signed release report available"
+  fi
 fi
 
 case $verdict in

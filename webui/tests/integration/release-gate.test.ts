@@ -32,7 +32,7 @@ import { getForge } from '../../server/forges'
 import { setConsoleUrl } from '../../server/forges/context'
 import { pollReleases, resetReleasePolling } from '../../server/release/poll'
 import { releaseTick } from '../../server/release/tick'
-import { applianceKey } from '../../server/release/sign'
+import { applianceKey, expireStaleReports } from '../../server/release/sign'
 import { clearReleaseVerdictListeners, onReleaseVerdict, type ReleaseVerdictEvent } from '../../server/release/events'
 import { canonicalBytes, sha256Hex } from '../../server/release/canonical'
 import type { Role } from '#shared/schemas'
@@ -338,6 +338,33 @@ describe.skipIf(!DATABASE_URL || !hasTools)('gate de release (chantier A, Postgr
     expect(rep.buf.equals(repo.releases![0]!.assets.find(a => a.name === 'scanoria-release-report.json')!.body)).toBe(true)
   })
 
+  it('mode poussé : deux demandes simultanées du même tag, une seule analyse ; forge en erreur : 503, commit de la CI jamais retenu', async () => {
+    const tag = 'v1.3.0'
+    const commit = sha()
+    repo.tags!.push({ name: tag, sha: commit })
+    const [a, b] = await Promise.all([
+      call(`/api/projects/${projectId}/releases`, 'operator', { method: 'POST', json: { tag } }),
+      call(`/api/projects/${projectId}/releases`, 'operator', { method: 'POST', json: { tag } }),
+    ])
+    expect([a.status, b.status].sort()).toEqual([200, 202])
+    expect(a.data.scan_id).toBe(b.data.scan_id)
+    const scans = await db.pool.query(`SELECT count(*)::int AS n FROM scans WHERE project_id = $1 AND trigger = 'release' AND ref = $2`, [projectId, tag])
+    expect(scans.rows[0].n).toBe(1)
+    const rc = await db.pool.query<{ scan_id: string }>('SELECT scan_id::text FROM release_candidates WHERE project_id = $1 AND tag = $2', [projectId, tag])
+    expect(rc.rows[0]!.scan_id).toBe(a.data.scan_id)
+
+    repo.failTags = true
+    try {
+      const down = await call(`/api/projects/${projectId}/releases`, 'operator', { method: 'POST', json: { tag: 'v1.4.0', commit: sha() } })
+      expect(down.status).toBe(503)
+      expect(down.code).toBe('E_RELEASE_FORGE')
+      expect((await db.pool.query('SELECT 1 FROM release_candidates WHERE project_id = $1 AND tag = $2', [projectId, 'v1.4.0'])).rowCount).toBe(0)
+    }
+    finally {
+      repo.failTags = false
+    }
+  })
+
   it('signature falsifiée dans le résultat du helper : refusée, rapport en erreur, statut bloquant', async () => {
     const tag = 'v1.2.0'
     repo.tags!.push({ name: tag, sha: sha() })
@@ -364,5 +391,23 @@ describe.skipIf(!DATABASE_URL || !hasTools)('gate de release (chantier A, Postgr
     expect(repo.statuses.filter(x => x.sha === repo.tags!.at(-1)!.sha).at(-1)).toMatchObject({ state: 'failure' })
     expect(events.find(e => e.scanId === id)).toBeUndefined()
     expect((await call(`/api/releases/${id}/report.json`, 'viewer')).code).toBe('E_RELEASE_NOT_SIGNED')
+  })
+
+  it('rapport resté « pending » au-delà du délai : erreur E_SIGN_TIMEOUT, statut bloquant', async () => {
+    const tag = 'v1.5.0'
+    repo.tags!.push({ name: tag, sha: sha() })
+    resetReleasePolling()
+    await pollReleases(db.pool)
+    const id = (await db.pool.query<{ scan_id: string }>('SELECT scan_id::text FROM release_candidates WHERE tag = $1', [tag])).rows[0]!.scan_id
+    await finishScan(id, 'passed', [])
+    // Arrêt simulé entre l'insertion du rapport et la demande : aucune demande ne reviendra.
+    await releaseTick(db.pool, requestsDir, () => {})
+    await db.pool.query(`DELETE FROM helper_requests WHERE type = 'sign-release-report' AND params ->> 'scan_id' = $1`, [id])
+    await db.pool.query(`UPDATE release_reports SET created_at = now() - interval '2 hours' WHERE scan_id = $1`, [id])
+    expect(await expireStaleReports(db.pool)).toBe(1)
+    await releaseTick(db.pool, requestsDir, () => {})
+    const rr = await db.pool.query('SELECT status, error FROM release_reports WHERE scan_id = $1', [id])
+    expect(rr.rows[0]).toMatchObject({ status: 'error', error: 'E_SIGN_TIMEOUT' })
+    expect(repo.statuses.filter(x => x.sha === repo.tags!.at(-1)!.sha).at(-1)).toMatchObject({ state: 'failure' })
   })
 })

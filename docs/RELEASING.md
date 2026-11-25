@@ -187,6 +187,10 @@ SCANORIA_TOKEN=… scanoria-scan --url https://analyse.exemple.test --project <i
 Le code de sortie reflète le verdict (0 favorable, 1 défavorable, 2 non concluant,
 3 erreur). Un second appel pour le même tag rend la même analyse. `--commit <sha>` est
 requis si l'appliance n'a pas accès à la forge ; il est comparé au commit du tag sinon.
+Si la forge reliée au projet ne répond pas, la demande est refusée (`503
+E_RELEASE_FORGE`) : le commit fourni par la CI n'est jamais pris à sa place. Un verdict
+favorable n'est rendu (code 0) qu'une fois le rapport signé disponible ; sans rapport
+signé au bout de 10 minutes, le code est 2 (non concluant), avec ou sans `--report`.
 
 ### 7.3 Preuves et vérification
 
@@ -213,7 +217,21 @@ différent, 3 erreur d'utilisation, 4 verdict autre que favorable (`--require-pa
 
 Le rapport signé est **figé** : si une exception est approuvée ensuite (J15), le verdict
 est réévalué sans réanalyse et le statut de commit est republié, mais le rapport garde le
-verdict d'origine ; la page Release montre l'écart.
+verdict d'origine ; la page Release montre l'écart. Pour une preuve qui couvre le
+verdict publié, `promote.yml` exige donc le statut **et** `--require-passed` sur le
+rapport.
+
+Limites connues :
+
+- la signature prouve que **cette appliance** a produit ce rapport. Le service root ne
+  relit pas la base : il contrôle la forme, le schéma, l'analyse et l'empreinte, pas le
+  sens du verdict. Une console compromise pourrait faire signer un rapport favorable ;
+- un rapport resté sans signature plus d'une heure passe en erreur (`E_SIGN_TIMEOUT`),
+  donc bloquant ;
+- le rapport joint à la release de la forge contient les noms d'utilisateurs de la
+  console qui ont demandé et approuvé les exceptions, et leur motif. Sur un dépôt
+  public, retirez le droit d'écriture des releases à l'application de forge pour ne
+  pas les publier (le statut reste posé).
 
 ### 7.4 Exemple : un projet comme Ipnoria
 

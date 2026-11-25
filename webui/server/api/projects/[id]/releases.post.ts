@@ -9,6 +9,7 @@
 //   commit envoyé doit alors correspondre) ; sinon commit est obligatoire.
 // - Une release n'est jamais analysée deux fois : le même tag rend l'analyse
 //   existante (200) ; un tag déplacé est refusé (409) et signalé dans l'audit.
+// - Forge reliée mais en erreur : 503 E_RELEASE_FORGE, rien n'est enregistré.
 // → 202 {scan_id, number, url, release_url, existing: false}.
 
 import { defineEventHandler, getRouterParam, setResponseStatus } from 'h3'
@@ -42,12 +43,14 @@ export default defineEventHandler(async (event) => {
     `SELECT rc.commit_sha, rc.scan_id::text, s.number FROM release_candidates rc LEFT JOIN scans s ON s.id = rc.scan_id
       WHERE rc.project_id = $1 AND rc.tag = $2`, [projectId, body.tag])).rows[0]
 
+  // Projet relié à une forge : son commit fait foi. Forge en erreur : 503,
+  // jamais le commit fourni par la CI à sa place.
   let commit: string | null | 'absent'
   try {
     commit = await tagCommit(pool, projectId, body.tag)
   }
   catch {
-    commit = null
+    throw releaseError(503, 'E_RELEASE_FORGE')
   }
   if (commit === 'absent') throw releaseError(404, 'E_RELEASE_TAG')
   if (commit && body.commit && commit !== body.commit) throw releaseError(409, 'E_RELEASE_COMMIT')
@@ -63,6 +66,7 @@ export default defineEventHandler(async (event) => {
   }
   const res = await enqueueRelease(pool, projectId, body.tag, sha, 'push', caller.kind === 'token' ? { apiTokenId: caller.token.id } : { requestedBy: caller.auth.user.id })
   if (!res) throw releaseError(409, 'E_RELEASE_TAG_MOVED')
+  if (res.existing) return { scan_id: res.scanId, number: res.number, url: `/scans/${res.scanId}`, release_url: `/releases/${res.scanId}`, existing: true }
   await writeAudit(pool, {
     actor: caller.kind === 'user'
       ? { type: 'user', userId: caller.auth.user.id, username: caller.auth.user.username, ip: clientAddress(event) }

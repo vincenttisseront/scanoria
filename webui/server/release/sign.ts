@@ -115,45 +115,61 @@ export async function applySignatureResults(db: Queryable, key: ApplianceKey | n
       ORDER BY created_at LIMIT 20`)
   const out: AppliedSignature[] = []
   for (const req of r.rows) {
+    const res = await applyOne(db, req, key, requestsDir)
+    // La marque suit le traitement : un arrêt au milieu rejoue la demande, sans perte.
+    if (res === 'wait-key') continue
     await markApplied(db, req.id)
-    if (!req.scan_id) continue
-    const row = (await db.query<{ report: unknown, report_sha256: string, status: string }>(
-      'SELECT report, report_sha256, status FROM release_reports WHERE scan_id = $1', [req.scan_id])).rows[0]
-    if (!row || row.status !== 'pending') continue
-    if (req.status !== 'ok') {
-      const attempt = typeof req.attempt === 'number' ? req.attempt : 1
-      if ((req.status === 'lost' || RETRY_CODES.has(req.code ?? '')) && attempt < MAX_SIGN_ATTEMPTS) {
-        await requestReportSignature(db, req.scan_id, canonicalBytes(row.report), row.report_sha256, attempt + 1, requestsDir)
-        out.push({ scanId: req.scan_id, outcome: 'retry' })
-      }
-      else {
-        await failReport(db, req.scan_id, req.code ?? 'E_SIGN_FAILED')
-        out.push({ scanId: req.scan_id, outcome: 'error' })
-      }
-      continue
-    }
-    const o = req.output ?? {}
-    const bytes = canonicalBytes(row.report)
-    const sig = typeof o.signature === 'string' ? o.signature : ''
-    const fp = typeof o.key_fingerprint === 'string' ? o.key_fingerprint : ''
-    // Rien n'est cru sur parole : empreinte du rapport en base, analyse, clé publiée et signature.
-    const problem = signatureProblem({ bytes, expected: row.report_sha256, output: o, scanId: req.scan_id, key, fp, sig })
-    if (problem === 'E_SIGN_KEY' && !key) {
-      // Clé pas encore publiée par le helper : on retentera au prochain passage.
-      await db.query(`UPDATE helper_requests SET params = params - 'applied' WHERE id = $1`, [req.id])
-      continue
-    }
-    if (problem) {
-      await failReport(db, req.scan_id, problem)
-      out.push({ scanId: req.scan_id, outcome: 'error' })
-      continue
-    }
-    await db.query(
-      `UPDATE release_reports SET status = 'signed', signature = $2, key_fingerprint = $3, signed_at = now(), error = NULL
-        WHERE scan_id = $1 AND status = 'pending'`, [req.scan_id, sig, fp])
-    out.push({ scanId: req.scan_id, outcome: 'signed' })
+    if (res) out.push(res)
   }
   return out
+}
+
+async function applyOne(db: Queryable, req: SignResultRow, key: ApplianceKey | null, requestsDir: string): Promise<AppliedSignature | 'wait-key' | null> {
+  if (!req.scan_id) return null
+  const row = (await db.query<{ report: unknown, report_sha256: string, status: string }>(
+    'SELECT report, report_sha256, status FROM release_reports WHERE scan_id = $1', [req.scan_id])).rows[0]
+  if (!row || row.status !== 'pending') return null
+  if (req.status !== 'ok') {
+    const attempt = typeof req.attempt === 'number' ? req.attempt : 1
+    if ((req.status === 'lost' || RETRY_CODES.has(req.code ?? '')) && attempt < MAX_SIGN_ATTEMPTS) {
+      await requestReportSignature(db, req.scan_id, canonicalBytes(row.report), row.report_sha256, attempt + 1, requestsDir)
+      return { scanId: req.scan_id, outcome: 'retry' }
+    }
+    await failReport(db, req.scan_id, req.code ?? 'E_SIGN_FAILED')
+    return { scanId: req.scan_id, outcome: 'error' }
+  }
+  const o = req.output ?? {}
+  const bytes = canonicalBytes(row.report)
+  const sig = typeof o.signature === 'string' ? o.signature : ''
+  const fp = typeof o.key_fingerprint === 'string' ? o.key_fingerprint : ''
+  // Rien n'est cru sur parole : empreinte du rapport en base, analyse, clé publiée et signature.
+  const problem = signatureProblem({ bytes, expected: row.report_sha256, output: o, scanId: req.scan_id, key, fp, sig })
+  // Clé pas encore publiée par le helper : on retentera au prochain passage
+  // (borné par expireStaleReports).
+  if (problem === 'E_SIGN_KEY' && !key) return 'wait-key'
+  if (problem) {
+    await failReport(db, req.scan_id, problem)
+    return { scanId: req.scan_id, outcome: 'error' }
+  }
+  await db.query(
+    `UPDATE release_reports SET status = 'signed', signature = $2, key_fingerprint = $3, signed_at = now(), error = NULL
+      WHERE scan_id = $1 AND status = 'pending'`, [req.scan_id, sig, fp])
+  return { scanId: req.scan_id, outcome: 'signed' }
+}
+
+/** Délai au-delà duquel un rapport encore « pending » passe en erreur (bloquant). */
+export const SIGN_TIMEOUT_MINUTES = 60
+
+/**
+ * Rapports restés « pending » trop longtemps (arrêt entre l'insertion et la
+ * demande, clé jamais publiée) : passés en erreur E_SIGN_TIMEOUT, donc
+ * bloquants et publiés comme tels, au lieu d'un statut « signature en cours » sans fin.
+ */
+export async function expireStaleReports(db: Queryable, minutes = SIGN_TIMEOUT_MINUTES): Promise<number> {
+  const r = await db.query(
+    `UPDATE release_reports SET status = 'error', error = 'E_SIGN_TIMEOUT'
+      WHERE status = 'pending' AND created_at < now() - make_interval(mins => $1)`, [minutes])
+  return r.rowCount ?? 0
 }
 
 export const SIGNED_REPORT_SCHEMA = 'scanoria-signed-release-report/1'

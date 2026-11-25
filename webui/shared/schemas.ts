@@ -90,6 +90,7 @@ export const RESULT_CODES = [
   'E_RELAY_UNAVAILABLE', 'E_RELAY_TOKEN',
   // 0.8 (A, contrat 37) : signature par la clé de l'appliance (communs avec D).
   'E_SIGN_TOO_LARGE', 'E_SIGN_ENCODING', 'E_SIGN_DIGEST', 'E_SIGN_CANONICAL', 'E_SIGN_SCHEMA', 'E_SIGN_SCAN', 'E_SIGN_KEY',
+  'E_SIGN_TIMEOUT',
 ] as const
 export type ResultCode = (typeof RESULT_CODES)[number]
 

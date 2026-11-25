@@ -22,7 +22,7 @@ import { projectForge } from '../forges/context'
 import { releaseForge } from '../forges/release'
 import { writeReleaseArtifacts } from './artifacts'
 import { buildReleaseReport, REPORT_SCHEMA, ReleaseReportError } from './report'
-import { applianceKey, applySignatureResults, requestReportSignature } from './sign'
+import { applianceKey, applySignatureResults, expireStaleReports, requestReportSignature } from './sign'
 import { canonicalBytes, sha256Hex } from './canonical'
 import { emitReleaseVerdict } from './events'
 import { publishReleaseGate, uploadReleaseAssets } from './gate'
@@ -147,6 +147,7 @@ export async function releaseTick(db: Queryable, requestsDir: string, log: (m: s
   running = true
   try {
     await applySignatureResults(db, await applianceKey(), requestsDir)
+    await expireStaleReports(db)
     for (const id of await scansToPrepare(db)) await prepareReport(db, id, requestsDir)
     for (const row of await reportsToFinalize(db)) await finalizeRelease(db, row)
     await emitBranchVerdicts(db)

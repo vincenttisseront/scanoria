@@ -110,8 +110,10 @@ chmod 600 "$TMP/tokens.json"
 # --- 3. Console, helper et gate de release contre le vrai Forgejo ----------------------------
 if [[ -z "${DATABASE_URL:-}" ]]; then
 	systemctl start postgresql.service
-	runuser -u postgres -- psql -X -q -c "ALTER USER postgres PASSWORD 'b37-live-postgres'" > /dev/null
-	DATABASE_URL="postgres://postgres:b37-live-postgres@127.0.0.1:5432/postgres"
+	# Mot de passe tiré à l'exécution : rien de littéral dans le dépôt.
+	pg_pass=$(od -An -tx1 -N12 /dev/urandom | tr -d ' \n')
+	runuser -u postgres -- psql -X -q -c "ALTER USER postgres PASSWORD '$pg_pass'" > /dev/null
+	DATABASE_URL="postgres://postgres:$pg_pass@127.0.0.1:5432/postgres"
 fi
 if (cd "$ROOT/webui" && DATABASE_URL="$DATABASE_URL" \
 	SCANORIA_FORGEJO_URL="https://forge.exemple.test:$PORT" SCANORIA_FORGE_CA="$TMP/ca.pem" SCANORIA_FORGEJO_TOKENS="$TMP/tokens.json" \

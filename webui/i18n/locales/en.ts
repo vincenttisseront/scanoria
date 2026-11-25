@@ -116,6 +116,7 @@ export default {
     E_SIGN_SCHEMA: 'Unexpected report schema: signature refused.',
     E_SIGN_SCAN: 'The report does not cover the requested scan: signature refused.',
     E_SIGN_KEY: 'Appliance key unavailable: signing not possible for now.',
+    E_SIGN_TIMEOUT: 'Release report left unsigned for too long: blocking.',
     E_BUNDLE_INVALID: 'The bundle manifest is invalid (format, paths or duplicate entries).',
     E_BUNDLE_SIGNATURE: 'The bundle signature is invalid: the bundle was modified or not signed by this key.',
     E_BUNDLE_UNTRUSTED: 'The bundle is signed by a key that is not, or no longer, trusted.',
@@ -2074,6 +2075,7 @@ export default {
       load: 'Unreadable release.',
       E_RELEASE_NOT_FOUND: 'This scan is not a release.',
       E_RELEASE_NOT_SIGNED: 'The report is not signed yet.',
+      E_RELEASE_FORGE: 'The forge does not answer: the tag commit cannot be checked.',
     },
   },
   usage: {

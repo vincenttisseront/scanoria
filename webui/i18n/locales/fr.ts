@@ -116,6 +116,7 @@ export default {
     E_SIGN_SCHEMA: 'Schéma de rapport inattendu : signature refusée.',
     E_SIGN_SCAN: 'Le rapport ne porte pas sur l’analyse demandée : signature refusée.',
     E_SIGN_KEY: 'Clé de l’appliance indisponible : signature impossible pour l’instant.',
+    E_SIGN_TIMEOUT: 'Rapport de release resté sans signature trop longtemps : bloquant.',
     E_BUNDLE_INVALID: 'Le manifeste du lot est invalide (format, chemins ou entrées en double).',
     E_BUNDLE_SIGNATURE: 'La signature du lot est invalide : le lot a été modifié ou n’a pas été signé par cette clé.',
     E_BUNDLE_UNTRUSTED: 'Le lot est signé par une clé qui n’est pas, ou plus, une clé de confiance.',
@@ -2074,6 +2075,7 @@ export default {
       load: 'Release illisible.',
       E_RELEASE_NOT_FOUND: 'Cette analyse n’est pas une release.',
       E_RELEASE_NOT_SIGNED: 'Le rapport n’est pas encore signé.',
+      E_RELEASE_FORGE: 'La forge ne répond pas : le commit du tag ne peut pas être vérifié.',
     },
   },
   usage: {
