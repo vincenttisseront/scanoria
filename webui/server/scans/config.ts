@@ -28,6 +28,8 @@ export interface WorkerConfig {
   retryBaseS: number
   /** runner.json plus vieux que ce délai : runner considéré absent. */
   runnerStaleS: number
+  /** 0.6 (V1) : demandes au helper root (prefetch-images après une image absente). */
+  requestsDir: string
 }
 
 function int(value: string | undefined, fallback: number, min: number, max: number): number {
@@ -48,5 +50,6 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     maxInfraRetries: int(env.SCANORIA_INFRA_RETRIES, 2, 0, 5),
     retryBaseS: int(env.SCANORIA_RETRY_BASE_S, 60, 0, 3600),
     runnerStaleS: int(env.SCANORIA_RUNNER_STALE_S, 120, 1, 86_400),
+    requestsDir: env.NUXT_REQUESTS_DIR || '/var/lib/scanoria/requests',
   }
 }

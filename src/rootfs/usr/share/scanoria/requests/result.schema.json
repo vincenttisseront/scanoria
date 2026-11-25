@@ -64,7 +64,8 @@
             "export-bundle",
             "import-bundle",
             "set-mirror",
-            "trust-key"
+            "trust-key",
+            "prefetch-images"
           ]
         }
       ]
@@ -151,7 +152,9 @@
         "E_MIRROR_CA",
         "E_MIRROR_UNTRUSTED",
         "E_MIRROR_UNREACHABLE",
-        "E_KEY_INVALID"
+        "E_KEY_INVALID",
+        "E_PREFETCH_FAILED",
+        "E_PREFETCH_UNKNOWN_IMAGE"
       ]
     },
     "message": {

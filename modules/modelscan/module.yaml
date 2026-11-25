@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module modelscan (0.6, K8) : fichiers de modèles d'apprentissage automatique
+# du dépôt (pickle, PyTorch, NumPy, Keras, H5, SavedModel) qui exécutent du
+# code au chargement. Analyse statique seule : ModelScan lit les opcodes et la
+# configuration des modèles, sans jamais les charger ; aucune IA, aucun réseau.
+#
+# Amont : ModelScan 0.8.8 de Protect AI (Apache-2.0, relevé sur PyPI et sur le
+# dépôt protectai/modelscan le 2026-11-24 ; modelscan/tools/ sous MIT). Protect
+# AI ne publie aucune image : ModelScan est livré tel quel avec l'appliance,
+# avec tomlkit 0.13.3 (MIT), dans scan-tools/modelscan/vendor/ (sources des
+# archives PyPI vérifiées par SHA-256, vendor/README.md), et lancé par le
+# python3 de l'image officielle tensorflow/tensorflow 2.21.0 (Apache-2.0,
+# Google, linux/amd64, relevée le 2026-11-24), qui apporte numpy, h5py et
+# TensorFlow : les formats Keras, H5 et SavedModel sont ainsi tous couverts.
+#
+# Gravité : un modèle qui exécute du code au chargement est « critical » ; la
+# catégorie sast (règle sast_block_from, « high » par défaut) le rend
+# bloquant sans réglage. Voir modules/modelscan/README.md.
+id: modelscan
+name: ModelScan
+description:
+  fr: Repère les fichiers de modèles d'IA (pickle, PyTorch, Keras, H5, SavedModel) qui exécuteraient du code à leur chargement.
+  en: Finds AI model files (pickle, PyTorch, Keras, H5, SavedModel) that would run code when they are loaded.
+type: scanner
+categories: [sast]
+license:
+  spdx: Apache-2.0
+  url: https://github.com/protectai/modelscan/blob/v0.8.8/LICENSE
+  restrictions: none
+  verified_at: "2026-11-24"
+  notes: ModelScan (Apache-2.0, picklescan sous MIT) et tomlkit (MIT) livrés tels quels avec l'appliance ; image d'exécution tensorflow/tensorflow (Apache-2.0).
+upstream:
+  homepage: https://github.com/protectai/modelscan
+  source: https://pypi.org/project/modelscan/0.8.8/
+image: docker.io/tensorflow/tensorflow@sha256:f325279f01a3e742a1285d8d736b7e600f72ccf8b55cc19ee0a90b8cbfce4c7a
+version: "0.8.8"
+resources: { min_ram_mb: 1536, min_cpu: 1, disk_mb: 3000 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.6.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive, image]
+  command: ["python3", "-I", "/scanoria/modelscan_sarif.py", "/src", "/out/modelscan.json", "/out/modelscan.sarif"]
+  tool: modelscan
+  env:
+    TF_CPP_MIN_LOG_LEVEL: "2"
+    PYTHONDONTWRITEBYTECODE: "1"
+  # 0.6 (V6, contrat 23) : fichiers de modèles seulement, comme la détection F1
+  # (projects/detect.ts, isModelFile) ; sans aucun, le module n'est pas lancé.
+  applies_to:
+    paths:
+      - "*.{pkl,pickle,joblib,dill,pt,pth,ckpt,npy,h5,keras}"
+      - "*.{PKL,PICKLE,JOBLIB,DILL,PT,PTH,CKPT,NPY,H5,KERAS}"
+      - "saved_model.pb"
+      - "keras_metadata.pb"
+      - "pytorch_model*.bin"
+      - "**/{model,models,Model,Models,weights,Weights,checkpoint,checkpoints}/**/*.{bin,dat,data}"
+  timeout_s: 900
+  network: none
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/modelscan.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # Pickle piégé inerte (operator.attrgetter puis REDUCE) : code exécuté au chargement.
+    - { rule: modelscan/pickle-unsafe-op, category: sast, min: 1 }
+    # Modèle Keras dont la configuration déclare une couche Lambda.
+    - { rule: modelscan/keras-lambda, category: sast, min: 1 }
+health: { command: ["python3", "-I", "-c", "import numpy, h5py, sys; print(sys.version.split()[0])"] }
+upgrade: { policy: on-demand }

@@ -34,9 +34,13 @@ interface HistoryRow {
   started_at: string
 }
 const history = ref<HistoryRow[]>([])
+// I16 : diagnostic IA des mises à jour en échec récentes (administrateurs, connecteur actif).
+const diag = useApplianceDiagnosis()
+const diagnosableHistory = computed(() => history.value.filter(h => diag.has(`update:${h.id}`)).slice(0, 3))
 async function loadHistory() {
   try {
     history.value = (await api<{ items: HistoryRow[] }>('/api/system/updates/history')).items
+    void diag.refresh()
   }
   catch {
     history.value = []
@@ -201,6 +205,10 @@ const codeLabel = (code: string | null | undefined) => (code && te(`codes.${code
     <StateAlert
       :data="data"
       :failed="failed"
+    />
+    <AiApplianceDiagnosis
+      v-if="diag.has('alert:update-rollback')"
+      subject-id="alert:update-rollback"
     />
 
     <div
@@ -479,6 +487,17 @@ const codeLabel = (code: string | null | undefined) => (code && te(`codes.${code
         :columns="historyColumns"
         :empty="t('common.none')"
       />
+      <div
+        v-if="diagnosableHistory.length"
+        class="mt-3 space-y-2"
+      >
+        <AiApplianceDiagnosis
+          v-for="h in diagnosableHistory"
+          :key="h.id"
+          :subject-id="`update:${h.id}`"
+          compact
+        />
+      </div>
     </UCard>
 
     <ConfirmModal

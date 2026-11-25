@@ -40,10 +40,13 @@ const { data: catalog, busy: catalogBusy, refresh: refreshCatalog } = useCatalog
 
 const detail = ref<ModuleDetail | null>(null)
 const loadError = ref('')
+// I16 : diagnostic IA de la dernière opération en échec sur ce module (administrateurs, connecteur actif).
+const diag = useApplianceDiagnosis()
 async function load() {
   try {
     detail.value = await api<ModuleDetail>(`/api/catalog/modules/${encodeURIComponent(id.value)}`)
     loadError.value = ''
+    void diag.refresh()
   }
   catch (err) {
     loadError.value = errorMessage(err)
@@ -354,6 +357,10 @@ const testbedDetails = computed(() => {
         :is-admin="isAdmin"
       />
 
+      <AiApplianceDiagnosis
+        v-if="diag.has(`install:${id}`)"
+        :subject-id="`install:${id}`"
+      />
       <UCard v-if="inst">
         <template #header>
           <h2 class="font-semibold">

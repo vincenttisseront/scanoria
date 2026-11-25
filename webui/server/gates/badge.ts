@@ -42,11 +42,15 @@ export function badgeSvg(verdict: Verdict | null): string {
     + `</g></svg>`
 }
 
-/** Dernier verdict rendu sur la branche par défaut, sinon sur n'importe quelle référence. */
+/**
+ * Dernier verdict rendu sur la branche par défaut, sinon sur n'importe quelle référence.
+ * Les téléversements externes (J6) n'en font jamais partie : le badge public reflète
+ * les analyses de l'appliance, pas un document envoyé par la CI.
+ */
 export async function latestVerdict(db: Queryable, projectId: string, defaultBranch: string | null): Promise<Verdict | null> {
   const res = await db.query<{ verdict: Verdict }>(
     `SELECT verdict FROM scans
-      WHERE project_id = $1 AND verdict IS NOT NULL AND status = 'done'
+      WHERE project_id = $1 AND verdict IS NOT NULL AND status = 'done' AND trigger <> 'external'
       ORDER BY (ref = $2) DESC, finished_at DESC NULLS LAST, number DESC
       LIMIT 1`,
     [projectId, defaultBranch ?? ''],

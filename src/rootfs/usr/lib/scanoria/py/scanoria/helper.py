@@ -27,7 +27,7 @@ import tempfile
 import time
 import uuid
 
-from . import aiendpoint, bundle, common, mirror, modules, netutil, offline, pkgdates, provision, schema
+from . import aiendpoint, bundle, common, mirror, modules, netutil, offline, pkgdates, prefetch, provision, schema
 from . import dns as dnscheck
 from .common import Fail
 
@@ -45,6 +45,7 @@ TIMEOUTS = {
     "reset-service-admin": 360,
     "package-dates": 360,
     "export-bundle": 3300, "import-bundle": 3300, "set-mirror": 180, "trust-key": 60,
+    "prefetch-images": 3300,
 }
 # Marge laissée entre l'échéance passée à scanoria-selfupdate et l'arrêt forcé
 # du helper : selfupdate ne franchit le point de non-retour (arrêt de la
@@ -499,6 +500,7 @@ ACTIONS = {
     "import-bundle": bundle.act_import_bundle,
     "set-mirror": mirror.act_set_mirror,
     "trust-key": offline.act_trust_key,
+    "prefetch-images": prefetch.act_prefetch_images,
 }
 
 

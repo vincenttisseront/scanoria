@@ -42,6 +42,10 @@ FILES+=(tests/b01-helper-hostile.sh tests/b02-update-signature.sh tests/b03-ca.s
 # --- 1. Fichiers ----------------------------------------------------------------------
 missing=()
 for f in "${FILES[@]}"; do
+	# Sources tierces livrées non modifiées avec un outil (0.6, modelscan) : leur
+	# licence est la leur (vendor/licenses/, OPEN-SOURCE.md). Seul vendor/README.md,
+	# écrit pour l'appliance, garde l'en-tête ; SHA256SUMS a un format fixe.
+	if [[ "$f" == src/rootfs/usr/lib/scanoria/scan-tools/*/vendor/* && "$f" != */vendor/README.md ]]; then continue; fi
 	grep -q 'SPDX-License-Identifier: AGPL-3.0-or-later' "$ROOT/$f" && grep -q 'Copyright (C) 2026 Vincent Tisseront' "$ROOT/$f" \
 		|| missing+=("$f")
 done

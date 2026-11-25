@@ -146,6 +146,28 @@
             }
           }
         },
+        "excluded": {
+          "description": "0.6 (V9, contrat 22) : exclusions communes masquées pour les modules hors secrets et SAST (qui voient tout l'arbre), notées dans la couverture (G15).",
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pattern", "count"],
+            "properties": {
+              "pattern": { "type": "string", "minLength": 1, "maxLength": 100 },
+              "count": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "workdir": {
+          "description": "0.6 (V9) : répertoire de travail de l'analyse, en mémoire (tmpfs) ou sur disque.",
+          "enum": ["tmpfs", "disk"]
+        },
+        "mirror": {
+          "description": "0.6 (V2) : miroir Git du projet ; hit (commit déjà présent, forge non contactée), fetched (nouveaux objets seulement), created (premier clone, superficiel sauf historique complet), ephemeral (projet inconnu : miroir jetable).",
+          "enum": ["hit", "fetched", "created", "ephemeral"]
+        },
         "tree": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$",
@@ -258,6 +280,11 @@
                     "null"
                   ],
                   "maxLength": 128
+                },
+                "revision": {
+                  "description": "0.6 (V7, G11) : répertoire de la version de la base montée pour cette analyse.",
+                  "type": "string",
+                  "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$"
                 },
                 "updated_at": {
                   "oneOf": [

@@ -22,6 +22,8 @@ const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-
 const CI_ROUTES: { method: string, re: RegExp, project: boolean }[] = [
   { method: 'POST', re: new RegExp(`^/api/projects/(${UUID})/scans$`), project: true },
   { method: 'GET', re: new RegExp(`^/api/scans/(${UUID})/verdict$`), project: false },
+  // J6 (0.6) : résultats externes téléversés par la CI (portée scan:create).
+  { method: 'POST', re: new RegExp(`^/api/projects/(${UUID})/results$`), project: true },
 ]
 const PUBLIC_ROUTES: { method: string, re: RegExp }[] = [
   { method: 'GET', re: /^\/api\/badges\/[a-z0-9][a-z0-9-]{0,62}\.svg$/ },

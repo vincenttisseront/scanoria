@@ -20,3 +20,4 @@ scanoria-ai.service
 scanoria-ai-check.timer
 scanoria-feeds-refresh.timer
 scanoria-bundle-export.timer
+scanoria-prefetch-images.timer

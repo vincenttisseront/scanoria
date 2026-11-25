@@ -244,7 +244,8 @@ valid "$id" && ok "git : résultat conforme au schéma" || ko "git : résultat n
 expect "git : statut ok" "$(jq -r .status <<< "$R")" ok
 expect "git : commit relevé" "$(jq -r .source.commit <<< "$R")" "$COMMIT"
 expect "git : historique superficiel" "$(jq -r .source.history <<< "$R")" shallow
-expect "git : profondeur 1 demandée au clone" "$(grep '"--name", "scanoria-fetch-' "$TMP/podman.log" | head -n 1 | jq -r '.[-1]')" 1
+# 0.6 (V2) : le script reçoit le mode d'historique (avant-dernier argument), le miroir fixe la profondeur.
+expect "git : historique superficiel demandé au clone" "$(grep '"--name", "scanoria-fetch-' "$TMP/podman.log" | head -n 1 | jq -r '.[-2]')" shallow
 expect "git : fichiers comptés (hors .git, gros fichier et tube écartés)" "$(jq -c '.source | {files, skipped: [.skipped[] | .reason] | sort}' <<< "$R")" '{"files":2,"skipped":["size","special"]}'
 expect "git : module faux ok" "$(jq -r '.modules[0].status' <<< "$R")" ok
 expect "git : sortie SARIF publiée" "$(jq -r '.modules[0].outputs.sarif' <<< "$R")" "faux/result.sarif"
@@ -286,7 +287,7 @@ drop "$id" "$(job "$id" "" '[{"id": "histo", "version": "1.0.0"}]')"
 run_runner
 R=$(res "$id")
 expect "historique : clone complet" "$(jq -r .source.history <<< "$R")" full
-grep '"--name", "scanoria-fetch-' "$TMP/podman.log" | head -n 1 | jq -e '.[-1] == ""' > /dev/null && ok "historique : aucune profondeur" || ko "historique : profondeur imposée"
+grep '"--name", "scanoria-fetch-' "$TMP/podman.log" | head -n 1 | jq -e '.[-2] == "full"' > /dev/null && ok "historique : historique complet demandé" || ko "historique : historique complet non demandé"
 expect "historique : history_command lancée" "$(jq -c . "$TMP/last-cmd")" '["faux","git","/src","--out","/out/result.sarif"]'
 grep '"--name", "scanoria-scan-' "$TMP/podman.log" | grep -qF ':/git:ro' && ok "historique : dépôt Git monté en lecture seule sur /git" || ko "historique : /git non monté"
 id=$(uuid)

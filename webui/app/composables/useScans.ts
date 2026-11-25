@@ -21,6 +21,8 @@ export interface ScanSummary {
   attempt: number
   error: { code?: string, class?: string, message?: string, retry_at?: string } | null
   replay_of: string | null
+  /** J6 (0.6) : source d'une analyse de résultats externes. */
+  external_source?: { tool: string, version: string | null, format: string, uploaded_via: string } | null
   queued_at: string
   started_at: string | null
   finished_at: string | null
@@ -81,7 +83,12 @@ export interface ScanDetail extends ScanSummary {
     timeout_s: number
     created_at: string
   } | null
-  coverage: { gaps?: CoverageGap[], source?: { files: number, bytes: number, skipped: unknown[] } } & Record<string, unknown> | null
+  coverage: {
+    gaps?: CoverageGap[]
+    source?: { files: number, bytes: number, skipped: unknown[], workdir?: string, mirror?: string }
+    /** 0.6 (contrat 22) : exclusions communes, non analysées (G15). */
+    excluded?: { pattern: string, count: number }[]
+  } & Record<string, unknown> | null
   verdict_details: Record<string, unknown> | null
   requested_by_username: string | null
   by_api_token: boolean

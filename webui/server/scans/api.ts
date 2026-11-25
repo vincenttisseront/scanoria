@@ -39,7 +39,8 @@ export type ScanListQuery = z.infer<typeof scanListQuery>
 
 const LIST_COLUMNS = `s.id, s.project_id, p.name AS project_name, p.slug AS project_slug, s.number, s.trigger, s.priority,
   ${EFFECTIVE_PRIORITY_SQL} AS effective_priority, s.ref, s.commit_sha, pr.slug AS profile, s.status, s.verdict,
-  s.attempt, s.error, s.replay_of, s.queued_at, s.started_at, s.finished_at`
+  s.attempt, s.error, s.replay_of, s.queued_at, s.started_at, s.finished_at,
+  s.external_source`
 
 export async function listScans(db: Queryable, q: ScanListQuery) {
   const where: string[] = []

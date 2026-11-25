@@ -105,6 +105,13 @@ export const scanResultSchema = z.strictObject({
       path: z.string().max(1024),
       reason: z.enum(['size', 'symlink', 'special', 'limit']),
     })).max(1000),
+    // 0.6 (chantier C, contrat 22) : exclusions communes (G15), répertoire de travail (V9), miroir Git (V2).
+    excluded: z.array(z.strictObject({
+      pattern: z.string().min(1).max(100),
+      count: z.number().int().min(1),
+    })).max(100).optional(),
+    workdir: z.enum(['tmpfs', 'disk']).optional(),
+    mirror: z.enum(['hit', 'fetched', 'created', 'ephemeral']).optional(),
     // 0.6 (V4, V6) : empreinte du contenu de /src et détection par clés.
     tree: cacheKey.optional(),
     detection: z.record(z.string(), z.unknown()).optional(),
@@ -118,6 +125,8 @@ export const scanResultSchema = z.strictObject({
     feeds: z.array(z.strictObject({
       id: moduleId,
       version: z.string().max(128).nullable(),
+      // 0.6 (V7, G11) : répertoire de la version de la base montée pour cette analyse.
+      revision: z.string().regex(/^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/).optional(),
       updated_at: timestamp.nullable(),
     })),
     started_at: timestamp.nullable().optional(),
