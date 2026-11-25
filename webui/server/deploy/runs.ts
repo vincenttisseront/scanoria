@@ -40,7 +40,7 @@ export const DEPLOYMENT_COLUMNS = `d.id::text, d.target_id::text, d.scan_id::tex
   to_char(d.finished_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS finished_at`
 
 /** Analyses qu'une cible prend en compte : release (contrat 40) ou branche configurée. */
-const SCAN_MATCH = `s.project_id = t.project_id AND s.created_at >= t.created_at AND s.pull_request IS NULL
+const SCAN_MATCH = `s.project_id = t.project_id AND s.queued_at >= t.created_at AND s.pull_request IS NULL
   AND s.status = 'done' AND s.verdict IS NOT NULL
   AND ((t.on_trigger = 'release' AND (s.trigger = 'release' OR EXISTS (SELECT 1 FROM release_candidates rc WHERE rc.scan_id = s.id)))
     OR (t.on_trigger = 'branch' AND s.trigger IN ('manual', 'schedule', 'commit', 'webhook', 'api')

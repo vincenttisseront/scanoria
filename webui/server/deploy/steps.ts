@@ -19,7 +19,7 @@ import { decryptSecret } from '../utils/secrets'
 import { getForge, forgeAccess } from '../forges'
 import { consoleUrl } from '../forges/context'
 import { ForgeError, forgeGet, forgeSend, type ForgeRequest } from '../forges/http'
-import { forgeDeployer, type ForgeDeployer } from '../forges/deploy'
+import { MAX_GITOPS_FILE_BYTES, forgeDeployer, type ForgeDeployer } from '../forges/deploy'
 import { escapeInline } from '../forges/sanitize'
 import { collectSignatures, listAttestations, requestAttestation } from '../attest'
 import { PREDICATE_TYPE, type VerdictPredicate } from '../attest/dsse'
@@ -176,18 +176,20 @@ async function advanceGitops(db: Queryable, run: Run, scan: ScanInfo, digests: M
   const missing = cfg.files.find(f => !digests.has(f.image))
   if (missing) return finishDeployment(db, run.id, 'failed', { error: 'E_DEPLOY_GITOPS_IMAGE' })
   const forge = await deployerFor(db, scan)
-  const changes: { path: string, content: string, sha: string | null }[] = []
+  // Chaque fichier est lu une seule fois ; plusieurs images peuvent viser le même fichier.
+  const originals = new Map<string, { content: string, sha: string | null }>()
   const byPath = new Map<string, string>()
   for (const f of cfg.files) {
-    const current = byPath.get(f.path) ?? (await forge.readFile(cfg.repo, cfg.base, f.path, 256 * 1024))?.content
-    if (current === undefined) return finishDeployment(db, run.id, 'failed', { error: 'E_DEPLOY_GITOPS_FILE' })
-    byPath.set(f.path, replaceImageDigest(current, f.image, digests.get(f.image)!).content)
+    if (!originals.has(f.path)) {
+      const orig = await forge.readFile(cfg.repo, cfg.base, f.path, MAX_GITOPS_FILE_BYTES)
+      if (!orig) return finishDeployment(db, run.id, 'failed', { error: 'E_DEPLOY_GITOPS_FILE' })
+      originals.set(f.path, orig)
+      byPath.set(f.path, orig.content)
+    }
+    byPath.set(f.path, replaceImageDigest(byPath.get(f.path)!, f.image, digests.get(f.image)!).content)
   }
-  for (const [path, content] of byPath) {
-    const orig = await forge.readFile(cfg.repo, cfg.base, path, 256 * 1024)
-    if (!orig) return finishDeployment(db, run.id, 'failed', { error: 'E_DEPLOY_GITOPS_FILE' })
-    if (orig.content !== content) changes.push({ path, content, sha: orig.sha })
-  }
+  const changes = [...byPath].filter(([path, content]) => originals.get(path)!.content !== content)
+    .map(([path, content]) => ({ path, content, sha: originals.get(path)!.sha }))
   if (!changes.length) return finishDeployment(db, run.id, 'succeeded', { error: 'already up to date' })
   if (!await claimDeployment(db, run.id)) return
   const branch = promotionBranch(run.environment, scan.id)
@@ -335,7 +337,10 @@ export async function advanceScan(db: Queryable, scanId: string): Promise<void> 
     if (!mine.length) continue
     if (before.some(r => !terminal(r.status))) return
     if (before.some(r => r.status === 'failed')) {
-      for (const r of mine) await finishDeployment(db, r.id, 'failed', { error: 'E_DEPLOY_PREVIOUS' })
+      for (const r of mine) {
+        await finishDeployment(db, r.id, 'failed', { error: 'E_DEPLOY_PREVIOUS' })
+        r.status = 'failed'
+      }
       continue
     }
     const digests = await promotedDigests(db, scanId)

@@ -51,7 +51,7 @@ export async function autonomousPass(db: Queryable): Promise<number> {
         AND (s.pull_request ->> 'number') ~ '^[0-9]{1,9}$'
         AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.action = $1 AND a.target_type = 'scan' AND a.target_id = s.id::text)
         AND NOT EXISTS (SELECT 1 FROM scans n WHERE n.project_id = s.project_id AND n.pull_request ->> 'number' = s.pull_request ->> 'number'
-                         AND n.created_at > s.created_at)
+                         AND n.queued_at > s.queued_at)
       ORDER BY s.finished_at LIMIT 20`, [AUTOMERGE_ACTION])
   let enabled = 0
   for (const s of r.rows) {

@@ -50,7 +50,7 @@ export async function projectChain(db: Queryable, projectId: string, limit = 10)
             (SELECT a.details ->> 'result' FROM audit_log a WHERE a.action = $3 AND a.target_type = 'scan' AND a.target_id = s.id::text
               ORDER BY a.id DESC LIMIT 1) AS auto_merge
        FROM scans s WHERE s.project_id = $1 AND s.pull_request IS NOT NULL AND (s.pull_request ->> 'number') ~ '^[0-9]{1,9}$'
-      ORDER BY s.created_at DESC LIMIT $2`, [projectId, limit, AUTOMERGE_ACTION])
+      ORDER BY s.queued_at DESC LIMIT $2`, [projectId, limit, AUTOMERGE_ACTION])
   const rel = await db.query<Omit<ChainRelease, 'attestations' | 'deployments'>>(
     `SELECT s.id::text AS scan_id, COALESCE(rr.tag, rc.tag) AS tag, s.commit_sha, s.verdict, s.status, rr.status AS report_status,
             ${TS('s.finished_at')} AS finished_at,
@@ -60,7 +60,7 @@ export async function projectChain(db: Queryable, projectId: string, limit = 10)
        LEFT JOIN release_candidates rc ON rc.scan_id = s.id
       WHERE s.project_id = $1 AND s.pull_request IS NULL
         AND (s.trigger = 'release' OR rc.scan_id IS NOT NULL OR EXISTS (SELECT 1 FROM deployments d WHERE d.scan_id = s.id))
-      ORDER BY s.created_at DESC LIMIT $2`, [projectId, limit])
+      ORDER BY s.queued_at DESC LIMIT $2`, [projectId, limit])
   const releases: ChainRelease[] = []
   for (const r of rel.rows) {
     const atts = (await listAttestations(db, r.scan_id)).map(({ envelope: _e, ...a }) => a)

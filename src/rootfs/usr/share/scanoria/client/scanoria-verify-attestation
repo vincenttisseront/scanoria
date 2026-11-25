@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+"""scanoria-verify attestation : vérifie l'attestation Scanoria d'une image (J9).
+
+  scanoria-verify attestation <registre/dépôt@sha256:…> --key <clé>
+      [--envelope <fichier.dsse.json>] [--cacert <ac.pem>]
+
+La clé est la clé publique de l'appliance : fichier PEM (SubjectPublicKeyInfo
+Ed25519), ou réponse JSON de GET https://<appliance>/api/system/appliance-key
+enregistrée dans un fichier. Sans --envelope, l'attestation est lue dans le
+registre au format cosign (étiquette sha256-<hex>.att) ; identifiants
+facultatifs par SCANORIA_REGISTRY_USER et SCANORIA_REGISTRY_PASSWORD (jamais
+en argument : ils apparaîtraient dans la liste des processus).
+
+Vérifie : signature DSSE (PAE) par la clé donnée, déclaration in-toto v1,
+prédicat Scanoria, sujet égal à l'empreinte de l'image, verdict « passed ».
+Python 3 (bibliothèque standard) et openssl 3. Codes de sortie : 0 attestation
+valide, 1 aucune attestation valide, 2 usage ou erreur d'accès.
+"""
+
+import base64
+import hashlib
+import json
+import os
+import re
+import ssl
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+
+PAYLOAD_TYPE = "application/vnd.in-toto+json"
+STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
+PREDICATE_TYPE = "https://github.com/vincenttisseront/scanoria/attestation/release-verdict/v1"
+DSSE_MEDIA = "application/vnd.dsse.envelope.v1+json"
+IMAGE_RE = re.compile(r"([a-z0-9.-]+(?::[0-9]{1,5})?)/([a-z0-9._/-]+)@(sha256:[0-9a-f]{64})\Z")
+MAX = 4 * 1024 * 1024
+
+
+def die(code, msg):
+    sys.stderr.write("scanoria-verify attestation : %s\n" % msg)
+    sys.exit(code)
+
+
+def pae(payload_type, payload):
+    t = payload_type.encode()
+    return b"DSSEv1 %d %s %d %s" % (len(t), t, len(payload), payload)
+
+
+def load_key(path):
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(64 * 1024)
+    except OSError as e:
+        die(2, "clé illisible (%s)" % e.strerror)
+    if raw.lstrip().startswith(b"{"):
+        try:
+            pem = json.loads(raw).get("pem")
+        except ValueError:
+            pem = None
+        if not isinstance(pem, str):
+            die(2, "réponse appliance-key sans champ pem")
+        raw = pem.encode()
+    if b"-----BEGIN PUBLIC KEY-----" not in raw:
+        die(2, "clé publique PEM attendue")
+    return raw
+
+
+def verify_sig(pem, message, sig):
+    with tempfile.TemporaryDirectory(prefix="scanoria-verify-") as d:
+        paths = {n: os.path.join(d, n) for n in ("key.pem", "msg", "sig")}
+        for n, data in (("key.pem", pem), ("msg", message), ("sig", sig)):
+            with open(paths[n], "wb") as f:
+                f.write(data)
+        r = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", paths["key.pem"], "-rawin",
+                            "-in", paths["msg"], "-sigfile", paths["sig"]], capture_output=True, check=False)
+        return r.returncode == 0
+
+
+def check_envelope(env, pem, digest):
+    """Rend la déclaration si l'enveloppe est valide pour digest, sinon (None, raison)."""
+    if not isinstance(env, dict) or env.get("payloadType") != PAYLOAD_TYPE or not isinstance(env.get("payload"), str):
+        return None, "enveloppe DSSE inattendue"
+    try:
+        payload = base64.b64decode(env["payload"], validate=True)
+    except ValueError:
+        return None, "charge utile non base64"
+    msg = pae(PAYLOAD_TYPE, payload)
+    sigs = env.get("signatures") if isinstance(env.get("signatures"), list) else []
+    ok = False
+    for s in sigs:
+        try:
+            raw = base64.b64decode(s.get("sig", ""), validate=True)
+        except (ValueError, AttributeError):
+            continue
+        if len(raw) == 64 and verify_sig(pem, msg, raw):
+            ok = True
+            break
+    if not ok:
+        return None, "signature invalide pour cette clé"
+    try:
+        st = json.loads(payload)
+    except ValueError:
+        return None, "déclaration illisible"
+    if st.get("_type") != STATEMENT_TYPE or st.get("predicateType") != PREDICATE_TYPE:
+        return None, "déclaration ou prédicat inattendu"
+    subj = st.get("subject")
+    if not isinstance(subj, list) or len(subj) != 1 or "sha256:%s" % (subj[0].get("digest") or {}).get("sha256") != digest:
+        return None, "le sujet n'est pas cette image"
+    if (st.get("predicate") or {}).get("verdict") != "passed":
+        return None, "verdict non favorable"
+    return st, None
+
+
+class Registry:
+    def __init__(self, host, repo, cafile):
+        self.host, self.repo = host, repo
+        self.ctx = ssl.create_default_context(cafile=cafile) if cafile else ssl.create_default_context()
+        self.auth = None
+        user, pwd = os.environ.get("SCANORIA_REGISTRY_USER"), os.environ.get("SCANORIA_REGISTRY_PASSWORD")
+        self.basic = "Basic " + base64.b64encode(("%s:%s" % (user or "", pwd)).encode()).decode() if pwd else None
+
+    def _open(self, url, accept, auth):
+        req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "scanoria-verify", **({"Authorization": auth} if auth else {})})
+        return urllib.request.urlopen(req, context=self.ctx, timeout=30)  # noqa: S310 (https seulement)
+
+    def _token(self, header):
+        m = re.match(r"(\w+)\s+(.*)", header or "")
+        if not m:
+            die(2, "authentification du registre refusée")
+        if m.group(1).lower() == "basic":
+            if not self.basic:
+                die(2, "le registre demande des identifiants (SCANORIA_REGISTRY_USER, SCANORIA_REGISTRY_PASSWORD)")
+            return self.basic
+        params = dict(re.findall(r'(\w+)="([^"]*)"', m.group(2)))
+        realm = params.get("realm", "")
+        if not realm.startswith("https://"):
+            die(2, "serveur de jetons non HTTPS")
+        q = {"scope": "repository:%s:pull" % self.repo}
+        if params.get("service"):
+            q["service"] = params["service"]
+        url = realm + ("&" if "?" in realm else "?") + urllib.parse.urlencode(q)
+        same = urllib.parse.urlparse(realm).netloc == self.host
+        with self._open(url, "application/json", self.basic if same else None) as r:
+            data = json.loads(r.read(64 * 1024))
+        tok = data.get("token") or data.get("access_token")
+        if not isinstance(tok, str):
+            die(2, "jeton du registre absent")
+        return "Bearer " + tok
+
+    def get(self, path, accept):
+        url = "https://%s/v2/%s%s" % (self.host, self.repo, path)
+        try:
+            with self._open(url, accept, self.auth) as r:
+                return r.read(MAX + 1)
+        except urllib.error.HTTPError as e:
+            if e.code == 401 and self.auth is None:
+                self.auth = self._token(e.headers.get("WWW-Authenticate"))
+                return self.get(path, accept)
+            if e.code == 404:
+                return None
+            die(2, "registre : HTTP %d" % e.code)
+        except (urllib.error.URLError, OSError) as e:
+            die(2, "registre injoignable (%s)" % getattr(e, "reason", e))
+        return None
+
+
+def envelopes_from_registry(host, repo, digest, cafile):
+    reg = Registry(host, repo, cafile)
+    tag = digest.replace(":", "-") + ".att"
+    raw = reg.get("/manifests/" + tag, "application/vnd.oci.image.manifest.v1+json")
+    if raw is None:
+        return []
+    manifest = json.loads(raw)
+    out = []
+    for layer in manifest.get("layers", [])[:50]:
+        if layer.get("mediaType") != DSSE_MEDIA or not re.match(r"sha256:[0-9a-f]{64}\Z", str(layer.get("digest"))):
+            continue
+        blob = reg.get("/blobs/" + layer["digest"], "application/octet-stream")
+        if blob is None or len(blob) > MAX or "sha256:" + hashlib.sha256(blob).hexdigest() != layer["digest"]:
+            continue
+        try:
+            out.append(json.loads(blob))
+        except ValueError:
+            continue
+    return out
+
+
+def main(argv):
+    args, opts = [], {}
+    it = iter(argv)
+    for a in it:
+        if a in ("--key", "--envelope", "--cacert"):
+            opts[a[2:]] = next(it, None)
+        elif a in ("-h", "--help"):
+            print(__doc__)
+            return 0
+        else:
+            args.append(a)
+    if len(args) != 1 or not opts.get("key"):
+        die(2, "usage : scanoria-verify attestation <registre/dépôt@sha256:…> --key <clé> [--envelope <fichier>] [--cacert <ac.pem>]")
+    m = IMAGE_RE.match(args[0])
+    if not m or ".." in m.group(2):
+        die(2, "image attendue sous la forme registre/dépôt@sha256:<64 hex>")
+    host, repo, digest = m.groups()
+    pem = load_key(opts["key"])
+    if opts.get("envelope"):
+        try:
+            with open(opts["envelope"], "rb") as f:
+                envs = [json.loads(f.read(MAX))]
+        except (OSError, ValueError):
+            die(2, "enveloppe illisible")
+    else:
+        envs = envelopes_from_registry(host, repo, digest, opts.get("cacert"))
+    reasons = []
+    for env in envs:
+        st, why = check_envelope(env, pem, digest)
+        if st:
+            p = st["predicate"]
+            print(json.dumps({"verified": True, "image": args[0], "verdict": p["verdict"], "commit_sha": p.get("commit_sha"),
+                              "tag": p.get("tag"), "scan_id": p.get("scan_id"), "report_sha256": p.get("report_sha256")}, ensure_ascii=False))
+            return 0
+        reasons.append(why)
+    print(json.dumps({"verified": False, "image": args[0], "reasons": reasons or ["aucune attestation Scanoria"]}, ensure_ascii=False))
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

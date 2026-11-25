@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+# Ressource de test (kyverno test) : image hors du dépôt « validé ».
+apiVersion: v1
+kind: Pod
+metadata:
+  name: outil-interne
+  namespace: defaut
+spec:
+  containers:
+    - name: outil
+      image: registre.exemple.test/outils/console@sha256:0000000000000000000000000000000000000000000000000000000000000000

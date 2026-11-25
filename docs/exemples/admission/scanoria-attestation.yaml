@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Politique d'admission Kyverno d'exemple (J9) : refuse tout Pod dont une
+# image du dépôt « validé » n'a pas d'attestation Scanoria valide, c'est-à-dire
+# signée par la clé de l'appliance, au prédicat Scanoria et au verdict
+# « passed ». Les images sont aussi réécrites par empreinte (mutateDigest).
+#
+# À adapter avant usage :
+#   - imageReferences : le dépôt « validé » de la promotion J13 ;
+#   - publicKeys : la clé de VOTRE appliance (champ pem de
+#     GET https://<appliance>/api/system/appliance-key). La clé ci-dessous est
+#     une clé d'exemple, sans valeur.
+# L'attestation est au format cosign, sans journal de transparence public
+# (appliance hors ligne possible) : rekor et ctlog sont donc ignorés.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: scanoria-verdict
+  annotations:
+    policies.kyverno.io/title: Verdict Scanoria obligatoire
+    policies.kyverno.io/description: Seules les images validées par Scanoria, attestation signée à l'appui, sont admises.
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  background: false
+  rules:
+    - name: attestation-scanoria
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - imageReferences:
+            - "registre.exemple.test/valide/*"
+          mutateDigest: true
+          verifyDigest: true
+          required: true
+          attestations:
+            - type: https://github.com/vincenttisseront/scanoria/attestation/release-verdict/v1
+              attestors:
+                - entries:
+                    - keys:
+                        publicKeys: |-
+                          -----BEGIN PUBLIC KEY-----
+                          MCowBQYDK2VwAyEABSC/jd8n1TpNXbYnJaU9TNehCNQ9XXIfZ2ujMrVYd+k=
+                          -----END PUBLIC KEY-----
+                        rekor:
+                          ignoreTlog: true
+                        ctlog:
+                          ignoreSCT: true
+              conditions:
+                - all:
+                    - key: "{{ verdict }}"
+                      operator: Equals
+                      value: passed
