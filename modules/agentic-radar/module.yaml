@@ -33,7 +33,7 @@ license:
 upstream:
   homepage: https://github.com/splx-ai/agentic-radar
   source: https://pypi.org/project/agentic-radar/0.14.2/
-image_pending: true
+image: ghcr.io/vincenttisseront/scanoria-agentic-radar@sha256:03f09561fe6db36623cda676e598b6fe257fcbb592dbeb68e9bb5ae2db0ad771
 version: "0.14.2"
 resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 600 }
 hostname: null

@@ -31,7 +31,7 @@ license:
 upstream:
   homepage: https://github.com/cisco-ai-defense/mcp-scanner
   source: https://pypi.org/project/cisco-ai-mcp-scanner/4.8.7/
-image_pending: true
+image: ghcr.io/vincenttisseront/scanoria-mcp-scanner@sha256:a0a3881d24075d10670b644c72e23eeb9470ddfbbf09c7d7761e4532db837153
 version: "4.8.7"
 resources: { min_ram_mb: 512, min_cpu: 1, disk_mb: 1200 }
 hostname: null
