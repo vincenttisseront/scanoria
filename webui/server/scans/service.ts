@@ -106,6 +106,10 @@ export class WorkerService {
   /** Lance la boucle ; se résout quand stop() a été appelé et la passe en cours terminée. */
   start(): Promise<void> {
     this.running = (async () => {
+      // Signe de vie dès le démarrage : la première passe (planification,
+      // re-corrélation, purges) peut être longue, et scanoria-selftest vérifie
+      // worker.alive juste après une mise à jour.
+      await this.heartbeat().catch(e => this.log(`heartbeat failed: ${(e as Error).message}`))
       while (!this.stopping) {
         await this.iterate()
         if (this.stopping) break
