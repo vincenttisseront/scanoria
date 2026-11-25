@@ -105,9 +105,9 @@ export function compilePattern(raw: string): ((path: string) => boolean) | null 
   if ((p.match(/\*\*/g) ?? []).length > MAX_GLOBSTARS) return null
   if (/[[\]]/.test(p)) return null
   const dirOnly = p.endsWith('/')
-  if (dirOnly) p = p.replace(/\/+$/, '')
+  while (p.endsWith('/')) p = p.slice(0, -1)
   const anchored = p.startsWith('/') || p.includes('/')
-  p = p.replace(/^\/+/, '')
+  while (p.startsWith('/')) p = p.slice(1)
   if (!p) return () => true // « / » ou « * » à la racine : tout le dépôt
   const segs = p.split('/').filter(Boolean).map(s => (s === '**' ? s : s.replace(/\*\*+/g, '*')))
   if (segs.some(s => s === '..' || s === '.')) return null

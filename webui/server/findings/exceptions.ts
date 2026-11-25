@@ -425,7 +425,7 @@ function canonical(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`
   if (v && typeof v === 'object') {
     const o = v as Record<string, unknown>
-    return `{${Object.keys(o).filter(k => o[k] !== undefined).sort().map(k => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`
+    return `{${Object.keys(o).filter(k => o[k] !== undefined).sort((a, b) => a.localeCompare(b)).map(k => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`
   }
   return JSON.stringify(v ?? null)
 }
