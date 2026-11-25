@@ -10,7 +10,103 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.7.1 — non publiée
+## 0.8.0 — non publiée
+
+Gate de release : chaque release passe par tous les outils installés, le
+verdict est signé par l'appliance et vérifiable hors ligne, puis le
+déploiement en place est déclenché seulement sur un verdict favorable. La CI
+s'intègre sans secret (OIDC) et une PR d'intégration est proposée à chaque
+dépôt enrôlé.
+
+### Ajouté : gate de release (§ 7)
+- **Profil `release` et mode tiré** (défaut, aucune exposition de l'appliance) : l'appliance interroge la forge de chaque projet toutes les 10 minutes (recul exponentiel jusqu'à 6 h), retient les tags qui correspondent aux motifs du projet (`v*` par défaut) et les pré-versions, et analyse chaque nouveau tag **une seule fois** avec la priorité maximale. Premier passage : seul le tag le plus récent. Un tag **déplacé** est signalé dans l'audit, jamais réanalysé.
+- **Mode poussé** : `scanoria-scan --profile release --ref <tag> --wait [--report rapport.json]` (route `POST /api/projects/:id/releases`) ; un second appel, même simultané, rend la même analyse ; code 0 seulement avec un rapport signé disponible ; forge reliée en erreur → `503 E_RELEASE_FORGE` (le commit de la CI n'est jamais pris à sa place).
+- **Statut `scanoria/release-gate`** sur le commit du tag (Forgejo, GitHub, GitLab) : en attente pendant l'analyse et la signature, favorable seulement avec un verdict favorable **et** un rapport signé, bloquant sinon ; republié quand une exception change le verdict.
+- **Rapport de release canonique signé** (Ed25519, clé de l'appliance) : outils et empreintes d'images, âge des bases, résultats, exceptions (motif, date de fin, demandeur et décideur), comparaison F2, verdict. La console le construit ; le **service root** revérifie la forme canonique, le schéma, l'analyse et l'empreinte avant de signer (demande `sign-release-report`, codes `E_SIGN_*`) ; la console revérifie la signature au retour.
+- **Preuves jointes** à la release de la forge (rapport signé, SARIF fusionné, SBOM CycloneDX, **VEX OpenVEX** (H7), couvert par son empreinte dans le rapport signé) ; un droit manquant est signalé sans bloquer le statut.
+- **`scanoria-verify`** (sh POSIX + openssl), téléchargeable depuis la console : `scanoria-verify rapport.json --key appliance.pem [--commit <sha>] [--require-passed]`, ou `--fetch-key <url> --key-fingerprint <empreinte>` ; codes de sortie distincts (0 valide, 1 altéré, 2 commit différent, 3 usage, 4 verdict non favorable). Clé publique : `GET /api/system/appliance-key`.
+- **Comparaison entre releases (F2)** : introduits, corrigés, inchangés, par outil et par gravité, avec la release précédente ou une release choisie.
+- **Notes de sécurité de release (I6)** proposées par IA : annexe **non signée** marquée « proposé par IA » (modèle et empreinte), jointe à côté du rapport signé inchangé ; absente sans connecteur ou pour un projet « aucun envoi à l'IA ».
+- **Page « Release »** de la console : verdict, statut, signature, téléchargements, comparaison, notes.
+- **Contrat 40** `onReleaseVerdict` émis une fois par release signée (et pour les branches configurées), pour le déploiement (J9, J11 à J16).
+- Documentation : `docs/RELEASING.md` § 7 et exemples génériques `docs/exemples/release-gate/` (release, promotion exigeant le statut, mode poussé).
+- Le service root tient un **relevé** de chaque rapport qu'il signe (`/var/lib/scanoria/release/signed/<analyse>.json`), sur lequel s'appuie l'attestation J9.
+
+### Ajouté : quality gate et VEX
+- **Simulateur de quality gate (F9)** : « Simuler » sur la page d'un gate rejoue les règles du formulaire sur l'historique (90 jours par défaut, jusqu'à 730), avec le plan figé de chaque analyse (G11) et les exceptions telles qu'elles étaient à sa date. Résultat : analyses et releases bloquées, débloquées ou inchangées, règles responsables, liste des analyses concernées. Un long historique passe en tâche de fond, suivie sans recharger la page. L'enregistrement des règles n'est possible qu'après une simulation des règles exactes du formulaire, et se confirme dans une modale qui rappelle l'effet. API : `POST /api/gates/simulations`, `GET /api/gates/simulations/:id` (contrat 39).
+- **Seuils de quality gate suggérés (I19)** : tâche IA `suggest-gate` (métadonnées seulement : comptes de verdicts, raisons, règles d'outil fréquentes ; jamais un chemin, un message ni un extrait). La proposition est simulée d'elle-même (origine « ai ») et s'affiche sur la page CI du projet ; « Reprendre dans le gate » préremplit la page du gate. L'enregistrement reste un clic d'administrateur, audité « proposé par IA » (modèle, empreinte, modifié ou non). Les exceptions candidates sont montrées, jamais créées. Rien sans connecteur ni pour un projet « aucun envoi à l'IA ».
+- **VEX (H7)** : les exceptions approuvées qui portent un statut VEX deviennent des déclarations (purl tiré du SBOM, sinon du paquet du résultat ; justification tirée du motif). Export canonique OpenVEX 0.2 et CycloneDX 1.6, par projet ou par analyse, depuis l'API et la page du projet (`buildVex`, contrat 38, utilisé par le rapport de release). Import strict d'un document OpenVEX ou CycloneDX VEX, avec aperçu puis confirmation : « non concerné » et « corrigé » deviennent des **demandes** d'exception (`tool-import`), jamais des approbations ; les autres statuts sont gardés pour information ; aucune demande pour un avis `MAL-` (H4) ni contre un verrou (G8). Révoquer une exception révoque sa déclaration.
+- **Statut VEX proposé (I10)** : la rédaction d'exception propose aussi un statut VEX et une justification OpenVEX, appuyés sur l'atteignabilité (I11) quand elle existe.
+
+### Ajouté : intégration aux CI
+- **CI sans secret par OIDC (J4)** : en mode poussé, la CI présente son jeton OIDC (GitHub Actions, Forgejo Actions, GitLab CI) à la place d'un jeton d'API. L'émetteur de chaque forge enrôlée est déclaré automatiquement (audience `scanoria`), et chaque dépôt enrôlé est lié à son projet pour `refs/heads/main` et `refs/tags/*`. Vérification stricte : RS256 et ES256 seulement (jamais `none` ni HS256), clés lues dans le JWKS de l'émetteur en HTTPS sur la même origine, mises en cache et relues seulement pour un `kid` inconnu (une fois par minute au plus) ; `iss`, `aud`, `exp`, `nbf` et la durée de vie contrôlés ; taille du jeton bornée ; clés embarquées (`jwk`, `jku`, `x5u`, `x5c`) refusées ; dépôt et ref piégés refusés. Les refus sont comptés et audités (`ci.oidc-refuse`) sans le jeton. Une identité OIDC n'est jamais humaine : elle peut demander une exception, jamais l'approuver (J15). `authenticateCi` (contrat 41) remplace la lecture directe du jeton dans les routes de CI. Chaque liaison épingle l'**identifiant immuable du dépôt** (`repository_id` de GitHub et Forgejo, `project_id` de GitLab ; **migration 019**, colonne `oidc_bindings.repository_id`) : rempli à l'enrôlement quand l'API de la forge le donne, sinon au premier jeton accepté, jamais écrasé automatiquement. Un dépôt supprimé puis recréé sous le même nom par un tiers est refusé (`E_OIDC_REPOSITORY_ID`, compté et audité) ; un administrateur réinitialise l'épingle si le dépôt a été légitimement recréé (audit `ci.oidc-binding-reset-pin`). Les liaisons de l'enrôlement couvrent aussi les PR (`refs/pull/*` ; GitLab : `refs/heads/*`). Les lignes d'audit de refus sont bornées par adresse. Console : page Système > Émetteurs OIDC (ajout, activation, refus comptés), liaisons sur la page « Intégration CI » du projet. API : `/api/ci/issuers`, `/api/projects/:id/ci/bindings`.
+- **`scanoria-scan --oidc`** : le client lit le jeton dans l'environnement de la CI seulement (`SCANORIA_ID_TOKEN`, ou le service de jetons `ACTIONS_ID_TOKEN_REQUEST_URL` de GitHub et Forgejo, en HTTPS), jamais en argument ; messages dédiés pour un jeton refusé ou une liaison absente.
+- **Modèles CI officiels (J3)** : workflow et action GitHub, workflow et action Forgejo, composant GitLab CI, *shared library* Jenkins et tâche Tekton, dans `/usr/share/scanoria/ci-templates/`. Chacun est une seule étape autour de `scanoria-ci.sh`, qui télécharge le client depuis l'appliance et vérifie son empreinte, choisit OIDC quand la CI le fournit, téléverse les SARIF externes (J6) et rend le verdict ; en mode tiré, il attend le statut `scanoria/release-gate`. Actions et images épinglées par empreinte, droits minimaux commentés, aucun secret. Téléchargeables depuis la page « Intégration CI » du projet, rendus pour le projet (`GET /api/ci/templates`).
+- **PR d'intégration automatique (J2)** : pour chaque dépôt enrôlé et détecté (F1), l'appliance ouvre une PR qui ajoute l'étape Scanoria à la CI en place (Forgejo, GitHub, GitLab ; Jenkins avec la ligne d'appel à ajouter), une seule fois, et suit son état (ouverte, fusionnée, fermée). Elle ne la fusionne jamais. Une CI qui appelle déjà Scanoria est reconnue. La protection de branche qui exige le statut Scanoria est **proposée**, puis appliquée seulement après confirmation d'un administrateur dans une modale qui montre la règle exacte (gate de release en option) ; elle s'ajoute à une règle existante sans rien retirer, et un droit manquant sur la forge est signalé. Tout est audité (`integration.*`). API : `/api/projects/:id/ci`, `…/ci/pr`, `…/ci/protection`, `…/ci/protection-request` (contrat 42).
+- **Chaîne autonome (J16)** : case par projet sur la page « Intégration CI », réservée aux administrateurs et auditée (`project.autonomous-chain`).
+
+### Ajouté : déploiement après verdict favorable
+- **Moteur de déploiement après verdict favorable** : pour chaque release (ou branche configurée) au verdict `passed` et au rapport signé, les cibles déclarées du projet avancent par passes, dans l'ordre promotion de registre, PR GitOps, puis CD existante. Une étape en échec arrête net les suivantes (`E_DEPLOY_PREVIOUS`). Un verdict qui n'est pas `passed` ne fait rien partir : le refus est enregistré (`deployments.status = 'refused'`) et visible dans la console. L'appliance ne détient aucun accès à la production et ne déploie jamais elle-même (ni SSH, ni Ansible, ni `kubectl`).
+- **Déclenchement de la CD existante (J11, mode par défaut)** : `workflow_dispatch` Forgejo ou GitHub, déclencheur de pipeline GitLab, `buildWithParameters` Jenkins. Entrées `scanoria_report`, `scanoria_commit`, `scanoria_tag` et `scanoria_image`. L'exécution est réservée avant l'appel : jamais de double déclenchement. Elle est ensuite suivie jusqu'à son résultat. Une CD qu'on ne peut pas suivre finit en échec `E_DEPLOY_UNTRACKED`, jamais en succès. Les workflows manuels du dépôt qui déclarent `scanoria_report` sont **proposés** comme cible, et un administrateur les confirme dans une modale.
+- **Promotion GitOps (J12)** : PR dans le dépôt de déploiement. Seule l'empreinte `@sha256:` des références déjà épinglées change, octet pour octet. Fusion humaine par défaut. Un administrateur peut autoriser, par cible, la fusion automatique **native de la forge** (modale avec accusé, `auto_merge_by` tracé). Cette fusion est liée au commit de la PR (`head_commit_id`, `expectedHeadOid`, `sha`).
+- **Promotion dans le registre (J13)** : copie **par empreinte**, index multi-architecture compris, du dépôt « candidat » vers le dépôt « validé ». L'empreinte est relue dans la destination. Une image candidate qui déclare un autre commit que celui analysé (`org.opencontainers.image.revision`) n'est jamais promue (`E_DEPLOY_REVISION`). La lecture d'un blob suit une redirection vers un stockage objet sans le jeton du registre, et le contenu est vérifié par son empreinte.
+- **Attestations (J9)** : déclaration in-toto Statement v1 (prédicat `…/attestation/release-verdict/v1`), signée en DSSE par le helper root (demande `sign-attestation`). La clé privée ne quitte jamais le helper. Le helper relit la déclaration (JSON strict et canonique, sujet unique par empreinte), puis la confronte au **relevé du rapport de release qu'il a lui-même signé** (`/var/lib/scanoria/release/signed/<scan_id>.json`, écrit à la signature du rapport) : verdict, commit, tag et empreinte du rapport. Sans relevé correspondant, il refuse (`E_ATTEST_REPORT`). La console revérifie chaque signature avec la clé publique publiée de l'appliance. L'attestation est poussée au format cosign (`sha256-<hex>.att`) et reste téléchargeable depuis la console. Fournis aussi : `scanoria-verify-attestation` (enveloppe ou registre ; redirections en HTTPS seulement, sans `Authorization` vers un autre hôte) et des exemples d'admission Kyverno.
+- **Chaîne autonome (J16)** : quand l'auteur d'une PR le demande (`/scanoria auto-merge`) et que le verdict est favorable, l'appliance active la fusion automatique native de la forge, liée au commit analysé. Elle ne fusionne jamais elle-même. Une PR qui a reçu un commit depuis l'analyse n'est pas fusionnée (résultat `stale`, audité).
+- **Console** : carte « Déploiement après verdict favorable » sur la page du projet. Elle montre la chaîne (PR, releases, attestations, déploiements et refus expliqués) et permet de déclarer des cibles par modale. Le jeton n'est jamais rendu. Affichage en français et en anglais, rafraîchi tant qu'une exécution est en cours.
+- **API** : `/api/deploy/projects/:id/targets` (lecture, création), `…/proposals`, `…/chain`, `/api/deploy/targets/:id` (modification, retrait), `/api/deploy/scans/:id`, `/api/deploy/attestations/:id`. Le tout est documenté dans OpenAPI et audité (`deploy.*`).
+- **Documentation** : `docs/DEPLOIEMENT.md`. Les entrées de CD passent toujours par des variables d'environnement du workflow, jamais interpolées dans un script.
+
+### Corrigé
+- L'approbation d'une exception montre la déclaration VEX qu'elle publiera, et l'audit `exception.approve` garde le statut VEX.
+- Libellés manquants des règles de gate de la 0.5 et de la 0.6 (licence interdite, KEV, EPSS, quarantaine) sur la page d'un gate.
+
+### Base de données
+- Migration **019** (`019_oidc_repository_id.sql`) : colonne `oidc_bindings.repository_id`, numérique, identifiant immuable du dépôt épinglé sur une liaison OIDC.
+- Les tables du déploiement, des attestations, des rapports de release, du VEX
+  et des simulations viennent de la migration 018, déjà livrée avec la 0.7.1.
+
+### Tests
+- `tests/b37-release.sh` : demandes de signature hostiles au vrai helper, `scanoria-verify` sur des rapports altérés, forme canonique stable.
+- `tests/b37-live.sh` (job `release-live`) : vrai Forgejo, du tag à la vérification du rapport joint.
+- Vitest : `release-canonical` (unitaire), `release-gate` (PostgreSQL, vrai helper, fausse forge).
+- `tests/b38-vex.sh` (documents hostiles, exports validés contre les schémas officiels OpenVEX et CycloneDX épinglés par commit et sha256), vitest `simulate-*`, `vex-*`, `gate-suggest-*`.
+- `tests/b39-ci.sh` (jetons OIDC hostiles, actionlint et zizmor en persona *pedantic* sans aucun résultat sur les modèles, client `--oidc`), `tests/b39-live.sh` (vrai Forgejo : enrôlement, PR d'intégration non fusionnée, protection appliquée après décision, étape OIDC sans secret acceptée pour le bon dépôt et refusée pour un autre), job CI `ci-live` ; vitest `oidc-*`, `ci-*`, `integration-*`.
+- `tests/b40-deploy.sh` : 51 cas de demandes `sign-attestation` hostiles, dont des verdicts forgés sans relevé root, un relevé défavorable, un lien symbolique, un fichier modifiable par tous et une clé en double.
+- `tests/b40-live.sh` et le job CI `deploy-live` : vrai Forgejo avec son registre, vrai helper, vérification par `scanoria-verify-attestation` et cosign v2.4.3.
+- Vitest : `deploy-*` en unitaire, en intégration contre PostgreSQL et pour les pages.
+
+### Limites connues
+- Le branchement sur la chaîne de publication d'Ipnoria (§ 7.4) et le verdict
+  de Scanoria sur son propre dépôt (§ 12) demandent une appliance en service
+  reliée à la forge : ils se font sur l'instance de validation, hors de ce
+  dépôt.
+- Un rapport resté sans signature plus d'une heure passe en erreur `E_SIGN_TIMEOUT` (bloquant).
+- La signature prouve que l'appliance a produit le rapport ; le service root n'en relit pas le sens dans la base.
+- Le rapport joint à la forge contient les noms des demandeurs et décideurs d'exceptions et leur motif.
+- Le rapport signé est figé : une exception approuvée après coup change le statut de commit, pas le rapport ; la page montre l'écart.
+- La justification VEX d'une exception est portée par un préfixe `[justification]` du motif, faute de colonne dédiée (une colonne `vex_justification` demandera une migration).
+- La simulation rejoue le tri humain actuel des résultats, pas celui de la date de l'analyse : l'écart est compté à part (« verdict réel différent du rejeu »).
+- Une demande d'exception issue d'un import VEX vise le paquet dans toutes ses versions du projet (la cible `vuln` du contrat ne porte que le nom) : l'import le signale, l'approbateur vérifie le produit. Une exception sur un résultat ne déclare que la version exacte de son paquet.
+- Les déclarations importées « concerné » ou « en cours d'analyse » ne se retirent pas encore depuis la console (une route de révocation est à prévoir).
+- Au plus deux simulations en tâche de fond à la fois (429 au-delà).
+- Une simulation en tâche de fond interrompue par un redémarrage de la console reste « en cours » ; il suffit d'en relancer une.
+- Un jeton OIDC reste réutilisable jusqu'à son expiration (quelques minutes, plus 60 s de tolérance), dans les limites de sa liaison : pas de mémoire des `jti`.
+- La protection GitLab est le réglage de projet « les pipelines doivent réussir » (toutes branches), pas une règle par branche : la modale le dit.
+- Le verdict qui fait foi est le statut `scanoria/*` posé par l'appliance et exigé par la protection, pas le résultat du job de CI, que l'auteur d'une PR peut modifier.
+- actionlint ne connaît pas la clé de job `enable-openid-connect` ni l'étiquette de runner `docker` de Forgejo : b39-ci les tolère explicitement pour le workflow Forgejo, et rien d'autre. zizmor les lit sans remarque.
+- Forgejo peut émettre la revendication `repository` sous la forme `owner-<id>/repo-<id>` pour certains dépôts : la liaison doit alors être ajoutée à la main sous cette forme.
+- Une application GitHub enrôlée par J1 n'a pas les droits d'écriture du contenu, des workflows et de l'administration du dépôt : la PR et la protection sont alors signalées « droit manquant ».
+- Le composant GitLab installe `curl` et `jq` dans une image Alpine épinglée ; Jenkins et Tekton utilisent le jeton d'API du projet (pas d'OIDC standard).
+- b39-live lance le vrai `scanoria-ci.sh` avec l'environnement d'un job Forgejo Actions et un émetteur de test, pas un forgejo-runner complet.
+- Une promotion de registre (et donc une attestation) n'existe que pour une **release** : il faut un rapport signé par le helper. Les cibles « branche » ne peuvent être que GitOps ou CD.
+- Une image candidate sans étiquette `org.opencontainers.image.revision` est promue sur la seule foi de son étiquette, lue une fois puis suivie par empreinte. L'audit le signale (`revision: absent`).
+- Si la clé publique de l'appliance n'est pas encore publiée par le helper, la console ne revérifie pas la signature. Le helper reste seul à signer.
+- Registres et Jenkins sont désignés par leur nom : une adresse IP littérale est refusée.
+- GitHub n'a pas de « commit multi-fichiers » par l'API de contenu : un commit est créé par fichier sur la branche de promotion.
+- Le suivi d'un `workflow_dispatch` GitHub retrouve l'exécution par heuristique (dernière exécution `workflow_dispatch` depuis le déclenchement).
+- La chaîne avance à chaque verdict de release émis par la gate de release (`onReleaseVerdict`, branché dans le plugin de déploiement) et par une passe périodique toutes les 30 s.
+
+## 0.7.1 — 2026-11-25
 
 Correctif de la mise à jour vers la 0.7 : avec le connecteur IA activé, la
 mise à jour d'une appliance échouait, puis son retour arrière aussi.
