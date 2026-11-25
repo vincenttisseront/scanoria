@@ -10,6 +10,7 @@ import type pg from 'pg'
 import { COMMIT_RE, SCAN_PRIORITY, SLUG_RE, type ScanTrigger } from '#shared/analysis'
 import { UUID_V4_RE } from '#shared/schemas'
 import { gitRef } from './contract'
+import { profileForSlot, slotFor, type ProjectProfiles, type PullRequestRef } from '../profiles/resolve'
 
 export interface EnqueueScanInput {
   projectId: string
@@ -24,7 +25,7 @@ export interface EnqueueScanInput {
    * 0.7 (D, contrat 33) : analyse d'une PR, {number, base_sha, base_ref,
    * head_sha, head_ref, author} (et changed_files pour G18).
    */
-  pullRequest?: Record<string, unknown> | null
+  pullRequest?: (PullRequestRef & Record<string, unknown>) | null
   /** 0.7 (D, G18) : analyse limitée aux fichiers modifiés (exige pullRequest). */
   incremental?: boolean
 }
@@ -113,9 +114,13 @@ export async function enqueueScan(db: Db, input: EnqueueScanInput): Promise<Enqu
         throw new EnqueueScanError('E_SCAN_REF')
       }
       if (input.profileSlug) {
-        const pr = await client.query<{ id: string }>('SELECT id FROM profiles WHERE slug = $1', [input.profileSlug])
+        const pr = await client.query<{ id: string }>('SELECT id FROM profiles WHERE slug = $1 AND archived_at IS NULL', [input.profileSlug])
         if (!pr.rows[0]) throw new EnqueueScanError('E_SCAN_PROFILE')
         profileId = pr.rows[0].id
+      }
+      else {
+        // 0.7 (G9, contrat 29) : profil du déclencheur (PR, nuit, release), sinon profile_id.
+        profileId = profileForSlot(project.extra as unknown as ProjectProfiles, slotFor(input.trigger, input.pullRequest))
       }
     }
 

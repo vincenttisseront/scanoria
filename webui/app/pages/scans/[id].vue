@@ -291,6 +291,11 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
         v-if="failed"
         :scan-id="scan.id"
       />
+      <!-- K7 (0.7) : inventaire des workflows d'agents, s'il y en a un. -->
+      <ScansAgentInventory
+        v-if="scan.status === 'done'"
+        :scan-id="scan.id"
+      />
 
       <UCard>
         <template #header>
@@ -379,6 +384,10 @@ const reasonText = (m: PlanModule) => (m.reason === 'included'
         >
           {{ t('scans.coverage.source', { files: source.files, skipped: source.skipped.length }) }}
         </p>
+        <ProfilesScanConfigNote
+          :repo-config="(scan.coverage as { repo_config?: never } | null)?.repo_config ?? null"
+          :profile="(scan.plan?.profile as never) ?? null"
+        />
         <p
           v-if="execNotes.length"
           class="mb-2 text-sm text-muted"

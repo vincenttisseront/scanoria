@@ -22,6 +22,7 @@ import { computeCoverage, mergeCoverageGaps, type CoverageGap } from './coverage
 import { assignCorrelationKeys } from './correlation'
 import { assignOwners, readCodeowners } from './owners'
 import { applyTriageRulesOnIngest } from './triage-rules'
+import { INVENTORY_MODULE, inventoryFromSarif, storeAgentInventory } from '../ai/agent-inventory'
 
 export const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 const OUTPUT_PATH_RE = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/
@@ -244,6 +245,11 @@ export async function ingestModuleOutputs(db: Db, input: IngestInput): Promise<I
     if (error) {
       errors.push({ ...error, output: kind })
       continue
+    }
+    // K7 (0.7) : inventaire des workflows d'agents porté par le SARIF d'agentic-radar.
+    if (kind === 'sarif' && input.moduleId === INVENTORY_MODULE && !input.external) {
+      const inv = inventoryFromSarif(doc)
+      if (inv) await storeAgentInventory(db, scan, (await moduleVersion(db, input.scanId, input.moduleId)) ?? '?', inv)
     }
     const out = kind === 'sarif' ? parseSarif(doc, ctx) : parseCycloneDx(doc, ctx)
     for (const issue of out.issues) errors.push({ ...issue, output: kind })

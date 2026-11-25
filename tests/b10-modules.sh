@@ -76,7 +76,7 @@ EOF
 		check "$id : sortie native enregistrée conforme aux attentes du banc d'essai" \
 			python3 "$MC" expect "$f" "$rec"
 		# Seule exception hors DAST : le réseau interne d'un service (contrat 12 de la 0.4, b17).
-		check "$id : réseau coupé pendant l'analyse" jq -e '.scan.network == "none" or (.scan.network | startswith("service:"))' "$TMP/m.json"
+		check "$id : réseau coupé pendant l'analyse (hors relais IA)" jq -e '.scan.network == "none" or (.scan.network | startswith("service:")) or .scan.network == "ai-relay"' "$TMP/m.json"
 		check "$id : licence vérifiée en amont (date)" jq -e '.license.verified_at | test("^2026-")' "$TMP/m.json"
 	fi
 done
