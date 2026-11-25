@@ -84,6 +84,8 @@ export const scanJobSchema = z.strictObject({
   cache: z.boolean().optional(),
   // 0.7 (D, contrat 33) : fichiers modifiés d'une PR, lus par les modules scan.incremental (G18).
   changed_files: z.array(changedFile).max(MAX_CHANGED_FILES).optional(),
+  // 0.7 (K2, K4) : commit de base d'une PR ; diff calculé par le runner pour les modules scan.pr_diff.
+  pr_base: z.string().regex(COMMIT_RE).optional(),
   modules: z.array(z.strictObject({
     id: moduleId,
     version: z.string().min(1).max(64),

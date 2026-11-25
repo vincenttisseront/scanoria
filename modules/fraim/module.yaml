@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module fraim (0.7, K4) : workflows d'analyse par IA de Fraim, lancés dans
+# le processus par l'outil de l'appliance (scan-tools/fraim) : « code »
+# (failles probables du code), « iac » (Terraform, Kubernetes, Dockerfile…)
+# et, pour une PR, « risk_flagger » sur son diff (/pr.diff, scan.pr_diff),
+# qui donne l'indicateur de risque de la PR. Pour une PR incrémentale, code
+# et IaC se limitent aux fichiers modifiés (G18). Résultats « IA »
+# (contrat 32) : informatifs et hors verdict tant qu'une personne ne les a
+# pas confirmés. Aucun commentaire de PR, relecteur ni message Slack n'est
+# envoyé par l'outil : rien ne lui donne d'URL de PR ni de webhook.
+#
+# Amont : Fraim 0.8.0 de Resourcely (MIT, relevé sur PyPI et sur le fichier
+# LICENSE du dépôt fraim-dev/fraim le 2026-11-25). Aucune image amont
+# épinglable : image construite par la CI de Scanoria (image/,
+# docs/MODULES.md § 8). Les outils tree-sitter que Fraim propose au modèle
+# ne lui sont jamais transmis (le relais retire tout outil, contrat 31) :
+# aucune grammaire n'est téléchargée.
+#
+# Modèle : celui de l'appliance (alias « scanoria »), joint par le relais ;
+# sans connecteur IA, ou si aucun appel au modèle n'aboutit, le module est
+# « skipped ». Voir modules/fraim/README.md.
+id: fraim
+name: Fraim
+description:
+  fr: Analyse par l'IA du code et de l'infrastructure en code, et indicateur de risque de chaque PR.
+  en: AI analysis of code and infrastructure as code, and a risk indicator for each pull request.
+type: scanner
+categories: [sast, iac]
+license:
+  spdx: MIT
+  url: https://github.com/fraim-dev/fraim/blob/v0.8.0/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: Fraim (MIT) et ses dépendances PyPI (requirements.lock) ; image de base python 3.13-slim (PSF-2.0, Debian).
+upstream:
+  homepage: https://github.com/fraim-dev/fraim
+  source: https://pypi.org/project/fraim/0.8.0/
+image_pending: true
+version: "0.8.0"
+resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 1500 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo, archive]
+  command: ["python3", "-I", "/scanoria/fraim_scan.py", "/src", "/out/fraim.sarif"]
+  tool: fraim
+  env:
+    TMPDIR: /tmp
+  timeout_s: 1800
+  network: ai-relay
+  pr_diff: optional
+  incremental: true
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/fraim.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # app.py : requête SQL construite par concaténation de l'entrée utilisateur.
+    - { rule: fraim/code, category: sast, min: 1 }
+health: { command: ["python3", "-I", "-c", "import importlib.metadata as m; print(m.version('fraim'))"] }
+upgrade: { policy: on-demand }

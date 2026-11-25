@@ -827,6 +827,14 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
     changed = changed_files_mount(job, m, ws)
     if changed:
         mounts.append((changed, CHANGED_FILES_MOUNT, "ro"))
+    # 0.7 (K2, K4) : diff de la PR, calculé à la récupération (fetch.FETCH_SCRIPT).
+    diff_mode = prdiff_mode(m)
+    diff = os.path.join(ws, "pr", "pr.diff") if diff_mode else None
+    diff_mounted = bool(diff) and os.path.isfile(diff) and not os.path.islink(diff)
+    if diff_mounted:
+        mounts.append((diff, PR_DIFF_MOUNT, "ro"))
+    elif diff_mode == "required":
+        return finish("skipped", _err("E_PR_DIFF_UNAVAILABLE", "input", pr_diff_reason(job, (ctx or {}).get("pr_diff"))))
     cache = scan_cache_dir(m, job)
     if cache:
         mounts.append((cache, "/cache", "rw"))
@@ -879,6 +887,8 @@ def run_module(job, entry, spec, ws, rdir, reg, secrets, ctx=None):
             args += ["--env", "SCANORIA_CACHE_DIR=/cache"]
         if changed:
             args += ["--env", "SCANORIA_CHANGED_FILES=" + CHANGED_FILES_MOUNT]
+        if diff_mounted:
+            args += ["--env", "SCANORIA_PR_DIFF=" + PR_DIFF_MOUNT]
         cmd = spec["command"]
         if use_sbom:
             cmd = spec["sbom_command"]
@@ -1024,6 +1034,33 @@ MAX_CHANGED_FILES = 3000
 CHANGED_PATH_RE = re.compile(r"[^\x00-\x1f\x7f]{1,1024}\Z")
 
 
+PR_DIFF_MOUNT = "/pr.diff"
+PR_DIFF_REASONS = {
+    "too-large": "the pull request diff exceeds %d MiB: module not run" % (fetch.PR_DIFF_MAX_BYTES >> 20),
+    "base-missing": "the base commit of the pull request could not be fetched: module not run",
+    "no-merge-base": "no common ancestor found between the pull request and its base: module not run",
+    "failed": "the pull request diff could not be computed: module not run",
+}
+
+
+def prdiff_mode(m):
+    """scan.pr_diff (0.7, K2/K4) : required (PR seulement), optional, ou None."""
+    mode = ((m or {}).get("scan") or {}).get("pr_diff")
+    return mode if mode in ("required", "optional") else None
+
+
+def pr_base(job):
+    """Commit de base d'une PR (contrat 33), revalidé ; None hors PR."""
+    base = job.get("pr_base")
+    return base if isinstance(base, str) and fetch.SHA_RE.match(base) else None
+
+
+def pr_diff_reason(job, state):
+    if not pr_base(job):
+        return "not a pull request analysis: module not run"
+    return PR_DIFF_REASONS.get(state or "base-missing", PR_DIFF_REASONS["base-missing"])
+
+
 def is_incremental(m):
     return (m.get("scan") or {}).get("incremental") is True
 
@@ -1108,18 +1145,22 @@ def _fetch_source(job, ws, reg, runnable, history, secrets, source):
         tmpfs = size_mb > 0 and workspace.mount_tmpfs(src, size_mb)
         info = {}
         log = os.path.join(ws, "logs", "fetch.log")
+        base = pr_base(job) if any(prdiff_mode(sp["manifest"]) for _, sp in runnable) else None
         try:
             commit = fetch.fetch_git(job, ws, reg["modules"], history, log, secrets, mirror=session, info=info,
-                                     extra_memory_mb=size_mb if tmpfs else 0)
+                                     extra_memory_mb=size_mb if tmpfs else 0, pr_base=base)
         except fetch.NoSpace:
             # Arbre plus gros que prévu : repris sur disque, sans nouvelle récupération.
             common.log("runner: source of job %s does not fit in memory, extracted on disk" % job["id"])
             workspace.unmount(src)
             shutil.rmtree(src, ignore_errors=True)
             tmpfs = False
-            commit = fetch.fetch_git(job, ws, reg["modules"], history, log, secrets, mirror=session, info=info)
+            commit = fetch.fetch_git(job, ws, reg["modules"], history, log, secrets, mirror=session, info=info,
+                                     pr_base=base)
         source["workdir"] = "tmpfs" if tmpfs else "disk"
         source["mirror"] = info.get("mirror") or "ephemeral"
+        if base:
+            source["pr_diff"] = info.get("pr_diff") or "base-missing"
         if session.project_id:
             gitmirror.note_tree(session.project_id, 0, fetch.tree_usage(src))
         masks, source["excluded"] = workspace.common_exclusions(src)
@@ -1201,7 +1242,7 @@ def execute(job):
         masks = source.pop("masks", None) or []
         workspace.mask_mounts(ws, masks)
         ctx = {"leases": leases, "mirror": session.path if session is not None and history == "full" else None,
-               "masks": masks}
+               "masks": masks, "pr_diff": source.get("pr_diff")}
         runnable = inspect_source(job, ws, source, runnable)
         schedule.configure_from(reg)
         run_modules(job, runnable, ws, rdir, reg, secrets, ctx)

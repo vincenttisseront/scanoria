@@ -1,0 +1,20 @@
+{
+  "title": "Recherche d'utilisateur\n",
+  "type": [
+    "Enhancement"
+  ],
+  "description": "- Ajoute une recherche d'utilisateur\n",
+  "pr_files": [
+    {
+      "changes_summary": "No detailed description available.",
+      "changes_title": "...\n",
+      "filename": "app.py\n",
+      "label": "additional files\n"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 10,
+    "total_tokens": 20
+  }
+}

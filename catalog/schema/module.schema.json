@@ -602,6 +602,10 @@
           "default": false,
           "description": "0.7 (contrat 33, G18) : le module sait se limiter aux fichiers modifiés d'une PR, listés un par ligne dans /changed-files.txt (variable SCANORIA_CHANGED_FILES). Sans cette déclaration, il analyse tout le dépôt, même pour une PR. Sa sortie n'est alors jamais mise en cache (V4)."
         },
+        "pr_diff": {
+          "enum": ["required", "optional"],
+          "description": "0.7 (K2, K4) : le module lit le diff unifié de la PR (base → tête) sur /pr.diff (variable SCANORIA_PR_DIFF), calculé par le runner sans rien exécuter du dépôt. required : hors PR, ou sans diff (base introuvable, plus de 4 Mio), le module est « skipped » avec sa raison ; optional : il tourne aussi sans diff. Sa sortie n'est jamais mise en cache (V4)."
+        },
         "prefers_sbom": {
           "type": "boolean",
           "default": false,

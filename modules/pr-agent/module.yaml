@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Vincent Tisseront
+#
+# Module pr-agent (0.7, K2) : revue de code IA d'une PR (review, puis
+# describe) par PR-Agent, en mode « diff seul » : il lit le diff de la PR
+# calculé par le runner (/pr.diff, scan.pr_diff), sans jeton de forge ni URL
+# de PR, et n'écrit que des fichiers. Ses points à revoir deviennent des
+# résultats « IA » (contrat 32) : informatifs et hors verdict tant qu'une
+# personne ne les a pas confirmés, publiés dans la PR par le client de forge
+# de l'appliance (contrat 30), jamais par l'outil.
+#
+# Amont : PR-Agent 0.50.0 (MIT, relevé sur PyPI et sur le fichier LICENSE du
+# dépôt the-pr-agent/pr-agent le 2026-11-25 ; le retour vers Apache-2.0
+# annoncé n'a pas eu lieu à cette date). Aucune image amont épinglable :
+# image construite par la CI de Scanoria (image/, docs/MODULES.md § 8).
+#
+# Modèle : celui de l'appliance (alias « scanoria »), joint par le relais
+# (contrat 31) ; sans connecteur IA, le module est « skipped ». Hors PR, il
+# l'est aussi (scan.pr_diff: required). Voir modules/pr-agent/README.md.
+id: pr-agent
+name: PR-Agent
+description:
+  fr: Revue de code par l'IA de chaque PR (points à revoir, sécurité, description proposée), sans accès à la forge.
+  en: AI code review of each pull request (issues to review, security, suggested description), without any forge access.
+type: scanner
+categories: [quality]
+license:
+  spdx: MIT
+  url: https://github.com/the-pr-agent/pr-agent/blob/v0.50.0/LICENSE
+  restrictions: none
+  verified_at: "2026-11-25"
+  notes: PR-Agent (MIT) et ses dépendances PyPI (requirements.lock) ; image de base python 3.13-slim (PSF-2.0, Debian).
+upstream:
+  homepage: https://github.com/the-pr-agent/pr-agent
+  source: https://pypi.org/project/pr-agent/0.50.0/
+image_pending: true
+version: "0.50.0"
+resources: { min_ram_mb: 1024, min_cpu: 1, disk_mb: 1500 }
+hostname: null
+requires: { modules: [git-fetch], feeds: [], appliance: ">=0.7.0" }
+conflicts: []
+needs: { sysctl: {}, postgres: false }
+options:
+  type: object
+  additionalProperties: false
+  properties: {}
+scan:
+  inputs: [repo]
+  command: ["python3", "-I", "/scanoria/pragent_scan.py", "/out/pr-agent.sarif"]
+  tool: pr-agent
+  env:
+    TMPDIR: /tmp
+  timeout_s: 900
+  network: ai-relay
+  pr_diff: required
+  exit_codes_ok: [0]
+outputs:
+  sarif: { path: /out/pr-agent.sarif, version: "2.1.0" }
+testbed:
+  path: testbed/
+  expect:
+    # app.py ajouté par la PR du banc : requête SQL construite par concaténation.
+    - { rule: pr-agent/key-issue, category: quality, min: 1 }
+health: { command: ["python3", "-I", "-c", "import importlib.metadata as m; print(m.version('pr-agent'))"] }
+upgrade: { policy: on-demand }

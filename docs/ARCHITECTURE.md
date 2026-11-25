@@ -886,3 +886,33 @@ un modèle) tant que `ai_confirmed_at` est vide. `POST /api/findings/:id/ai-conf
 `finding.ai-confirm`) les confirme : statut `nouveau` → `confirmé`, et le
 résultat compte comme un autre dans les verdicts évalués ensuite. I24 : accord
 IA/humain par module (`/api/ai/agreement`, champ `modules`).
+
+**Diff de la PR (`scan.pr_diff`, K2 et K4)** : pour une analyse de PR, le
+worker fige le commit de base (`pull_request.base_sha`) dans le plan
+(`source.pr_base`, G11) et le transmet au runner (`pr_base` de la tâche). Si
+un module du plan déclare `scan.pr_diff`, le conteneur de récupération
+(`fetch.FETCH_SCRIPT`) récupère aussi la base si le miroir ne l'a pas, puis
+écrit `git diff --no-ext-diff --no-textconv -M <merge-base> <tête>` dans
+`ws/pr/pr.diff`, au plus 4 Mio (écriture bornée). En clone superficiel,
+l'historique est approfondi en deux paliers (50 puis 1 000 commits) pour
+trouver le point de divergence ; sans lui, aucun diff (jamais base → tête,
+faux dès que la branche a divergé). Ces récupérations n'arrêtent jamais
+l'analyse. Le runner monte le diff en lecture seule sur
+`/pr.diff` (`SCANORIA_PR_DIFF`). `required` : hors PR, base ou point de
+divergence introuvable, diff trop gros, le module est `skipped` (`E_PR_DIFF_UNAVAILABLE`, classe `input`) ;
+`optional` : il tourne sans diff. Une sortie qui dépend du diff n'est jamais
+mise en cache (V4).
+
+**Modules d'analyse par IA livrés (0.7)** :
+
+| Module | Ce qu'il lance | Règles | Diff |
+|---|---|---|---|
+| `pr-agent` (K2) | PR-Agent 0.50.0 en mode « diff seul » (plain-diff) : `review` puis `describe`, sortie JSON | `pr-agent/key-issue`, `pr-agent/security-concern` ; description proposée, effort et note dans `runs[0].properties["scanoria/pr-agent"]` | `required` |
+| `fraim` (K4) | workflows Fraim 0.8.0 `code`, `iac` (fichiers modifiés seulement pour une PR incrémentale) et `risk_flagger` sur le diff | `fraim/code`, `fraim/iac`, `fraim/risk-flagger` ; indicateur de risque `pr_risk` dans `runs[0].properties["scanoria/fraim"]` | `optional` |
+
+Ni l'un ni l'autre ne reçoit de jeton de forge, d'URL de PR ou de webhook :
+leurs résultats sont publiés dans la PR par le client de forge de l'appliance
+(contrat 30), marqués « (IA) ». Un outil qui n'obtient aucune réponse du
+modèle rend le code 3 : module `skipped`, jamais « aucun résultat ». K1
+(Kodus) n'est pas livré : voir `docs/ETUDE-K1-KODUS.md`.
+

@@ -490,6 +490,12 @@ def run(manifest, timeout=None):
         if rulesets.spec_of(manifest) is not None:
             # 0.7 (contrat 34) : /rules toujours monté ; vide au banc d'essai (règles par défaut).
             mounts.append((rulesets.stage([], os.path.join(work, "rules")), "/rules", "ro"))
+        env = dict(scan.get("env") or {})
+        diff = os.path.join(src, "pr.diff")
+        if scan.get("pr_diff") in ("required", "optional") and os.path.isfile(diff) and not os.path.islink(diff):
+            # 0.7 (K2, K4) : la PR du banc, montée comme le runner monte celle d'une analyse de PR.
+            mounts.append((diff, "/pr.diff", "ro"))
+            env["SCANORIA_PR_DIFF"] = "/pr.diff"
         started = time.monotonic()
         from . import airelay
         if airelay.uses_relay(manifest):
@@ -500,7 +506,7 @@ def run(manifest, timeout=None):
                 with airelay.Lease(manifest, project_id=None, scan_id=None, timeout_s=t + 60,
                                    workdir=work, purpose="testbed") as lease:
                     rc, hint = run_confined(manifest, lease.wrap(cmd), mounts, timeout=t,
-                                            env=scan.get("env"), with_stderr=True,
+                                            env=env, with_stderr=True,
                                             network=["--network=none"] + lease.args())
                     hint = hint.replace(lease.token, "***")
             except airelay.Unavailable as u:
@@ -512,12 +518,12 @@ def run(manifest, timeout=None):
         elif svc:
             try:
                 with svcnet.Attachment(svc, svcnet.TESTBED_KEY, budget_s=max(60, t - 60)) as att:
-                    rc, hint = run_confined(manifest, cmd, mounts, timeout=t, env=scan.get("env"),
+                    rc, hint = run_confined(manifest, cmd, mounts, timeout=t, env=env,
                                             with_stderr=True, network=att.args())
             except svcnet.Unavailable as u:
                 raise Fail("E_TESTBED", u.message)
         else:
-            rc, hint = run_confined(manifest, cmd, mounts, timeout=t, env=scan.get("env"), with_stderr=True)
+            rc, hint = run_confined(manifest, cmd, mounts, timeout=t, env=env, with_stderr=True)
         if rc not in (scan.get("exit_codes_ok") or SCANNER_OK_RC):
             msg = "scanner %s exited with code %d on its testbed" % (manifest["id"], rc)
             if rc == KILLED_RC and time.monotonic() - started < t:

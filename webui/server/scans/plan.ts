@@ -101,6 +101,8 @@ export interface ScanPlan {
     history: 'shallow' | 'full'
     /** 0.7 (D, contrat 33) : analyse incrémentale d'une PR, fichiers modifiés figés (G11, G18). */
     changed_files?: string[]
+    /** 0.7 (K2, K4) : commit de base d'une PR. */
+    pr_base?: string
   }
   profile: { id: string, slug: string, categories: string[], include_modules: string[], exclude_modules: string[] } & Partial<Pick<import('../profiles/plan-profile').PlanProfile, 'level' | 'chain' | 'locks' | 'slot' | 'source'>>
   gate: { id: string, slug: string, rules: GateRules }
@@ -340,6 +342,8 @@ export const scanPlanSchema = z.object({
     commit: z.string().nullable(),
     history: z.enum(['shallow', 'full']),
     changed_files: z.array(z.string().min(1).max(1024)).max(3000).optional(),
+    // 0.7 (K2, K4) : commit de base d'une PR, figé dans le plan (G11).
+    pr_base: z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/).optional(),
   }),
   profile: z.object({
     id: z.string(), slug: z.string(), categories: z.array(z.string()),
@@ -366,6 +370,15 @@ export const scanPlanSchema = z.object({
 export function parsePlan(value: unknown): ScanPlan | null {
   const parsed = scanPlanSchema.safeParse(value)
   return parsed.success ? parsed.data as ScanPlan : null
+}
+
+/**
+ * 0.7 (K2, K4) : commit de base d'une analyse de PR (pull_request.base_sha),
+ * transmis au runner pour les modules scan.pr_diff ; hors PR ou mal formé : rien.
+ */
+export function prBase(scan: { pull_request?: unknown }): string | undefined {
+  const base = (scan.pull_request as { base_sha?: unknown } | null | undefined)?.base_sha
+  return typeof base === 'string' && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(base) ? base : undefined
 }
 
 /**

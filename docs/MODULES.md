@@ -129,6 +129,10 @@ le reste en arguments. Le moteur lance le conteneur ainsi :
   contenir Python 3. Sans connecteur IA ou pour un projet « aucun envoi à
   l'IA », le module est `skipped`. Ses résultats sont marqués « IA » et hors
   verdict jusqu'à confirmation humaine (ARCHITECTURE § 14) ;
+- `scan.pr_diff: required | optional` (0.7, K2 et K4) : pour une analyse de
+  PR, le diff unifié base → tête calculé par le runner est monté en lecture
+  seule sur `/pr.diff` (`SCANORIA_PR_DIFF`) ; `required` : le module est
+  `skipped` hors PR, `optional` : il tourne aussi sans diff (ARCHITECTURE § 14) ;
 - `--read-only`, `--cap-drop=ALL`, `--security-opt=no-new-privileges`,
   utilisateur 65534, limites mémoire, CPU et PIDs, délai `scan.timeout_s` ;
 - sources en lecture seule sur `/src`, `/out` écrivable, `/tmp` en tmpfs ;
