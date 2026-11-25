@@ -45,6 +45,8 @@ RUNTIME_DIR = common.p("/run/scanoria-ai")
 # qui ouvre aussi les jetons de forge et les clés SSH.
 AI_TOKEN_KEY = common.VARLIB + "/console/ai-token.key"
 GRANTS_SQL = common.SHARE_DIR + "/sql/ai-grants.sql"
+# 0.7 (contrat 31) : certificat ai-relay.<nom> du relais IA des modules (scanoria-ca issue-relay).
+RELAY_PKI = common.ETC + "/pki/ai-relay"
 AI_USER = "scanoria-ai"
 TABLE = "scanoria_ai"
 MAX_ADDRESSES = 8
@@ -395,11 +397,57 @@ def read_token_key():
         os.close(fd)
 
 
+def relay_certificate(timeout=120):
+    """Certificat et clé du relais IA (ai-relay.<nom>), émis ou renouvelé par
+    l'AC interne ; None si l'appliance n'a pas encore de nom ou d'AC. Le relais
+    n'est alors pas servi et les modules d'analyse par IA sont « skipped »."""
+    from . import routing
+    fqdn = routing.appliance_fqdn()
+    if fqdn is None:
+        return None
+    try:
+        common.run_protocol("scanoria-ca", ["issue-relay", "--fqdn", fqdn], timeout=timeout)
+    except Fail as e:
+        common.log("AI relay certificate not issued: %s" % e.message)
+    out = {}
+    for name, src in (("relay.crt", "fullchain.pem"), ("relay.key", "privkey.pem")):
+        path = os.path.join(RELAY_PKI, src)
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        except OSError:
+            return None
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return None
+            out[name] = os.read(fd, 65536)
+        finally:
+            os.close(fd)
+    return out
+
+
+def refresh_relay_certificate(timeout=120):
+    """Renouvellement planifié (cert-renew) : nouveau certificat du relais → scanoria-ai redémarré."""
+    from . import routing
+    fqdn = routing.appliance_fqdn()
+    if fqdn is None:
+        return False
+    out, _ = common.run_protocol("scanoria-ca", ["issue-relay", "--fqdn", fqdn], timeout=timeout)
+    if isinstance(out, dict) and out.get("issued") is True:
+        common.run("systemctl", ["try-restart", "scanoria-ai.service"], timeout=timeout)
+        return True
+    return False
+
+
 def install_runtime(conf):
     """Fichiers lus par le service, copiés dans /run/scanoria-ai (propriétaire scanoria-ai)."""
     os.makedirs(RUNTIME_DIR, mode=0o700, exist_ok=True)
     uid = ai_uid()
     wanted = {"ai.json": (common.dumps(conf).encode("utf-8"), 0o400)}
+    # Relais des modules (contrat 31) : servi même sans connecteur, il répond alors « indisponible ».
+    relay = relay_certificate()
+    if relay:
+        for name, data in relay.items():
+            wanted[name] = (data, 0o400)
     if conf.get("enabled") and conf.get("ca") and os.path.isfile(AI_CA):
         with open(AI_CA, "rb") as f:
             wanted["ca.pem"] = (f.read(65536), 0o400)
