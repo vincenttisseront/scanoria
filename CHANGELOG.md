@@ -10,7 +10,23 @@ version sert aussi de notes de version dans la console (`release.json`,
 champ `notes_md`). Les numéros suivent le versionnage sémantique et ne sont
 jamais reconstruits : une version rejetée est remplacée par la suivante.
 
-## 0.8.0 — non publiée
+## 0.8.1 — non publiée
+
+Correctif de l'installation des modules et des réponses de l'IA.
+
+### Corrigé
+- **Installation groupée** : un module d'analyse par IA dont le banc d'essai
+  échoue est écarté seul, et les autres modules sont installés. Avant ce
+  correctif, son échec annulait toute l'installation.
+- **IA indépendante du modèle** : les blocs de raisonnement `<think>` sont
+  retirés de toutes les réponses (modèles à raisonnement), et les réponses
+  de Fraim sont remises en forme avant leur validation. Une sortie anticipée
+  de Fraim (code 255) est rattrapée et signalée comme une erreur de l'outil.
+- **DNS** : avant une installation, les noms des modules « service » du
+  catalogue sont vérifiés un par un. L'avertissement « ne résout pas » ne
+  s'affiche plus à tort quand le DNS n'a pas d'enregistrement générique.
+
+## 0.8.0 — 2026-11-25
 
 Gate de release : chaque release passe par tous les outils installés, le
 verdict est signé par l'appliance et vérifiable hors ligne, puis le
