@@ -229,8 +229,62 @@ def count_llm_calls():
             CALLS["failed"] += 1
             raise
         CALLS["ok"] += 1
+        repair_response(res)
         return res
     litellm.acompletion = counted
+
+
+THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+FENCE_RE = re.compile(r"\A\s*```[A-Za-z0-9_-]*\s*\n(.*?)\n?\s*```\s*\Z", re.DOTALL)
+RESULT_KEYS = ("locations", "level", "ruleId")
+LINE_KEYS = ("startLine", "endLine", "startColumn", "endColumn")
+
+
+def repair_json(v):
+    """Écarts courants des modèles par rapport au SARIF attendu par Fraim, corrigés
+    sans rien inventer : objet {text} donné comme simple chaîne (snippet, message),
+    artifactLocation donné comme chemin, numéros de ligne donnés comme chaînes."""
+    if isinstance(v, list):
+        return [repair_json(x) for x in v]
+    if not isinstance(v, dict):
+        return v
+    out = {}
+    for k, x in v.items():
+        if isinstance(x, str) and (k == "snippet" or (k == "message" and any(r in v for r in RESULT_KEYS))):
+            x = {"text": x}
+        elif k == "artifactLocation" and isinstance(x, str):
+            x = {"uri": x}
+        elif k in LINE_KEYS and isinstance(x, str) and x.strip().isdigit():
+            x = int(x.strip())
+        out[k] = repair_json(x)
+    return out
+
+
+def repair_text(content):
+    """Réponse du modèle rendue lisible par Fraim quel que soit le modèle : blocs de
+    raisonnement <think> retirés, clôture Markdown retirée, JSON remis en forme
+    (repair_json). Un texte qui n'est pas du JSON est rendu sans autre changement."""
+    if not isinstance(content, str):
+        return content
+    text = THINK_RE.sub("", content).strip()
+    m = FENCE_RE.match(text)
+    if m:
+        text = m.group(1).strip()
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text
+    if not isinstance(data, (dict, list)):
+        return text
+    return json.dumps(repair_json(data), ensure_ascii=False)
+
+
+def repair_response(res):
+    try:
+        for choice in res.choices:
+            choice.message.content = repair_text(choice.message.content)
+    except Exception as e:  # noqa: BLE001 (la réponse d'origine reste utilisée telle quelle)
+        sys.stderr.write("fraim: response not repaired: %s\n" % e.__class__.__name__)
 
 
 def use_diff_file(diff):
