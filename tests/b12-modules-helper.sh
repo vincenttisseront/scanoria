@@ -618,6 +618,42 @@ schema.load("requests", sys.argv[2]); print("ok")' "$PYLIB" "$f")" ok
 done
 expect "timer de rafraîchissement du catalogue" "$(grep -c -x 'OnCalendar=daily' "$ROOT/src/rootfs/usr/lib/systemd/system/scanoria-catalog-refresh.timer")" 1
 
+# --- Installation groupée : module d'IA écarté seul, noms DNS du catalogue (0.8.1) ---------------
+aside=$(python3 -I -B - "$ROOT/src/rootfs/usr/lib/scanoria/py" <<-'EOF'
+	import sys
+	sys.path.insert(0, sys.argv[1])
+	from scanoria import modules, dns, catalogverify, routing
+	from scanoria.common import Fail
+	undone = []
+	modules.rollback_installs = lambda reg, done: undone.extend(done) or True
+	ai = {"id": "fraim", "scan": {"network": "ai-relay"}, "requires": {"modules": ["git-fetch"]}}
+	plain = {"id": "gitleaks", "scan": {"network": "none"}}
+	dep = {"id": "needs-fraim", "scan": {"network": "none"}, "requires": {"modules": ["fraim"]}}
+	f = lambda code: Fail(code, "x")
+	res = [
+	    modules.ai_module_set_aside({}, [ai, plain], ai, f("E_RELAY_UNAVAILABLE")),
+	    modules.ai_module_set_aside({}, [ai, plain], ai, f("E_TESTBED")),
+	    modules.ai_module_set_aside({}, [ai, plain], plain, f("E_TESTBED")),
+	    modules.ai_module_set_aside({}, [ai], ai, f("E_TESTBED")),
+	    modules.ai_module_set_aside({}, [ai, dep], ai, f("E_TESTBED")),
+	    modules.ai_module_set_aside({}, [ai, plain], ai, f("E_RESOURCES")),
+	]
+	catalogverify.installed_index = lambda: {"modules": [
+	    {"id": "sonarqube", "type": "service", "hostname": "sonarqube"},
+	    {"id": "dependency-track", "type": "service", "hostname": "dtrack"},
+	    {"id": "evil", "type": "service", "hostname": "bad name"},
+	    {"id": "gitleaks", "type": "scanner", "hostname": None}]}
+	routing.recorded = lambda: {"services": [{"hostname": "dtrack"}]}
+	names = [n for n, _ in dns.names_to_check("analyse.exemple.test")]
+	print("%s|%s|%s" % (res, undone, ",".join(names[2:])))
+EOF
+)
+expect "module d'IA en échec de banc d'essai : écarté seul, sauf seul, requis ou autre cause" \
+	"${aside%%|*}" "[True, True, False, False, False, False]"
+expect "module d'IA écarté : lui seul est retiré" "$(cut -d'|' -f2 <<< "$aside")" "['fraim', 'fraim']"
+expect "DNS : noms des services du catalogue vérifiés, sans doublon ni libellé invalide" \
+	"$(cut -d'|' -f3 <<< "$aside")" "dtrack.analyse.exemple.test,sonarqube.analyse.exemple.test"
+
 echo
 echo "b12 : $PASS réussis, $FAIL échoués"
 [[ "$FAIL" -eq 0 ]]

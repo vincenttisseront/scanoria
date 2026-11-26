@@ -741,12 +741,18 @@ def act_install_modules(c):
     if not planned:
         return {"installed": [], "skipped": skipped}
     op = Op(reg, "install", planned[0]["id"], c.req["id"])
-    done = []
+    done, set_aside = [], []
     try:
         for i, m in enumerate(planned):
             n = len(planned)
             done.append(m["id"])
-            install_one(c, reg, op, m, options[m["id"]], lambda f, i=i: 100.0 * (i + f) / n)
+            try:
+                install_one(c, reg, op, m, options[m["id"]], lambda f, i=i: 100.0 * (i + f) / n)
+            except Fail as f:
+                if not ai_module_set_aside(reg, planned, m, f):
+                    raise
+                done.remove(m["id"])
+                set_aside.append({"id": m["id"], "code": f.code, "message": f.message[:500]})
         if any(m["type"] == "service" for m in planned):
             op.step("route", 95)
             route(reg)
@@ -760,9 +766,30 @@ def act_install_modules(c):
         if not rb_ok:
             raise Fail("E_ROLLBACK_FAILED", "%s; rollback incomplete" % err.message)
         raise err
-    op.finish(True, "installed: %s" % ", ".join(done))
-    return {"installed": [{"id": m["id"], "version": m["version"]} for m in planned], "skipped": skipped,
-            "operation": op.rec["id"]}
+    op.finish(True, "installed: %s%s" % (", ".join(done), "; not installed (AI testbed): %s" % ", ".join(
+        x["id"] for x in set_aside) if set_aside else ""))
+    return {"installed": [{"id": m["id"], "version": m["version"]} for m in planned if m["id"] in done],
+            "skipped": skipped, "not_installed": set_aside, "operation": op.rec["id"]}
+
+
+AI_SET_ASIDE_CODES = ("E_RELAY_UNAVAILABLE", "E_RELAY_TOKEN", "E_TESTBED")
+
+
+def ai_module_set_aside(reg, planned, m, err):
+    """Module d'analyse par IA dont le banc d'essai échoue pendant une installation
+    groupée : il est retiré seul, les autres modules restent installés. Son résultat
+    dépend du modèle du serveur Ollama, pas de l'appliance, et un module d'IA sous
+    son seuil se désactive seul (I23) sans rien changer d'autre (CLAUDE.md § 3.5).
+    Faux si l'échec doit annuler toute la demande : autre type de module, module
+    demandé seul, module requis par un autre de la demande, ou retrait impossible."""
+    from . import airelay
+    mid = m["id"]
+    if not airelay.uses_relay(m) or err.code not in AI_SET_ASIDE_CODES or len(planned) < 2:
+        return False
+    if any(mid in requires_of(o) for o in planned if o["id"] != mid):
+        return False
+    common.log("install-modules: %s set aside (%s: %s)" % (mid, err.code, err.message))
+    return rollback_installs(reg, [mid])
 
 
 def rollback_installs(reg, done):

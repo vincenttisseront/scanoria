@@ -205,7 +205,9 @@ async def run_plan(plan):
         try:
             found += [(name, r) for r in await run_workflow(name, options)]
             ran.append(name)
-        except Exception as e:  # noqa: BLE001 (un workflow en échec n'empêche pas les autres)
+        except (Exception, SystemExit) as e:  # noqa: BLE001 (un workflow en échec n'empêche pas les autres)
+            # SystemExit compris : un workflow de Fraim qui abandonne (réponses du
+            # modèle toutes invalides) appelle sys.exit et sortait en code 255.
             sys.stderr.write("fraim %s failed: %s\n" % (name, e.__class__.__name__))
             failed.append(name)
     return found, ran, failed
