@@ -94,7 +94,35 @@ def names_to_check(fqdn):
             host = "%s.%s" % (label, fqdn)
             if len(host) <= 253:
                 names.append((host, host))
+    # Modules « service » du catalogue pas encore installés : leur nom est
+    # vérifié lui aussi. Sans cela, l'aperçu d'installation ne se fiait qu'au
+    # joker et annonçait « ne résout pas » à qui déclare ses noms un par un
+    # (CNAME ou A par application, sans enregistrement *.<nom>).
+    seen = {n for n, _ in names}
+    for label in catalog_labels():
+        host = "%s.%s" % (label, fqdn)
+        if len(host) <= 253 and host not in seen:
+            seen.add(host)
+            names.append((host, host))
     return names
+
+
+MAX_CATALOG_LABELS = 32
+
+
+def catalog_labels():
+    """Libellés DNS des modules « service » de l'index du catalogue installé (aucun accès réseau)."""
+    from . import catalogverify
+    try:
+        idx = catalogverify.installed_index()
+    except Exception as e:  # noqa: BLE001 — le contrôle DNS ne dépend jamais du catalogue
+        common.log("dns: catalog index unreadable: %r" % (e,))
+        return []
+    mods = idx.get("modules") if isinstance(idx, dict) else None
+    labels = {m.get("hostname") for m in mods if isinstance(m, dict) and m.get("type") == "service"
+              and isinstance(m.get("hostname"), str) and routing.LABEL_RE.match(m["hostname"])} \
+        if isinstance(mods, list) else set()
+    return sorted(labels)[:MAX_CATALOG_LABELS]
 
 
 def check(fqdn, timeout=20, budget=None):

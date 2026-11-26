@@ -68,6 +68,17 @@ export const EMBED_MAX_DIMS = 8192
 export const EMBED_MAX_INPUTS = 16
 
 /** Vecteurs d'une réponse /api/embed : un par entrée, mêmes dimensions, nombres finis. */
+/**
+ * Retire les blocs de raisonnement `<think>…</think>` que certains modèles (Qwen3,
+ * DeepSeek-R1…) placent dans leur réponse : l'appliance ne dépend d'aucun modèle,
+ * et ni les tâches de la console ni les outils du relais ne savent les lire.
+ * Un bloc non refermé est laissé tel quel (rien n'est deviné).
+ */
+export function stripReasoning(content: string): string {
+  if (!content.includes('<think>')) return content
+  return content.replace(/<think>[\s\S]*?<\/think>\s*/gi, '')
+}
+
 export function parseEmbeddings(json: unknown, expected: number): number[][] {
   const list = (json as { embeddings?: unknown })?.embeddings
   if (!Array.isArray(list) || list.length !== expected) throw new OllamaError('protocol', 'invalid embeddings')
@@ -222,7 +233,7 @@ export class OllamaClient {
     const { json, bytesSent } = await this.request('POST', '/api/chat', body, timeoutMs)
     const content = (json as { message?: { content?: unknown } }).message?.content
     if (typeof content !== 'string') throw new OllamaError('protocol', 'missing message content')
-    return { content, bytesSent, durationMs: Date.now() - started }
+    return { content: stripReasoning(content), bytesSent, durationMs: Date.now() - started }
   }
 
   /** Embeddings (I7) : une liste de textes déjà masqués, un vecteur par texte. */

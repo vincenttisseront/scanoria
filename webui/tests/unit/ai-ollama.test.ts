@@ -5,7 +5,7 @@
 // résolution du nom), corps de chat sans outil ni flux, jeton, pannes.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { OllamaClient, OllamaError, pinnedLookup } from '../../server/ai/ollama'
+import { OllamaClient, OllamaError, pinnedLookup, stripReasoning } from '../../server/ai/ollama'
 import { startFakeOllama, type FakeOllama } from '../helpers/fake-ollama'
 
 let fake: FakeOllama
@@ -77,5 +77,15 @@ describe('client Ollama', () => {
     lookup('ignored', {} as never, (...args: unknown[]) => seen.push(args[1], args[2]))
     lookup('ignored', {} as never, (...args: unknown[]) => seen.push(args[1], args[2]))
     expect(seen).toEqual([[{ address: '192.0.2.10', family: 4 }, { address: '2001:db8::10', family: 6 }], '192.0.2.10', 4, '2001:db8::10', 6])
+  })
+})
+
+describe('modèles à raisonnement', () => {
+  it('retire les blocs <think> refermés, quel que soit le modèle', () => {
+    expect(stripReasoning('<think>je réfléchis\nlonguement</think>\n{"ok":true}')).toBe('{"ok":true}')
+    expect(stripReasoning('a <THINK>x</THINK> b <think>y</think>c')).toBe('a b c')
+    expect(stripReasoning('sans bloc')).toBe('sans bloc')
+    // Bloc non refermé : rien n'est deviné.
+    expect(stripReasoning('<think>tronqué')).toBe('<think>tronqué')
   })
 })

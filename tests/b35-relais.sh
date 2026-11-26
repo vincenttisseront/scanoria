@@ -750,5 +750,15 @@ ESSAI_FAIL=code tool "$FR" "$ESS/src" "$ESS/fr4.sarif"; rc3=$?
 set -e
 expect "Fraim : un workflow en échec n'empêche pas les autres" "$rc3 $(jq -c '.runs[0].properties["scanoria/fraim"] | [.workflows, .failed]' "$ESS/fr4.sarif")" '0 [["iac"],["code"]]'
 
+# 8.5 Réponses du modèle remises en forme (aucun modèle imposé).
+expect "Fraim : réponse d'un modèle à raisonnement (<think>, clôture Markdown, snippet et message en chaînes) réparée" "$(python3 -I -B -c 'import json, runpy, sys
+g = runpy.run_path(sys.argv[1])
+bad = "<think>je cherche</think>\n```json\n" + json.dumps({"results": [{"message": "SQLi", "level": "error", "locations": [
+    {"physicalLocation": {"artifactLocation": "app.py", "region": {"startLine": "4", "snippet": "q = 1"}}}]}], "message": "libre"}) + "\n```"
+d = json.loads(g["repair_text"](bad))
+r = d["results"][0]; pl = r["locations"][0]["physicalLocation"]
+print(r["message"], pl["artifactLocation"], pl["region"], d["message"], g["repair_text"]("texte <think>x</think>libre"), g["repair_text"](None))' "$FR")" \
+	"{'text': 'SQLi'} {'uri': 'app.py'} {'startLine': 4, 'snippet': {'text': 'q = 1'}} libre texte libre None"
+
 printf '\n%d réussis, %d échoués\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]]
